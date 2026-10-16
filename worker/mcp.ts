@@ -202,7 +202,13 @@ const SHOW_GRAPH_TOOL: McpTool = {
 const calculatorTool = (origin: string): McpTool => ({
   name: 'graphing_calculator',
   title: 'Graphing calculator',
-  annotations: { title: 'Graphing calculator', readOnlyHint: true, openWorldHint: false, destructiveHint: false },
+  annotations: {
+    title: 'Graphing calculator',
+    readOnlyHint: true,
+    openWorldHint: false,
+    destructiveHint: false,
+    idempotentHint: true,
+  },
   description:
     'Open a blank equation.io graphing calculator for the user to work in. Hosts call this to open the app from their sidebar; to show a graph, use show_graph.',
   inputSchema: { type: 'object', properties: {}, additionalProperties: false },
