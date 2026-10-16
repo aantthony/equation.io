@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { analyzeRows } from './analysis.ts';
+import { evaluate } from './expr.ts';
 import { runtimeSliderNames } from './runtime-sliders.ts';
 
 const names = (rows: string[]) => [...runtimeSliderNames(analyzeRows(rows))].sort();
@@ -37,5 +38,44 @@ describe('runtime-only sliders', () => {
     expect(names(['a=1', '[0..1/a]', 'unknown(x)'])).toEqual([]);
     expect(names(['a=1', 'X~Normal(a,1)'])).toEqual([]);
     expect(names(['a=1', "v'=-v", 'v(0)=a', 'v'])).toEqual([]);
+  });
+});
+
+describe('Σ up to a clamped slider', () => {
+  const series = 'y = (4/pi) sum(k=1..N, sin((2k-1)x)/(2k-1))';
+
+  it('keeps the bound live: a drag moves a uniform rather than re-expanding', () => {
+    expect(names(['N = round(clamp(19, 1, 50))', series])).toEqual(['N']);
+    expect(names(['N = clamp(round(3), 0, 8)', 'y = prod(k=1..N, 1 + x/k)'])).toEqual(['N']);
+    // Without a declared range there is no last term to expand to.
+    expect(names(['N = 19', series])).toEqual([]);
+  });
+
+  it('gates each term on the slider, matching the plain expansion at every value', () => {
+    const rhs = (rows: string[]) => {
+      const object = analyzeRows(rows).rows[1].cls!.object;
+      if (object.kind !== 'curve' || object.form !== 'graph') throw new Error(object.kind);
+      return object.rhs;
+    };
+    const gated = rhs(['N = round(clamp(19, 1, 50))', series]);
+    for (const n of [1, 2, 19, 37, 50]) {
+      const plain = rhs([`N = ${n}`, series]);
+      for (const x of [-2.5, 0.3, 1.7]) expect(evaluate(gated, { x, N: n })).toBeCloseTo(evaluate(plain, { x }), 12);
+    }
+  });
+
+  it('draws as one runtime loop with an analytic graph slope', () => {
+    const gpu = analyzeRows(['N = round(clamp(19, 1, 50))', series]).rows[1].gpu!;
+    if (gpu.type !== 'implicit2d') throw new Error(gpu.type);
+    expect(gpu.params).toEqual(['N']);
+    expect(gpu.field).toContain('eq_loop_');
+    expect(gpu.field).not.toContain('sin(');
+    expect(gpu.graphEval?.slopeScale).toBe(1);
+  });
+
+  it('expands the current value when the full range is over the term limit', () => {
+    const a = analyzeRows(['N = round(clamp(3, 1, 100000))', series]);
+    expect(a.rows[1].error).toBeUndefined();
+    expect(runtimeSliderNames(a).has('N')).toBe(false);
   });
 });
