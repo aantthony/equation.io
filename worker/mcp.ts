@@ -201,9 +201,9 @@ const SHOW_GRAPH_TOOL: McpTool = {
  */
 const calculatorTool = (origin: string): McpTool => ({
   name: 'graphing_calculator',
-  title: 'Graphing calculator',
+  title: 'Equation.io',
   annotations: {
-    title: 'Graphing calculator',
+    title: 'Equation.io',
     readOnlyHint: true,
     openWorldHint: false,
     destructiveHint: false,

@@ -71,8 +71,10 @@ its `_meta["openai/ui"].entrypoints` list `global` (the ChatGPT sidebar) and
 returns an empty graph, which the UI treats as a launch: the editor comes out
 on one empty line, and there is no Reset. Its `_meta.ui.visibility` is `["app"]`,
 so the model is never offered it; `show_graph` stays the model's way to draw.
-The sidebar title is the tool's `title` and its icon is `/mcp-icon.svg` (20×20,
-monochrome, `currentColor`), both from `tools/list`.
+The sidebar title is the tool's `title`, the brand "Equation.io" (as Figma's
+is "Figma"), and its icon is `/mcp-icon.svg` (20×20, monochrome,
+`currentColor`), both from `tools/list`. The `name` stays
+`graphing_calculator`: deep links carry it, so it must not change.
 
 A deep link opens a graph: the host passes the app-relative URL in
 `hostContext["openai/deepLink"].url`, at launch or later, and the site's own
