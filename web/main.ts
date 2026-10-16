@@ -84,7 +84,7 @@ import { hullFaces } from '../lib/hull.ts';
 import { hullGeometrySampler } from '../lib/hull-geometry.ts';
 import { type VertexSampler, fanFillable, vertexSampler } from '../lib/figure-vertices.ts';
 
-import { decodePayload, encodePayload } from '../lib/link.ts';
+import { decodePayload, encodePayload, urlPayload } from '../lib/link.ts';
 import { type GridField, angularSpacing, sampleGradMag } from '../lib/grid.ts';
 import {
   CURVE_SAMPLES,
@@ -7076,17 +7076,7 @@ if (voiceBtn && !embedded && readVoiceKey()) {
 
 // --- boot ---
 
-/** The graph payload the current URL names: the /g/ path, or a legacy
- *  #fragment (which wins, so an appended #… can steer a /g/ page). */
-function urlPayload(): string {
-  const hash = location.hash.slice(1);
-  if (hash) return hash;
-  const path = location.pathname;
-  if (path.startsWith('/g/')) return path.slice('/g/'.length);
-  return '';
-}
-
-const initialPayload = urlPayload();
+const initialPayload = urlPayload(location.pathname, location.hash);
 // decodePayload splits bracket-aware and decodes each row exactly once, so it
 // reads both the /g/ form and legacy /#… links.
 const initialRows = decodePayload(initialPayload);
@@ -7119,7 +7109,7 @@ else if (!embedded && location.pathname !== '/') history.replaceState(null, '', 
  * cannot loop against its own writes; the equality check covers the rest.
  */
 function loadFromUrl() {
-  const rows = decodePayload(urlPayload());
+  const rows = decodePayload(urlPayload(location.pathname, location.hash));
   const wanted = rows.length ? rows : emptyDefault;
   const current = equations.map(e => e.text);
   if (wanted.length === current.length && wanted.every((t, i) => t === current[i])) return;
@@ -7196,6 +7186,8 @@ if (mcpApp) {
           renderAll();
           requestRender();
         },
+        // Opening a link mid-session is a navigation: undo brings the old graph back.
+        openRows: rows => replaceDocument(rows, false),
         onChange: cb => {
           graphChanged = cb;
         },
@@ -7204,6 +7196,7 @@ if (mcpApp) {
         },
         setVisible: setGraphVisible,
         showPanel: panelSwipe.present,
+        traced: () => traceQueue.whenIdle(),
         still: maxEdge =>
           (capture ??= attachCapture({ gl: canvas, overlay, render, requestRender, notice: showNotice })).still(
             maxEdge,

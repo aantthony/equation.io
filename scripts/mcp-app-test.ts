@@ -219,11 +219,20 @@ try {
     ),
   );
   assert.ok(await frame.evaluate(() => (window as any).savedWidgetState.privateContent.equations[0].includes('3')));
-  // Hosts that take images get a picture of the edited graph, drawn fresh
-  // (the WebGL buffer is not preserved), so it must not come out blank.
+  // Hosts that take images get a picture of the edited graph once edits
+  // pause, drawn fresh (the WebGL buffer is not preserved), so it must not
+  // come out blank.
+  await page.waitForFunction(() =>
+    (window as any).messages.some(
+      (m: any) =>
+        m.method === 'ui/update-model-context' &&
+        m.params.structuredContent.equations[0].includes('3') &&
+        m.params.content?.[0]?.type === 'image',
+    ),
+  );
   const snapshot = await page.evaluate(async () => {
     const message = (window as any).messages.find(
-      (m: any) => m.method === 'ui/update-model-context' && m.params.structuredContent.equations[0].includes('3'),
+      (m: any) => m.method === 'ui/update-model-context' && m.params.content?.[0]?.type === 'image',
     );
     const block = message.params.content?.[0];
     if (!block) return null;

@@ -476,7 +476,9 @@ async function handleRpc(req: RpcRequest, ctx: RpcContext): Promise<object | nul
           ? 'encode_graph_url'
           : name === 'read_graph'
             ? 'decode_graph_url'
-            : TOOL_NAMES.find(t => t === name);
+            : name === 'graphing_calculator'
+              ? name
+              : TOOL_NAMES.find(t => t === name);
       try {
         let value: object;
         const content: object[] = [];
@@ -494,8 +496,9 @@ async function handleRpc(req: RpcRequest, ctx: RpcContext): Promise<object | nul
             value = made.value;
           }
           content.push({ type: 'text', text: JSON.stringify(value, null, 2) });
-        } else if (name === 'graphing_calculator') {
+        } else if (tool === 'graphing_calculator') {
           // An empty graph: the UI opens its editor, or loads a deep link.
+          ctx.recordCall(tool, { rows: 0, errorRows: 0, types: [] });
           value = { valid: true, url: `${origin}/`, share_url: `${origin}/`, rows: [] };
           content.push({ type: 'text', text: 'Opened a blank graphing calculator.' });
         } else if (tool === 'decode_graph_url') {

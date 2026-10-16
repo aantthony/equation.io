@@ -62,3 +62,21 @@ export function decodePayload(payload: string): string[] {
     })
     .filter(s => s.trim());
 }
+
+/** The payload a site URL names: a legacy #fragment, which wins so an
+ *  appended #… can steer a /g/ page, else the /g/ path. Any other page is ''. */
+export function urlPayload(pathname: string, hash: string): string {
+  if (hash.length > 1) return hash.slice(1);
+  return pathname.startsWith('/g/') ? pathname.slice('/g/'.length) : '';
+}
+
+/** Rows a site-relative URL opens, as a ChatGPT deep link passes it: [] for a
+ *  page with no graph (the root, say), undefined for a payload that won't decode. */
+export function linkRows(url: string): string[] | undefined {
+  try {
+    const { pathname, hash } = new URL(url, 'https://equation.io');
+    return decodePayload(urlPayload(pathname, hash));
+  } catch {
+    return;
+  }
+}

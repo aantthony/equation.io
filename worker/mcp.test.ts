@@ -906,6 +906,12 @@ describe('usage counts', () => {
     for (const text of ['sin', 'cos', 'a = 2', 'florb']) expect(stored).not.toContain(text);
   });
 
+  it('counts calculator opens from ChatGPT entrypoints', async () => {
+    usage.length = 0;
+    await call('graphing_calculator', {});
+    expect(points()).toEqual([{ blobs: ['call', 'graphing_calculator', '', '', ''], doubles: [0, 0, 0, 0] }]);
+  });
+
   it('counts former tool names as the tools they became, and rejected calls as failed', async () => {
     usage.length = 0;
     await call('create_graph', { equations: ['y = x'] });

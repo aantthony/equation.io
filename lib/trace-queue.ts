@@ -60,7 +60,15 @@ export class TraceQueue {
   private pending = new Map<number, Job>();
   private active?: Job;
   private token = 0;
+  private waiting: (() => void)[] = [];
   constructor(private send: (message: TraceMessage) => void) {}
+
+  /** Resolves once nothing is tracing or queued to: a picture taken then
+   *  shows every traced curve. */
+  whenIdle(): Promise<void> {
+    if (!this.active && !this.pending.size) return Promise.resolve();
+    return new Promise(resolve => this.waiting.push(resolve));
+  }
 
   request(row: number, key: string, input: TraceInput, receive: Job['receive']) {
     if (this.active?.row === row && this.active.key === key) {
@@ -73,12 +81,14 @@ export class TraceQueue {
 
   cancelPending(row: number) {
     this.pending.delete(row);
+    if (!this.active && !this.pending.size) this.settle();
   }
 
   /** Discard work during teardown; late worker replies cannot restart it. */
   clear() {
     this.pending.clear();
     this.active = undefined;
+    this.settle();
   }
 
   complete(token: number, result: TraceResult) {
@@ -92,9 +102,13 @@ export class TraceQueue {
   private pump() {
     if (this.active) return;
     const job = this.pending.values().next().value;
-    if (!job) return;
+    if (!job) return this.settle();
     this.pending.delete(job.row);
     this.active = job;
     this.send({ token: job.token, input: job.input });
+  }
+
+  private settle() {
+    for (const resolve of this.waiting.splice(0)) resolve();
   }
 }

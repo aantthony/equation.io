@@ -10,11 +10,16 @@ theme changes, fullscreen, external links, and model-context updates. Changes
 to equations and sliders are sent through `ui/update-model-context`, throttled
 by the editor's existing URL-save interval. This does not send a chat message
 or trigger a model response. Hosts that list `image` under
-`updateModelContext` also get a JPEG of the edited graph (longest edge 1280px,
-drawn fresh, as voice mode's look_at_graph does), so the model sees the picture
-and not only the equations. ChatGPT shows it as a removable attachment titled
-by `_meta["openai/title"]`. An off-screen graph skips the picture rather than
-break its render pause; teardown takes one before the renderer is released. ChatGPT's optional widget state stores edited rows
+`updateModelContext` also get a JPEG of the graph (longest edge 1280px,
+drawn fresh, as voice mode's look_at_graph does), so the model sees the
+picture and not only the equations. It follows the equations once edits pause
+for 600ms and background curve traces have landed, so a slider drag doesn't
+encode a frame on every save tick. ChatGPT shows it as a removable attachment
+titled by `_meta["openai/title"]`: "Edited graph", or "Graph" for a deep-linked
+graph the model has never seen. A graph the model already knows (untouched, or
+reset) gets no picture. An off-screen graph skips the picture rather than
+break its render pause; teardown takes one before the renderer is released.
+ChatGPT's optional widget state stores edited rows
 for the matching original result. Graphs still have shareable URLs.
 
 Embedded graphs start with the equation editor collapsed. Host theme, color and
@@ -71,10 +76,11 @@ monochrome, `currentColor`), both from `tools/list`.
 
 A deep link opens a graph: the host passes the app-relative URL in
 `hostContext["openai/deepLink"].url`, at launch or later, and the site's own
-`/g/…` or `/#…` path loads those rows. That graph becomes the original Reset
-returns to, and is published to model context at once, since the model has
-not seen it. Any other path is a blank graph; a link that fails to decode
-leaves the graph alone and says so. The public link form is
+`/g/…` or `/#…` path loads those rows (`linkRows` in `lib/link.ts`). That
+graph becomes the original Reset returns to, and is published to model context
+at once, since the model has not seen it. A link arriving while the app is
+open replaces the graph as one undoable step. Any other path is a blank graph;
+a link that fails to decode leaves the graph alone and says so. The public link form is
 `https://chatgpt.com/plugins/<plugin-id>/app/graphing_calculator?path=<encoded /g/… path>`.
 
 Edits made in a sidebar or panel go to that thread's model context, picture

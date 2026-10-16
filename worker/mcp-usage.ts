@@ -3,7 +3,7 @@
  * and one per graph type the call draws. scripts/traffic.ts reads them.
  *
  *   blob1    kind     call | type
- *   blob2    tool     encode_graph_url | show_graph | decode_graph_url
+ *   blob2    tool     encode_graph_url | show_graph | decode_graph_url | graphing_calculator
  *   blob3    client   the User-Agent's product name (claude-user, node, …)
  *   blob4    type     a graph type (lib/row-kind.ts KIND_MEANINGS); '' on a call
  *   blob5    reason   failed calls only: a FailReason, never the error message
@@ -22,7 +22,9 @@
  * already count it (scripts/traffic.ts).
  */
 export const TOOL_NAMES = ['encode_graph_url', 'show_graph', 'decode_graph_url'] as const;
-export type Tool = (typeof TOOL_NAMES)[number];
+/** Model-facing tools, plus the app-only calculator ChatGPT opens from its
+ *  sidebar, a panel, or a deep link. */
+export type Tool = (typeof TOOL_NAMES)[number] | 'graphing_calculator';
 
 /**
  * Why a call was rejected outright. `internal` is anything not thrown as a

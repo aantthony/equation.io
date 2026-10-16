@@ -128,10 +128,15 @@ try {
     ),
   );
   assert.ok(await frame.locator('#app-reset').isHidden(), 'Typing into a blank calculator still has no Reset');
-  const typed = await page.evaluate(
-    () => (window as any).messages.filter((m: any) => m.method === 'ui/update-model-context').at(-1).params,
+  // The picture follows once typing pauses.
+  await page.waitForFunction(() =>
+    (window as any).messages.some(
+      (m: any) =>
+        m.method === 'ui/update-model-context' &&
+        m.params.structuredContent.equations[0] === 'y = x^2' &&
+        m.params.content?.[0]?._meta?.['openai/title'] === 'Edited graph',
+    ),
   );
-  assert.equal(typed.content?.[0]?.type, 'image', 'Sidebar edits carry a picture of the graph');
 
   // A deep link arriving while open replaces the graph and becomes the original.
   const sine = ['a = 2', 'y = a sin(x)'];
@@ -142,6 +147,20 @@ try {
     JSON.stringify(sine),
   );
   assert.ok(await frame.locator('#app-reset').isHidden(), 'A freshly opened link needs no Reset');
+  // The model has never seen a linked graph, so it gets a picture of it too.
+  await page.waitForFunction(() =>
+    (window as any).messages.some((m: any) => m.params?.content?.[0]?._meta?.['openai/title'] === 'Graph'),
+  );
+  // Opening a link while open is undoable: the typed graph comes back.
+  await frame.locator('.eq-line').first().click();
+  await page.keyboard.press('Control+z');
+  await frame.waitForFunction(
+    () =>
+      document.querySelectorAll('.eq-line').length === 1 &&
+      document.querySelector('.eq-line')!.textContent === 'y = x^2',
+  );
+  await page.keyboard.press('Control+Shift+z');
+  await frame.waitForFunction(() => document.querySelectorAll('.eq-line').length === 2);
   await frame.locator('.eq-slider input[type=range]').evaluate((input: HTMLInputElement) => {
     input.value = '3';
     input.dispatchEvent(new Event('input', { bubbles: true }));
@@ -155,7 +174,36 @@ try {
     () => document.getElementById('app-status')?.textContent === 'Could not open that graph link.',
   );
   assert.equal(await frame.locator('.eq-line').count(), 2, 'A bad link leaves the graph alone');
+  // A link to a page with no graph opens a blank calculator, and says so to the model.
+  await page.evaluate(() => (window as any).sendContext({ 'openai/deepLink': { url: '/' } }));
+  await frame.waitForFunction(
+    () => document.querySelectorAll('.eq-line').length === 1 && !document.querySelector('.eq-line')!.textContent,
+  );
+  await page.waitForFunction(() =>
+    (window as any).messages.some(
+      (m: any) => m.method === 'ui/update-model-context' && m.params.structuredContent.equations.length === 0,
+    ),
+  );
+  assert.equal(await frame.locator('#app-status').textContent(), '', 'Opening a blank link clears the error');
   await page.close();
+
+  // Closed untouched: nothing new for the model, and no picture.
+  const untouched = await browser.newPage({ viewport: { width: 900, height: 700 } });
+  track(untouched);
+  const untouchedFrame = await openHost(untouched);
+  await untouched.evaluate(value => (window as any).sendResult(value), launch);
+  await untouchedFrame.locator('#panel').waitFor({ state: 'visible' });
+  await untouched.evaluate(() =>
+    document
+      .querySelector('iframe')!
+      .contentWindow!.postMessage({ jsonrpc: '2.0', id: 'teardown', method: 'ui/resource-teardown', params: {} }, '*'),
+  );
+  await untouched.waitForFunction(() => (window as any).messages.some((m: any) => m.id === 'teardown' && m.result));
+  assert.ok(
+    !(await untouched.evaluate(() => (window as any).messages.some((m: any) => m.params?.content?.length))),
+    'An untouched calculator sends no picture',
+  );
+  await untouched.close();
 
   // Opened straight at a deep link: that graph, not a blank one.
   const linked = await browser.newPage({ viewport: { width: 900, height: 700 } });
@@ -174,7 +222,9 @@ try {
   await linked.close();
 
   assert.deepEqual(errors, []);
-  console.log('PASS: sidebar entrypoint, icon, blank launch, typing, deep links (at launch, while open, bad), reset');
+  console.log(
+    'PASS: sidebar entrypoint, icon, blank launch, typing, deep links (at launch, while open, undo, bad, blank), reset, pictures',
+  );
 } finally {
   await browser.close();
 }
