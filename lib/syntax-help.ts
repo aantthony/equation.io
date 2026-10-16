@@ -54,6 +54,7 @@ const signatures: Record<string, [string, string]> = {
   ln: ['ln(x)', 'Natural logarithm'],
   log: ['log(x)', 'Base-10 logarithm'],
   log2: ['log2(x)', 'Base-2 logarithm'],
+  lambertw: ['lambertw(x)', 'Lambert W (principal branch): the w ≥ −1 with w eʷ = x, for x ≥ −1/e'],
   atan2: ['atan2(y, x)', 'Angle of the point (x, y)'],
   normalpdf: ['normalpdf(x, mean, sd)', 'Normal probability density'],
   normalcdf: ['normalcdf(x, mean, sd)', 'Normal cumulative probability'],

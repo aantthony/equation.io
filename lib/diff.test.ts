@@ -39,6 +39,15 @@ describe('diff', () => {
     expect(ddx('|x^2-1|', { x: 0.5 })).toBe(-1); // sign(x^2-1)*2x = -1
   });
 
+  it('differentiates lambertw, through 0 and near −1/e', () => {
+    const fd = (f: (x: number) => number, x: number) => (f(x + 1e-6) - f(x - 1e-6)) / 2e-6;
+    const W = (x: number) => evaluate(parseExpr('lambertw(x)'), { x });
+    expect(ddx('lambertw(x)', { x: 0 })).toBe(1);
+    for (const x of [-0.3, 0.4, 2, 50]) expect(ddx('lambertw(x)', { x })).toBeCloseTo(fd(W, x), 6);
+    // W′ = W/(x(1 + W)).
+    expect(ddx('lambertw(x^2)', { x: 1.5 })).toBeCloseTo((2 * W(2.25)) / (1.5 * (1 + W(2.25))), 12);
+  });
+
   it('differentiates sinc, including the removable hole at 0', () => {
     const fd = (f: (x: number) => number, x: number) => (f(x + 1e-6) - f(x - 1e-6)) / 2e-6;
     expect(ddx('sinc(x)', { x: 0 })).toBe(0);

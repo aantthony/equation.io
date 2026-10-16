@@ -234,6 +234,10 @@ export interface GeodesicFlow {
   /** Why it stopped, when that is worth a note: where it last failed to
    *  hold, if no step has been put back on its constraint since. */
   stopped?(): string | undefined;
+  /** Whether its velocity can never turn right round within a step — a
+   *  spacetime diagram's stays inside the future cone — so a step that
+   *  turns it is refused and shortened. */
+  readonly oneWay?: boolean;
 }
 
 /** A surface's geodesic flow, at unit speed in its metric. */
@@ -494,6 +498,12 @@ export function traceGeodesic(
         const sc = atol[c] + TOLERANCE * Math.max(Math.abs(y[c]), Math.abs(hi));
         err = Math.max(err, Math.abs(e) / sc);
       }
+    // On a flow that never turns back, a step that turns the velocity
+    // right round is no step of it: nearing a singularity (Kruskal's
+    // r → 0, where the metric runs off) both of its orders can be wrong
+    // alike, the error estimate passes, and a light ray went on back into
+    // the past. It shortens, as off does.
+    if (!off && flow.oneWay && !(y[2] * next[2] + y[3] * next[3] > 0)) off = true;
     if (off || !Number.isFinite(err)) {
       // Off the surface's domain of definition: shorten toward it, and stop
       // once the step is nothing.
@@ -1587,6 +1597,7 @@ function diagramStart(
       return Number.isFinite(y[2]) && Number.isFinite(y[3]);
     },
     stopped: () => why,
+    oneWay: true,
   };
   return { flow, velocity: [sign * U[0], sign * U[1]] };
 }

@@ -73,6 +73,8 @@ describe('antiderivative: exact families', () => {
     checkDeriv('sinh(x) + cosh(2x)');
     checkDeriv('abs(x)');
     checkDeriv('erf(x)');
+    checkDeriv('lambertw(x)', 'x', [-0.3, -0.01, 0, 0.41, 1.13, 2.9, 40]);
+    checkDeriv('lambertw(2x - 1)', 'x', [0.4, 0.5, 1.13, 2.9]);
     checkDeriv('2^x');
     checkDeriv('normalpdf(x, 1, 2)');
   });
