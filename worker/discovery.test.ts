@@ -20,8 +20,39 @@ async function json(path: string) {
 async function initialize(protocolVersion: string) {
   const request = new Request('https://equation.io/mcp', {
     method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'initialize', params: { protocolVersion } }),
+    headers: { 'content-type': 'application/json', accept: 'application/json, text/event-stream' },
+    body: JSON.stringify({
+      jsonrpc: '2.0',
+      id: 1,
+      method: 'initialize',
+      params: { protocolVersion, capabilities: {}, clientInfo: { name: 'test', version: '0' } },
+    }),
+  });
+  const response = await handleMcp(request, new URL(request.url), env);
+  return ((await response.json()) as any).result;
+}
+
+async function discover(protocolVersion: string) {
+  const request = new Request('https://equation.io/mcp', {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/json',
+      accept: 'application/json, text/event-stream',
+      'mcp-protocol-version': protocolVersion,
+      'mcp-method': 'server/discover',
+    },
+    body: JSON.stringify({
+      jsonrpc: '2.0',
+      id: 1,
+      method: 'server/discover',
+      params: {
+        _meta: {
+          'io.modelcontextprotocol/protocolVersion': protocolVersion,
+          'io.modelcontextprotocol/clientCapabilities': {},
+          'io.modelcontextprotocol/clientInfo': { name: 'test', version: '0' },
+        },
+      },
+    }),
   });
   const response = await handleMcp(request, new URL(request.url), env);
   return ((await response.json()) as any).result;
@@ -77,7 +108,8 @@ describe('MCP Server Card', () => {
     expect(card.title).toBe(serverInfo.title);
     expect(card.version).toBe(serverInfo.version);
     for (const version of card.remotes[0].supportedProtocolVersions) {
-      expect((await initialize(version)).protocolVersion).toBe(version);
+      if (version >= '2026-07-28') expect((await discover(version)).supportedVersions).toContain(version);
+      else expect((await initialize(version)).protocolVersion).toBe(version);
     }
   });
 

@@ -6,7 +6,7 @@ const origin = process.env.MCP_TEST_ORIGIN ?? 'http://localhost:5196';
 async function rpc(method: string, params: object = {}) {
   const res = await fetch(`${origin}/mcp`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', Accept: 'application/json, text/event-stream' },
     body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }),
   });
   const body = (await res.json()) as any;

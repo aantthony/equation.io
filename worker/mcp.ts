@@ -1,5 +1,6 @@
 /**
- * Stateless MCP server (Streamable HTTP, JSON responses) at /mcp.
+ * Stateless MCP server (Streamable HTTP, JSON responses) at /mcp, served by
+ * the official MCP SDK (@modelcontextprotocol/server).
  *
  * encode_graph_url builds a shareable link from equation rows,
  * validates every row through the app's own parser; decode_graph_url decodes an existing link
@@ -12,6 +13,17 @@
  * No sessions, no SSE — each POST is a complete JSON-RPC exchange, which is
  * all these tools need and keeps the Worker stateless.
  */
+import {
+  type CallToolResult,
+  type JsonSchemaValidatorResult,
+  McpServer,
+  SUPPORTED_PROTOCOL_VERSIONS,
+  WebStandardStreamableHTTPServerTransport,
+  createMcpHandler,
+  fromJsonSchema,
+  isLegacyRequest,
+  type jsonSchemaValidator,
+} from '@modelcontextprotocol/server';
 import { dragAxes } from '../lib/drag.ts';
 import { sliderForm } from '../lib/slider.ts';
 import { definitionDependencies } from '../lib/defs.ts';
@@ -21,12 +33,10 @@ import { rowKind } from '../lib/row-kind.ts';
 import { splitStatements } from '../lib/statements.ts';
 import { publicKind } from '../lib/plot.ts';
 import { analyze } from './graph.ts';
-import { type CallStats, type Tool, TOOL_NAMES, ToolError, recordToolCall } from './mcp-usage.ts';
+import { type CallStats, type Tool, ToolError, recordToolCall } from './mcp-usage.ts';
 import { MAX_PLOTS, previewGap } from './og.ts';
 import { GRAPH_UI_URI, graphResource, graphResourceContents } from './mcp-app.ts';
 import type { JsonSchema, ObjectSchema } from '../lib/json-schema.ts';
-
-export const PROTOCOL_VERSIONS = ['2025-06-18', '2025-03-26', '2024-11-05'];
 
 /** A tool as tools/list describes it. */
 interface McpTool {
@@ -42,7 +52,7 @@ interface McpTool {
     openWorldHint: boolean;
   };
   inputSchema: ObjectSchema;
-  outputSchema?: ObjectSchema;
+  outputSchema: ObjectSchema;
   _meta?: Record<string, unknown>;
 }
 
@@ -161,8 +171,6 @@ const DECODE_TOOL: McpTool = {
     additionalProperties: false,
   },
 };
-
-const TOOLS: McpTool[] = [ENCODE_TOOL, DECODE_TOOL];
 
 // Keep validation/link-only calls separate from rendering a new chat widget.
 // Static share-card fields (`preview`, `preview_omits`) stay on encode_graph_url:
@@ -372,16 +380,9 @@ function decodeGraphUrl(args: Record<string, unknown>) {
   }
 }
 
-// --- JSON-RPC plumbing ---
+// --- Serving, via the MCP SDK ---
 
-interface RpcRequest {
-  jsonrpc?: string;
-  id?: number | string | null;
-  method?: string;
-  params?: Record<string, unknown>;
-}
-
-interface RpcContext {
+interface ToolContext {
   origin: string;
   /** Reads the /llms.txt asset backing the "syntax" resource. */
   syntaxText: () => Promise<string>;
@@ -389,106 +390,80 @@ interface RpcContext {
   recordCall: (tool: Tool, stats: CallStats) => void;
 }
 
-async function handleRpc(req: RpcRequest, ctx: RpcContext): Promise<object | null> {
-  const { id, method, params = {} } = req;
-  const { origin } = ctx;
-  const result = (r: object) => ({ jsonrpc: '2.0', id, result: r });
-  const error = (code: number, message: string) => ({ jsonrpc: '2.0', id, error: { code, message } });
+/**
+ * Accepts any arguments. The tools check their own, so a caller that guessed
+ * wrong is told what arrived and what to send instead (encodeGraphUrl), and the
+ * rejection is counted with its reason — the SDK's validator would answer
+ * first with a generic message. The advertised inputSchema is unchanged.
+ */
+const toolsCheckArguments: jsonSchemaValidator = {
+  getValidator:
+    <T>() =>
+    (input: unknown): JsonSchemaValidatorResult<T> => ({ valid: true, data: input as T, errorMessage: undefined }),
+};
 
-  // A notification is a request with NO id member (JSON-RPC 2.0). `id: null`
-  // is a valid (if discouraged) request id and must still get a response.
-  if (id === undefined) return null;
-
-  switch (method) {
-    case 'initialize': {
-      const requested = (params as { protocolVersion?: string }).protocolVersion;
-      return result({
-        protocolVersion: PROTOCOL_VERSIONS.includes(requested ?? '') ? requested : PROTOCOL_VERSIONS[0],
-        capabilities: { tools: {}, resources: {} },
-        serverInfo: { name: 'equation', title: 'Equation.io', version: '1.0.1' },
-        instructions:
-          'Graphing calculator whose entire state lives in the URL. show_graph displays an interactive graph in the conversation. encode_graph_url validates equations and creates a share link without displaying a widget. decode_graph_url decodes a link the user shares so you can edit their graph. Before writing non-trivial equations, read the "syntax" resource: the full language reference, also served at ' +
-          origin +
-          '/llms.txt',
+async function callTool(tool: Tool, args: Record<string, unknown>, ctx: ToolContext): Promise<CallToolResult> {
+  try {
+    let value: Record<string, unknown>;
+    if (tool === 'decode_graph_url') {
+      const decoded = decodeGraphUrl(args);
+      ctx.recordCall(tool, { rows: decoded.equations.length, errorRows: 0, types: [] });
+      value = decoded;
+    } else {
+      const made = await encodeGraphUrl(ctx.origin, args);
+      ctx.recordCall(tool, {
+        rows: made.value.rows.length,
+        errorRows: made.value.rows.filter(r => r.status === 'error').length,
+        types: made.types,
       });
+      const { preview: _preview, preview_omits: _omits, ...shown } = made.value;
+      value = tool === 'show_graph' ? shown : made.value;
     }
-    case 'ping':
-      return result({});
-    case 'tools/list':
-      return result({ tools: [...TOOLS, SHOW_GRAPH_TOOL] });
-    case 'resources/list':
-      return result({ resources: [syntaxResource(origin), graphResource] });
-    case 'resources/templates/list':
-      return result({ resourceTemplates: [] });
-    case 'resources/read': {
-      const uri = (params as { uri?: string }).uri;
-      if (uri === GRAPH_UI_URI) {
-        try {
-          return result({ contents: [graphResourceContents(await ctx.graphHtml(), origin)] });
-        } catch (e) {
-          return error(-32603, e instanceof Error ? e.message : String(e));
-        }
-      }
-      const expected = syntaxResource(origin).uri;
-      if (uri !== expected)
-        return error(-32002, `Unknown resource: ${uri}. Available resources: ${expected}, ${GRAPH_UI_URI}.`);
-      try {
-        return result({ contents: [{ uri: expected, mimeType: 'text/markdown', text: await ctx.syntaxText() }] });
-      } catch (e) {
-        return error(-32603, e instanceof Error ? e.message : String(e));
-      }
-    }
-    case 'tools/call': {
-      const { name, arguments: args = {} } = params as { name?: string; arguments?: Record<string, unknown> };
-      // Accept former names for clients with cached tool definitions.
-      const tool: Tool | undefined =
-        name === 'create_graph'
-          ? 'encode_graph_url'
-          : name === 'read_graph'
-            ? 'decode_graph_url'
-            : TOOL_NAMES.find(t => t === name);
-      try {
-        let value: object;
-        const content: object[] = [];
-        if (tool === 'encode_graph_url' || tool === 'show_graph') {
-          const made = await encodeGraphUrl(origin, args);
-          ctx.recordCall(tool, {
-            rows: made.value.rows.length,
-            errorRows: made.value.rows.filter(r => r.status === 'error').length,
-            types: made.types,
-          });
-          if (tool === 'show_graph') {
-            const { preview: _preview, preview_omits: _omits, ...shown } = made.value;
-            value = shown;
-          } else {
-            value = made.value;
-          }
-          content.push({ type: 'text', text: JSON.stringify(value, null, 2) });
-        } else if (tool === 'decode_graph_url') {
-          const decoded = decodeGraphUrl(args);
-          ctx.recordCall(tool, { rows: decoded.equations.length, errorRows: 0, types: [] });
-          value = decoded;
-          content.push({ type: 'text', text: JSON.stringify(value, null, 2) });
-        } else return error(-32602, `Unknown tool: ${name}`);
-        return result({ content, structuredContent: value });
-      } catch (e) {
-        if (tool)
-          ctx.recordCall(tool, {
-            rows: 0,
-            errorRows: 0,
-            types: [],
-            failed: e instanceof ToolError ? e.reason : 'internal',
-          });
-        return result({
-          content: [{ type: 'text', text: e instanceof Error ? e.message : String(e) }],
-          isError: true,
-        });
-      }
-    }
-    default:
-      return error(-32601, `Method not found: ${method}`);
+    return { content: [{ type: 'text', text: JSON.stringify(value, null, 2) }], structuredContent: value };
+  } catch (e) {
+    ctx.recordCall(tool, { rows: 0, errorRows: 0, types: [], failed: e instanceof ToolError ? e.reason : 'internal' });
+    return { content: [{ type: 'text', text: e instanceof Error ? e.message : String(e) }], isError: true };
   }
 }
+
+function createServer(ctx: ToolContext): McpServer {
+  const server = new McpServer(
+    { name: 'equation', title: 'Equation.io', version: '1.0.1' },
+    {
+      instructions:
+        'Graphing calculator whose entire state lives in the URL. show_graph displays an interactive graph in the conversation. encode_graph_url validates equations and creates a share link without displaying a widget. decode_graph_url decodes a link the user shares so you can edit their graph. Before writing non-trivial equations, read the "syntax" resource: the full language reference, also served at ' +
+        ctx.origin +
+        '/llms.txt',
+    },
+  );
+  for (const { name, inputSchema, outputSchema, ...config } of [ENCODE_TOOL, DECODE_TOOL, SHOW_GRAPH_TOOL]) {
+    server.registerTool(
+      name,
+      {
+        ...config,
+        inputSchema: fromJsonSchema<Record<string, unknown>>(inputSchema, toolsCheckArguments),
+        outputSchema: fromJsonSchema(outputSchema),
+      },
+      args => callTool(name as Tool, args ?? {}, ctx),
+    );
+  }
+  const { uri, name, ...syntax } = syntaxResource(ctx.origin);
+  server.registerResource(name, uri, syntax, async () => ({
+    contents: [{ uri, mimeType: syntax.mimeType, text: await ctx.syntaxText() }],
+  }));
+  const { uri: graphUri, name: graphName, ...graph } = graphResource;
+  server.registerResource(graphName, graphUri, graph, async () => ({
+    contents: [graphResourceContents(await ctx.graphHtml(), ctx.origin)],
+  }));
+  return server;
+}
+
+/**
+ * Every protocol version /mcp serves, for the server card. The SDK exports
+ * only the initialize-era list; the 2026-07-28 revisions, negotiated by
+ * server/discover, stay internal to it.
+ */
+export const PROTOCOL_VERSIONS = ['2026-07-28', ...SUPPORTED_PROTOCOL_VERSIONS];
 
 const CORS_HEADERS = {
   'Access-Control-Allow-Origin': '*',
@@ -501,6 +476,12 @@ const CORS_HEADERS = {
   'Access-Control-Allow-Methods': 'POST, GET, DELETE, OPTIONS',
   'Access-Control-Allow-Headers': 'Content-Type, Accept, Authorization, Mcp-Session-Id, Mcp-Protocol-Version',
 };
+
+function withCors(response: Response): Response {
+  const headers = new Headers(response.headers);
+  for (const [name, value] of Object.entries(CORS_HEADERS)) headers.set(name, value);
+  return new Response(response.body, { status: response.status, statusText: response.statusText, headers });
+}
 
 export async function handleMcp(request: Request, url: URL, env: Env): Promise<Response> {
   if (request.method === 'OPTIONS') {
@@ -527,17 +508,7 @@ export async function handleMcp(request: Request, url: URL, env: Env): Promise<R
     );
   }
 
-  let body: unknown;
-  try {
-    body = await request.json();
-  } catch {
-    return Response.json(
-      { jsonrpc: '2.0', id: null, error: { code: -32700, message: 'Parse error' } },
-      { status: 400, headers: CORS_HEADERS },
-    );
-  }
-
-  const ctx: RpcContext = {
+  const ctx: ToolContext = {
     origin: url.origin,
     recordCall: (tool, stats) => recordToolCall(env, request, tool, stats),
     graphHtml: async () => {
@@ -552,11 +523,17 @@ export async function handleMcp(request: Request, url: URL, env: Env): Promise<R
       return res.text();
     },
   };
-  const responses = (
-    await Promise.all((Array.isArray(body) ? body : [body]).map(r => handleRpc(r as RpcRequest, ctx)))
-  ).filter((r): r is object => r !== null);
-
-  if (!responses.length) return new Response(null, { status: 202, headers: CORS_HEADERS });
-  const payload = Array.isArray(body) ? responses : responses[0];
-  return Response.json(payload, { headers: CORS_HEADERS });
+  const server = () => createServer(ctx);
+  // Both protocol eras get plain JSON responses: nothing here streams. The
+  // SDK's own 2025-era fallback would answer over SSE, so that era is served
+  // by a stateless transport with JSON responses switched on.
+  if (await isLegacyRequest(request)) {
+    const transport = new WebStandardStreamableHTTPServerTransport({
+      sessionIdGenerator: undefined,
+      enableJsonResponse: true,
+    });
+    await server().connect(transport);
+    return withCors(await transport.handleRequest(request));
+  }
+  return withCors(await createMcpHandler(server, { legacy: 'reject', responseMode: 'json' }).fetch(request));
 }
