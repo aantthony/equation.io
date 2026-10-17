@@ -18,6 +18,9 @@
  * reaches the dataset. Calls come from the AI provider's
  * servers, so there is no person, IP or country to record either.
  *
+ * Only production is counted: preview versions that Workers Builds uploads
+ * for PR branches share this dataset, so their test calls are skipped.
+ *
  * Site traffic needs nothing like this: Cloudflare's own zone analytics
  * already count it (scripts/traffic.ts).
  */
@@ -54,6 +57,7 @@ export function clientName(ua: string): string {
 }
 
 export function recordToolCall(env: Env, request: Request, tool: Tool, stats: CallStats): void {
+  if (new URL(request.url).hostname !== 'equation.io') return;
   const client = clientName(request.headers.get('User-Agent') ?? '');
   try {
     env.MCP_USAGE.writeDataPoint({

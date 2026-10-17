@@ -921,6 +921,24 @@ describe('usage counts', () => {
     ]);
   });
 
+  it('counts nothing on a preview host', async () => {
+    usage.length = 0;
+    const url = 'https://abc123-equation.example.workers.dev/mcp';
+    const body = JSON.stringify({
+      jsonrpc: '2.0',
+      id: 1,
+      method: 'tools/call',
+      params: { name: 'encode_graph_url', arguments: { equations: ['y = x'] } },
+    });
+    const res = await handleMcp(
+      new Request(url, { method: 'POST', headers: { 'content-type': 'application/json' }, body }),
+      new URL(url),
+      env,
+    );
+    expect(res.status).toBe(200);
+    expect(usage).toEqual([]);
+  });
+
   it('records why a call was rejected, never the input or the message', async () => {
     usage.length = 0;
     await call('encode_graph_url', { equations: ['y = florb; y = 2'] });
