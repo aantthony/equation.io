@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { decodePayload, encodePayload } from './link.ts';
+import { decodePayload, encodePayload, linkRows, urlPayload } from './link.ts';
 
 describe('graph-link payload codec', () => {
   it('round-trips equations', () => {
@@ -77,5 +77,27 @@ describe('graph-link payload codec', () => {
   it('keeps a single row whole', () => {
     expect(decodePayload('y%20%3D%20sin%28x%29')).toEqual(['y = sin(x)']);
     expect(decodePayload('(cos(2pi u), sin(2pi u), u)')).toEqual(['(cos(2pi u), sin(2pi u), u)']);
+  });
+});
+
+describe('site URLs', () => {
+  it('reads the /g/ path, with a #fragment winning', () => {
+    expect(urlPayload('/g/y%3Dx', '')).toBe('y%3Dx');
+    expect(urlPayload('/g/y%3Dx', '#y%3D2x')).toBe('y%3D2x');
+    expect(urlPayload('/about/', '')).toBe('');
+    expect(urlPayload('/', '#')).toBe('');
+  });
+
+  it('opens a deep link at the rows its path names', () => {
+    const rows = ['a = 2', 'y = a sin(x)', 'f(x) = 1/x'];
+    expect(linkRows(`/g/${encodePayload(rows)}`)).toEqual(rows);
+    // ChatGPT passes the path's query along; it is not part of the graph.
+    expect(linkRows(`/g/${encodePayload(rows)}?from=chatgpt`)).toEqual(rows);
+  });
+
+  it('opens a blank graph for other pages, and nothing for a broken payload', () => {
+    expect(linkRows('/')).toEqual([]);
+    expect(linkRows('/about/')).toEqual([]);
+    expect(linkRows('/g/%E0%A4%A')).toBeUndefined();
   });
 });

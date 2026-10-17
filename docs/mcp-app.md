@@ -9,7 +9,17 @@ The UI uses `@modelcontextprotocol/ext-apps` for initialization, tool results,
 theme changes, fullscreen, external links, and model-context updates. Changes
 to equations and sliders are sent through `ui/update-model-context`, throttled
 by the editor's existing URL-save interval. This does not send a chat message
-or trigger a model response. ChatGPT's optional widget state stores edited rows
+or trigger a model response. Hosts that list `image` under
+`updateModelContext` also get a JPEG of the graph (longest edge 1280px,
+drawn fresh, as voice mode's look_at_graph does), so the model sees the
+picture and not only the equations. It follows the equations once edits pause
+for 600ms and background curve traces have landed, so a slider drag doesn't
+encode a frame on every save tick. ChatGPT shows it as a removable attachment
+titled by `_meta["openai/title"]`: "Edited graph", or "Graph" for a deep-linked
+graph the model has never seen. A graph the model already knows (untouched, or
+reset) gets no picture. An off-screen graph skips the picture rather than
+break its render pause; teardown takes one before the renderer is released.
+ChatGPT's optional widget state stores edited rows
 for the matching original result. Graphs still have shareable URLs.
 
 Embedded graphs start with the equation editor collapsed. Host theme, color and
@@ -52,6 +62,32 @@ Sandbox domain formats differ between hosts. We omit `ui.domain` so Claude
 uses its default sandbox, and provide `openai/widgetDomain` for ChatGPT's
 unique widget origin requirement using its supported compatibility alias.
 
+## ChatGPT sidebar and conversation panels
+
+`graphing_calculator` is the app's own entry point, per OpenAI's
+[MCP extensions](https://github.com/openai/mcp-extensions/blob/main/docs/spec.md):
+its `_meta["openai/ui"].entrypoints` list `global` (the ChatGPT sidebar) and
+`thread` (a panel beside a conversation). The host calls it with `{}` and it
+returns an empty graph, which the UI treats as a launch: the editor comes out
+on one empty line, and there is no Reset. Its `_meta.ui.visibility` is `["app"]`,
+so the model is never offered it; `show_graph` stays the model's way to draw.
+The sidebar title is the tool's `title`, the brand "Equation.io" (as Figma's
+is "Figma"), and its icon is `/mcp-icon.svg` (20×20, monochrome,
+`currentColor`), both from `tools/list`. The `name` stays
+`graphing_calculator`: deep links carry it, so it must not change.
+
+A deep link opens a graph: the host passes the app-relative URL in
+`hostContext["openai/deepLink"].url`, at launch or later, and the site's own
+`/g/…` or `/#…` path loads those rows (`linkRows` in `lib/link.ts`). That
+graph becomes the original Reset returns to, and is published to model context
+at once, since the model has not seen it. A link arriving while the app is
+open replaces the graph as one undoable step. Any other path is a blank graph;
+a link that fails to decode leaves the graph alone and says so. The public link form is
+`https://chatgpt.com/plugins/<plugin-id>/app/graphing_calculator?path=<encoded /g/… path>`.
+
+Edits made in a sidebar or panel go to that thread's model context, picture
+included, as they do inline.
+
 ## Known gaps
 
 A central `app.onerror` handler is not implemented yet. Individual bridge calls
@@ -65,6 +101,7 @@ pnpm web:build
 pnpm exec wrangler dev --config dist-web/equation/wrangler.json --port 5196
 # In another terminal:
 node scripts/mcp-app-test.ts
+node scripts/mcp-sidebar-test.ts
 pnpm exec vitest run worker/mcp.test.ts
 pnpm typecheck
 ```

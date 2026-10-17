@@ -6,6 +6,22 @@ import { analyze } from '../worker/graph.ts';
 const input: TraceInput = { residuals: [], dim: 2, lo: [-1, -1], hi: [1, 1], env: {} };
 const result = { pts: [[1, 2]] };
 
+it('is idle once every queued trace has landed', async () => {
+  const sent: TraceMessage[] = [];
+  const q = new TraceQueue(m => sent.push(m));
+  let idle = false;
+  await q.whenIdle(); // Nothing queued: idle at once.
+  q.request(1, 'a', input, () => {});
+  q.request(2, 'b', input, () => {});
+  void q.whenIdle().then(() => (idle = true));
+  q.complete(sent[0].token, result);
+  await Promise.resolve();
+  expect(idle).toBe(false); // Row 2 is still tracing.
+  q.complete(sent[1].token, result);
+  await Promise.resolve();
+  expect(idle).toBe(true);
+});
+
 it('coalesces a burst of wheel updates to the latest view', () => {
   const sent: TraceMessage[] = [];
   const received: string[] = [];

@@ -43,6 +43,7 @@ interface McpTool {
   };
   inputSchema: ObjectSchema;
   outputSchema?: ObjectSchema;
+  icons?: { src: string; mimeType?: string; sizes?: string[] }[];
   _meta?: Record<string, unknown>;
 }
 
@@ -190,6 +191,35 @@ const SHOW_GRAPH_TOOL: McpTool = {
   },
   _meta: { ui: { resourceUri: GRAPH_UI_URI } },
 };
+
+/**
+ * The app's own way in: ChatGPT lists it in the sidebar (a "global"
+ * entrypoint) and as a panel beside a conversation (a "thread" entrypoint),
+ * calling it with {} to open a blank calculator, or the graph a deep link
+ * names (hostContext["openai/deepLink"]). App-only visibility keeps it out of
+ * the model's tool list: show_graph stays the one way the model draws.
+ */
+const calculatorTool = (origin: string): McpTool => ({
+  name: 'graphing_calculator',
+  title: 'Equation.io',
+  annotations: {
+    title: 'Equation.io',
+    readOnlyHint: true,
+    openWorldHint: false,
+    destructiveHint: false,
+    idempotentHint: true,
+  },
+  description:
+    'Open a blank equation.io graphing calculator for the user to work in. Hosts call this to open the app from their sidebar; to show a graph, use show_graph.',
+  inputSchema: { type: 'object', properties: {}, additionalProperties: false },
+  outputSchema: SHOW_GRAPH_TOOL.outputSchema,
+  // Monochrome and currentColor, 20×20, per the ChatGPT sidebar icon guidelines.
+  icons: [{ src: `${origin}/mcp-icon.svg`, mimeType: 'image/svg+xml', sizes: ['20x20'] }],
+  _meta: {
+    ui: { resourceUri: GRAPH_UI_URI, visibility: ['app'] },
+    'openai/ui': { entrypoints: [{ type: 'global' }, { type: 'thread' }] },
+  },
+});
 
 /**
  * The syntax manual as an MCP resource. Its uri is the real /llms.txt URL on
@@ -415,7 +445,7 @@ async function handleRpc(req: RpcRequest, ctx: RpcContext): Promise<object | nul
     case 'ping':
       return result({});
     case 'tools/list':
-      return result({ tools: [...TOOLS, SHOW_GRAPH_TOOL] });
+      return result({ tools: [...TOOLS, SHOW_GRAPH_TOOL, calculatorTool(origin)] });
     case 'resources/list':
       return result({ resources: [syntaxResource(origin), graphResource] });
     case 'resources/templates/list':
@@ -446,7 +476,9 @@ async function handleRpc(req: RpcRequest, ctx: RpcContext): Promise<object | nul
           ? 'encode_graph_url'
           : name === 'read_graph'
             ? 'decode_graph_url'
-            : TOOL_NAMES.find(t => t === name);
+            : name === 'graphing_calculator'
+              ? name
+              : TOOL_NAMES.find(t => t === name);
       try {
         let value: object;
         const content: object[] = [];
@@ -464,6 +496,11 @@ async function handleRpc(req: RpcRequest, ctx: RpcContext): Promise<object | nul
             value = made.value;
           }
           content.push({ type: 'text', text: JSON.stringify(value, null, 2) });
+        } else if (tool === 'graphing_calculator') {
+          // An empty graph: the UI opens its editor, or loads a deep link.
+          ctx.recordCall(tool, { rows: 0, errorRows: 0, types: [] });
+          value = { valid: true, url: `${origin}/`, share_url: `${origin}/`, rows: [] };
+          content.push({ type: 'text', text: 'Opened a blank graphing calculator.' });
         } else if (tool === 'decode_graph_url') {
           const decoded = decodeGraphUrl(args);
           ctx.recordCall(tool, { rows: decoded.equations.length, errorRows: 0, types: [] });

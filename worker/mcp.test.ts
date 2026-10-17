@@ -166,6 +166,7 @@ describe('mcp endpoint', () => {
       'encode_graph_url',
       'decode_graph_url',
       'show_graph',
+      'graphing_calculator',
     ]);
     for (const tool of body.result.tools) {
       // Both the top-level title (current MCP spec) and annotations.title
@@ -179,6 +180,21 @@ describe('mcp endpoint', () => {
         idempotentHint: true,
       });
     }
+  });
+
+  it('opens a blank calculator from ChatGPT entrypoints, hidden from the model', async () => {
+    const { body } = await rpc('tools/list');
+    const tool = body.result.tools.find((t: { name: string }) => t.name === 'graphing_calculator');
+    const show = body.result.tools.find((t: { name: string }) => t.name === 'show_graph');
+    expect(tool._meta.ui).toEqual({ resourceUri: show._meta.ui.resourceUri, visibility: ['app'] });
+    expect(tool._meta['openai/ui']).toEqual({ entrypoints: [{ type: 'global' }, { type: 'thread' }] });
+    expect(tool.icons).toEqual([
+      { src: 'https://equation.io/mcp-icon.svg', mimeType: 'image/svg+xml', sizes: ['20x20'] },
+    ]);
+    // Hosts open entrypoints with {} as the arguments.
+    const opened = await rpc('tools/call', { name: 'graphing_calculator', arguments: {} });
+    expect(opened.body.result.isError).toBeUndefined();
+    expect(opened.body.result.structuredContent.rows).toEqual([]);
   });
 
   it.each([
@@ -906,6 +922,12 @@ describe('usage counts', () => {
     ]);
     const stored = JSON.stringify(usage);
     for (const text of ['sin', 'cos', 'a = 2', 'florb']) expect(stored).not.toContain(text);
+  });
+
+  it('counts calculator opens from ChatGPT entrypoints', async () => {
+    usage.length = 0;
+    await call('graphing_calculator', {});
+    expect(points()).toEqual([{ blobs: ['call', 'graphing_calculator', '', '', ''], doubles: [0, 0, 0, 0] }]);
   });
 
   it('counts former tool names as the tools they became, and rejected calls as failed', async () => {

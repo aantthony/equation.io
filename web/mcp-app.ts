@@ -4,15 +4,23 @@ import {
   applyHostStyleVariables,
   type McpUiHostContext,
 } from '@modelcontextprotocol/ext-apps';
-import { encodePayload } from '../lib/link.ts';
+import { encodePayload, linkRows } from '../lib/link.ts';
 import { setHostTheme } from './theme.ts';
 
 interface GraphEditor {
   getRows(): string[];
   setRows(rows: string[]): void;
+  /** Replace the graph as one undoable step. */
+  openRows(rows: string[]): void;
   onChange(callback: (rows: string[]) => void): void;
   onEdit(callback: () => void): void;
   setVisible(visible: boolean): void;
+  /** Bring the equation editor out from its chip. */
+  showPanel(): void;
+  /** A fresh frame of the graph, longest edge at most maxEdge pixels. */
+  still(maxEdge: number): HTMLCanvasElement;
+  /** Resolves once background curve traces have landed. */
+  traced(): Promise<void>;
   flush(): void;
   dispose(): void;
 }
@@ -21,8 +29,24 @@ interface WidgetState {
   privateContent?: { source?: string; equations?: unknown };
 }
 
+// Matches voice mode's look_at_graph: enough to read labels and shapes.
+const SNAPSHOT_EDGE = 1280;
+// The picture follows the equations once edits pause: a slider drag sends
+// rows on every save tick, but encoding a frame each time would stutter it.
+const SNAPSHOT_DELAY_MS = 600;
+// A trace that never lands must not hold the picture back for good.
+const TRACE_WAIT_MS = 3000;
+
 const strings = (value: unknown): value is string[] =>
   Array.isArray(value) && value.every(row => typeof row === 'string');
+
+/** The app-relative URL a ChatGPT deep link opened the app at, if any. */
+const deepLinkUrl = (context: McpUiHostContext): string | undefined => {
+  const link = (context as Record<string, unknown>)['openai/deepLink'];
+  return link && typeof link === 'object' && typeof (link as { url?: unknown }).url === 'string'
+    ? (link as { url: string }).url
+    : undefined;
+};
 
 // SDK validation can materialize omitted optional keys as undefined. They
 // are not resets: host-context notifications contain only changed fields.
@@ -66,6 +90,17 @@ export async function connectGraphApp(editor: GraphEditor) {
   let pendingPreview: string[] | undefined;
   let context: McpUiHostContext = {};
   let closing = false;
+  // Opened from ChatGPT's sidebar or a conversation panel (an empty tool
+  // result), rather than to show a graph the model made.
+  let launched = false;
+  let appliedDeepLink: string | undefined;
+  // The rows the model already knows, as the JSON of their non-blank text:
+  // its own tool result, or [] for a blank calculator. undefined for a graph
+  // it has never seen, such as a deep link. Only a graph that differs needs
+  // a picture.
+  let seen: string | undefined;
+  let snapshotTimer: ReturnType<typeof setTimeout> | undefined;
+  let published: string[] = [];
   let changingMode = false;
   let teardown: Promise<{}> | undefined;
   const events = new AbortController();
@@ -88,7 +123,8 @@ export async function connectGraphApp(editor: GraphEditor) {
   document.head.append(fonts);
 
   function link(rows: string[]) {
-    open.href = `${origin}/g/${encodePayload(rows)}`;
+    const payload = encodePayload(rows);
+    open.href = payload ? `${origin}/g/${payload}` : `${origin}/`;
   }
 
   function originalRows(): string[] | undefined {
@@ -103,7 +139,8 @@ export async function connectGraphApp(editor: GraphEditor) {
 
   function syncReset() {
     const original = originalRows();
-    reset.hidden = !original || JSON.stringify(editor.getRows()) === source;
+    // A blank calculator has nothing to go back to.
+    reset.hidden = !original?.length || JSON.stringify(editor.getRows()) === source;
   }
 
   function resetGraph() {
@@ -116,20 +153,69 @@ export async function connectGraphApp(editor: GraphEditor) {
     void publish(rows);
   }
 
-  async function publish(rows: string[]) {
+  const wantsPicture = (rows: string[]) =>
+    !!app.getHostCapabilities()?.updateModelContext?.image &&
+    JSON.stringify(rows.map(row => row.trim()).filter(Boolean)) !== seen;
+
+  // The graph as the user left it, for hosts that take images as model
+  // context: the model can then see the picture, not just the equations.
+  // ChatGPT shows each block as a removable attachment under this title.
+  // Not while off-screen: drawing a frame would undo the render pause, and
+  // the equations still describe the graph. Teardown draws its last frame
+  // regardless; the renderer is released straight after.
+  function snapshot(): { type: 'image'; data: string; mimeType: string; _meta: Record<string, unknown> } | undefined {
+    if (!closing && (!intersecting || document.hidden)) return;
+    try {
+      const url = editor.still(SNAPSHOT_EDGE).toDataURL('image/jpeg', 0.85);
+      const data = url.slice(url.indexOf(',') + 1);
+      if (!data) return;
+      const title = seen === undefined ? 'Graph' : 'Edited graph';
+      return { type: 'image', data, mimeType: 'image/jpeg', _meta: { 'openai/title': title } };
+    } catch {
+      return; // The equations and share link still describe the graph.
+    }
+  }
+
+  // Each update replaces the last, so the picture goes out again with the
+  // rows it shows, after edits pause and background traces have landed.
+  function schedulePicture() {
+    clearTimeout(snapshotTimer);
+    snapshotTimer = undefined;
+    if (!wantsPicture(published)) return;
+    const rows = published;
+    snapshotTimer = setTimeout(async () => {
+      await Promise.race([editor.traced(), new Promise(resolve => setTimeout(resolve, TRACE_WAIT_MS))]);
+      if (closing || rows !== published) return;
+      const image = snapshot();
+      if (image) void publish(rows, image);
+    }, SNAPSHOT_DELAY_MS);
+  }
+
+  async function publish(rows: string[], image?: ReturnType<typeof snapshot>) {
     link(rows);
     if (!connected || !hasResult) return;
+    if (!image) {
+      published = rows;
+      if (!closing) schedulePicture();
+    }
     const publishedSource = source;
     try {
       openai?.setWidgetState?.({ privateContent: { source, equations: rows } });
     } catch {
       /* Persistence may be unavailable; the live graph still works. */
     }
+    // A message shown while this was in flight, such as a bad deep link, is
+    // newer than this update and stays.
+    const shown = status.textContent;
+    const reports = () => !closing && hasResult && source === publishedSource && status.textContent === shown;
     try {
-      await app.updateModelContext({ structuredContent: { equations: rows, share_url: open.href } });
-      if (!closing && hasResult && source === publishedSource) status.textContent = '';
+      await app.updateModelContext({
+        ...(image && { content: [image] }),
+        structuredContent: { equations: rows, share_url: open.href },
+      });
+      if (reports()) status.textContent = '';
     } catch {
-      if (!closing && hasResult && source === publishedSource) status.textContent = 'Edits could not sync';
+      if (reports()) status.textContent = 'Edits could not sync';
     }
   }
 
@@ -171,6 +257,7 @@ export async function connectGraphApp(editor: GraphEditor) {
       }
     }
     if (styles?.css?.fonts !== undefined) fonts.textContent = styles.css.fonts;
+    if (launched) openDeepLink(false);
     for (const edge of ['top', 'right', 'bottom', 'left'] as const) {
       const inset = context.safeAreaInsets?.[edge];
       root.style.setProperty(`--host-safe-${edge}`, `${Number.isFinite(inset) ? Math.max(0, inset!) : 0}px`);
@@ -186,6 +273,48 @@ export async function connectGraphApp(editor: GraphEditor) {
   }
 
   app.onhostcontextchanged = hostContext;
+  // A deep link names the graph to open, and becomes the original that Reset
+  // returns to. The model has not seen it, so it is published right away.
+  // At launch it replaces the empty page, and edits saved in widget state for
+  // it come back; once open it replaces the user's graph, which undo restores.
+  // A link to a page with no graph opens a blank calculator.
+  function openDeepLink(atLaunch: boolean): boolean {
+    const url = deepLinkUrl(context);
+    if (url === undefined || url === appliedDeepLink) return false;
+    appliedDeepLink = url;
+    const rows = linkRows(url);
+    if (!rows) {
+      status.textContent = 'Could not open that graph link.';
+      return false;
+    }
+    status.textContent = '';
+    if (!rows.length) {
+      openBlank(atLaunch);
+      return true;
+    }
+    source = JSON.stringify(rows);
+    seen = undefined;
+    const wanted = atLaunch && restored?.source === source && strings(restored.equations) ? restored.equations : rows;
+    if (atLaunch) showRows(wanted);
+    else editor.openRows(wanted);
+    link(wanted);
+    syncReset();
+    void publish(wanted);
+    return true;
+  }
+
+  /** An empty calculator with a line to type on, or the edits widget state
+   *  kept for it. */
+  function openBlank(atLaunch: boolean) {
+    source = seen = '[]';
+    const saved = atLaunch && restored?.source === source && strings(restored.equations) ? restored.equations : [];
+    if (atLaunch) showRows(saved.length ? saved : ['']); // The line shows its hint.
+    else editor.openRows([]);
+    link(saved);
+    syncReset();
+    // A blank graph tells the model nothing new, unless it replaced one.
+    if (saved.length || !atLaunch) void publish(saved);
+  }
   function cancelPreview() {
     clearTimeout(previewTimer);
     previewTimer = undefined;
@@ -262,7 +391,18 @@ export async function connectGraphApp(editor: GraphEditor) {
       status.textContent = 'No graph equations received.';
       return;
     }
-    source = JSON.stringify(rows);
+    if (!rows.length) {
+      // An entrypoint launch: an empty calculator, ready to type in.
+      launched = true;
+      inputSource = undefined;
+      hasResult = true;
+      status.textContent = '';
+      editor.showPanel();
+      if (!openDeepLink(true)) openBlank(true);
+      return;
+    }
+    launched = false;
+    source = seen = JSON.stringify(rows);
     // Matching results confirm the already-rendered graph without resetting
     // animation, undo history, or slider edits made while validation ran.
     const wanted =
@@ -349,8 +489,12 @@ export async function connectGraphApp(editor: GraphEditor) {
       try {
         editor.flush();
         const rows = editor.getRows();
+        clearTimeout(snapshotTimer);
+        // Take the picture while the renderer still exists, and only of a
+        // graph the model hasn't seen: an untouched one needs none.
+        const image = connected && hasResult && wantsPicture(rows) ? snapshot() : undefined;
         editor.dispose();
-        await publish(rows);
+        await publish(rows, image);
       } finally {
         editor.dispose();
         connected = false;

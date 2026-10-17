@@ -107,7 +107,7 @@ try {
           response = {
             protocolVersion: message.params.protocolVersion,
             hostInfo: { name: 'test-host', version: '1' },
-            hostCapabilities: { openLinks: {}, updateModelContext: { structuredContent: {} } },
+            hostCapabilities: { openLinks: {}, updateModelContext: { structuredContent: {}, image: {} } },
             hostContext: {
               theme: 'dark',
               displayMode: 'inline',
@@ -219,6 +219,49 @@ try {
     ),
   );
   assert.ok(await frame.evaluate(() => (window as any).savedWidgetState.privateContent.equations[0].includes('3')));
+  // Hosts that take images get a picture of the edited graph once edits
+  // pause, drawn fresh (the WebGL buffer is not preserved), so it must not
+  // come out blank.
+  await page.waitForFunction(() =>
+    (window as any).messages.some(
+      (m: any) =>
+        m.method === 'ui/update-model-context' &&
+        m.params.structuredContent.equations[0].includes('3') &&
+        m.params.content?.[0]?.type === 'image',
+    ),
+  );
+  const snapshot = await page.evaluate(async () => {
+    const message = (window as any).messages.find(
+      (m: any) => m.method === 'ui/update-model-context' && m.params.content?.[0]?.type === 'image',
+    );
+    const block = message.params.content?.[0];
+    if (!block) return null;
+    const image = new Image();
+    image.src = `data:${block.mimeType};base64,${block.data}`;
+    await image.decode();
+    const canvas = document.createElement('canvas');
+    canvas.width = image.width;
+    canvas.height = image.height;
+    const ctx = canvas.getContext('2d')!;
+    ctx.drawImage(image, 0, 0);
+    const pixels = ctx.getImageData(0, 0, image.width, image.height).data;
+    const colors = new Set<number>();
+    for (let i = 0; i < pixels.length; i += 4 * 97)
+      colors.add((pixels[i] >> 4) | ((pixels[i + 1] >> 4) << 4) | ((pixels[i + 2] >> 4) << 8));
+    return {
+      type: block.type,
+      mimeType: block.mimeType,
+      title: block._meta?.['openai/title'],
+      width: image.width,
+      colors: colors.size,
+    };
+  });
+  assert.ok(snapshot, 'Edits publish a graph image to hosts that accept images');
+  assert.equal(snapshot.type, 'image');
+  assert.equal(snapshot.mimeType, 'image/jpeg');
+  assert.equal(snapshot.title, 'Edited graph');
+  assert.ok(snapshot.width > 100, `snapshot width ${snapshot.width}`);
+  assert.ok(snapshot.colors > 3, `snapshot is not blank (${snapshot.colors} colors)`);
   // A host may replay the original input after completion. It must neither
   // reset slider edits nor turn off publishing for subsequent edits.
   await frame.evaluate(() => ((window as any).confirmedRow = document.querySelector('.eq-line')));
@@ -399,6 +442,15 @@ try {
         .structuredContent.equations,
   );
   assert.equal(publishedRows[2], viewportRows[2], 'Teardown preserves an unapplied viewport in model context');
+  assert.equal(
+    await page.evaluate(
+      () =>
+        (window as any).messages.filter((m: any) => m.method === 'ui/update-model-context').at(-1).params.content?.[0]
+          ?.type,
+    ),
+    'image',
+    'Teardown snapshots the graph before disposing the renderer',
+  );
   assert.ok(await frame.evaluate(() => (window as any).workersTerminated >= 1), 'Teardown terminates the curve worker');
   const disposedFrames = await frame.evaluate(() => (window as any).renderFrames);
   await page.evaluate(value => (window as any).sendResult(value), sphere);

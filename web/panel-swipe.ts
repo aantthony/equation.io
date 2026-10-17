@@ -51,7 +51,12 @@ const SLOP = 9;
 /** The corner the panel was last pinned to, kept across visits. */
 const CORNER_KEY = 'eq-panel-corner';
 
-export function initPanelSwipe(panel: HTMLElement, chip: HTMLElement, grip: HTMLElement, editor: HTMLElement): void {
+export function initPanelSwipe(
+  panel: HTMLElement,
+  chip: HTMLElement,
+  grip: HTMLElement,
+  editor: HTMLElement,
+): { present: () => void } {
   const reduceMotion = matchMedia('(prefers-reduced-motion: reduce)');
 
   /** Which corner the panel is pinned to: 0 TL, 1 TR, 2 BL, 3 BR. */
@@ -727,4 +732,6 @@ export function initPanelSwipe(panel: HTMLElement, chip: HTMLElement, grip: HTML
   };
   chip.addEventListener('pointerup', endChipPointer);
   chip.addEventListener('pointercancel', endChipPointer);
+
+  return { present };
 }
