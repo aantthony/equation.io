@@ -250,11 +250,10 @@ try {
       (m: any) => m.method === 'ui/update-model-context' && m.params.structuredContent.equations[0].includes('a = 2'),
     ),
   );
-  await frame.locator('#app-open').click();
-  await page.waitForFunction(() => (window as any).messages.some((m: any) => m.method === 'ui/open-link'));
+  assert.ok(await frame.locator('#app-open').isHidden(), 'The share link is not shown in chat');
   await frame.locator('#app-expand').click();
-  await frame.waitForFunction(() => document.getElementById('app-expand')?.textContent === 'Collapse');
-  assert.equal(await frame.locator('#app-expand').textContent(), 'Collapse');
+  await frame.waitForFunction(() => document.getElementById('app-expand')?.getAttribute('aria-label') === 'Collapse');
+  assert.equal(await frame.locator('#app-expand').getAttribute('aria-label'), 'Collapse');
   await page.evaluate(() => (window as any).sendContext({ availableDisplayModes: ['fullscreen'] }));
   await frame.locator('#app-expand').waitFor({ state: 'hidden' });
   const beforeRequests = await page.evaluate(
@@ -271,7 +270,7 @@ try {
   await page.evaluate(() => (window as any).sendContext({ availableDisplayModes: ['inline'] }));
   await frame.locator('#app-expand').waitFor({ state: 'visible' });
   await frame.locator('body').press('Escape');
-  await frame.waitForFunction(() => document.getElementById('app-expand')?.textContent === 'Expand');
+  await frame.waitForFunction(() => document.getElementById('app-expand')?.getAttribute('aria-label') === 'Expand');
   assert.ok(await frame.locator('#app-expand').isHidden(), 'Cannot expand when only inline is allowed');
   await page.evaluate(() => {
     (window as any).forcedMode = 'inline';
@@ -283,7 +282,7 @@ try {
   await frame.locator('#app-expand').click();
   await frame.waitForFunction(() => !(document.getElementById('app-expand') as HTMLButtonElement).disabled);
   assert.equal(
-    await frame.locator('#app-expand').textContent(),
+    await frame.locator('#app-expand').getAttribute('aria-label'),
     'Expand',
     'Use the host-returned mode if fullscreen is declined',
   );

@@ -21,6 +21,12 @@ interface WidgetState {
   privateContent?: { source?: string; equations?: unknown };
 }
 
+// Corner arrows pointing out (expand) or in (collapse).
+const icon = (d: string) =>
+  `<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="${d}"/></svg>`;
+const EXPAND_ICON = icon('M9.5 2.5h4v4M13.5 2.5 9 7M6.5 13.5h-4v-4M2.5 13.5 7 9');
+const COLLAPSE_ICON = icon('M13 7H9V3M9 7l4.5-4.5M3 9h4v4M7 9l-4.5 4.5');
+
 const strings = (value: unknown): value is string[] =>
   Array.isArray(value) && value.every(row => typeof row === 'string');
 
@@ -78,11 +84,6 @@ export async function connectGraphApp(editor: GraphEditor) {
   observer.observe(document.getElementById('gl')!);
   document.addEventListener('visibilitychange', visibility, { signal: events.signal });
   visibility();
-  const toolbar = document.getElementById('app-toolbar')!;
-  const toolbarSize = new ResizeObserver(() => {
-    document.documentElement.style.setProperty('--app-toolbar-height', `${toolbar.getBoundingClientRect().height}px`);
-  });
-  toolbarSize.observe(toolbar);
   const fonts = document.createElement('style');
   fonts.id = 'equation-host-fonts';
   document.head.append(fonts);
@@ -177,7 +178,12 @@ export async function connectGraphApp(editor: GraphEditor) {
     }
     const nextMode = context.displayMode === 'fullscreen' ? 'inline' : 'fullscreen';
     expand.hidden = !context.availableDisplayModes?.includes(nextMode);
-    expand.textContent = context.displayMode === 'fullscreen' ? 'Collapse' : 'Expand';
+    const label = context.displayMode === 'fullscreen' ? 'Collapse' : 'Expand';
+    if (expand.getAttribute('aria-label') !== label) {
+      expand.setAttribute('aria-label', label);
+      expand.title = label;
+      expand.innerHTML = label === 'Collapse' ? COLLAPSE_ICON : EXPAND_ICON;
+    }
     if (connected && context.displayMode !== 'fullscreen') {
       const dims = context.containerDimensions;
       const height = dims && 'height' in dims ? dims.height : Math.min(520, dims?.maxHeight ?? 520);
@@ -295,19 +301,6 @@ export async function connectGraphApp(editor: GraphEditor) {
   });
 
   reset.addEventListener('click', resetGraph, { signal: events.signal });
-  open.addEventListener(
-    'click',
-    event => {
-      link(editor.getRows()); // Include edits still waiting for the throttled callback.
-      if (connected && app.getHostCapabilities()?.openLinks) {
-        event.preventDefault();
-        void app.openLink({ url: open.href }).catch(() => {
-          status.textContent = 'Could not open the link. Try again.';
-        });
-      }
-    },
-    { signal: events.signal },
-  );
   async function requestMode(mode: 'inline' | 'fullscreen') {
     if (closing || !connected || changingMode || !context.availableDisplayModes?.includes(mode)) return;
     changingMode = true;
@@ -344,7 +337,6 @@ export async function connectGraphApp(editor: GraphEditor) {
       cancelPreview();
       events.abort();
       observer.disconnect();
-      toolbarSize.disconnect();
       editor.onChange(() => {});
       try {
         editor.flush();
