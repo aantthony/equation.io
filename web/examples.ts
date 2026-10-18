@@ -1104,116 +1104,6 @@ export const EXAMPLES: Array<[string, Array<[string, string, string]>]> = [
     ],
   ],
   [
-    'curved space + spacetime',
-    [
-      // The upper half-plane with ds² = (dx² + dy²)/y² is the hyperbolic
-      // plane: its geodesics are half-circles standing on y = 0 (and vertical
-      // lines), which is infinitely far away. Drag P.
-      [
-        'Poincaré half-plane geodesics (drag P)',
-        'view(x = -3..3, y = -0.4..3.6); ds^2 = (dx^2 + dy^2)/y^2; y < 0; P = (0, 1); a = [0..17] pi/9; geodesic(P, (cos(a), sin(a)))',
-        'draggable geometry coordinates',
-      ],
-      // A particle round a black hole, in the equatorial plane of the
-      // Schwarzschild metric: speed is its coordinate velocity dφ/dt r, across
-      // the line to P. Each orbit's nearest point moves on by about
-      // 2π((1 − 6M/r)^−½ − 1); slow it below about 0.172 and it falls in.
-      // The horizon r = 2M is shaded and the photon sphere r = 3M drawn.
-      [
-        'Schwarzschild orbit precession (slide speed, drag P)',
-        'view(x = -26..26, y = -20..20); M = 1; r = sqrt(x^2 + y^2); phi = atan2(y, x); ' +
-          'ds^2 = -(1 - 2M/r) dt^2 + dr^2/(1 - 2M/r) + r^2 dphi^2; r < 2M; r = 3M; P = (20, 0); speed = 0.18; ' +
-          'geodesic(P, speed (-P.y, P.x)/sqrt(P.x^2 + P.y^2), 1600)',
-        'slider draggable coordinates physics',
-      ],
-      // Parallel light rays past a black hole: far out they bend by about
-      // 4M/b, those within b = 3√3 M fall in, and those near it wind round
-      // the photon sphere r = 3M before leaving.
-      [
-        'light bending around a black hole',
-        'view(x = -16..16, y = -12..12); M = 1; r = sqrt(x^2 + y^2); phi = atan2(y, x); ' +
-          'ds^2 = -(1 - 2M/r) dt^2 + dr^2/(1 - 2M/r) + r^2 dphi^2; r < 2M; r = 3M; b = [-16..16]/2; lightray((-30, b), (1, 0))',
-        'slider coordinates physics',
-      ],
-      // Schwarzschild's r and t as a spacetime diagram: x is r, y is t. The
-      // light cones close up toward the horizon r = 2M (half-angle
-      // atan(1 − 2M/r)), and inside it they lie on their side: r is the time
-      // there, running inward. Particles dropped from rest, and light from
-      // r = 3 either way, only creep up the horizon as t runs on — these
-      // coordinates never reach it.
-      [
-        'light cones closing at a horizon',
-        'view(x = 0..12, y = -1..13); M = 1; ds^2 = -(1 - 2M/x) dy^2 + dx^2/(1 - 2M/x); x < 2M; lightcones; ' +
-          'geodesic(([2..5] 2, 0), (0, 1)); lightray((3, 0), ([-1, 1], 1))',
-        'physics coordinates',
-      ],
-      // The same black hole in ingoing Eddington–Finkelstein coordinates (x
-      // is r, y is v = t + r*): the metric is regular at r = 2M, the cones
-      // tip over smoothly as they cross it, and the particles fall through
-      // to r = 0. Light sent outward from inside the horizon still falls in;
-      // from outside it escapes.
-      [
-        'Eddington–Finkelstein: through the horizon',
-        'view(x = -0.5..8, y = -1..9); M = 1; ds^2 = -(1 - 2M/x) dy^2 + 2 dy dx; x < 2M; lightcones; ' +
-          'geodesic(([3..6], 0), (0, 1)); lightray(([2..12]/4, 0), (0, 1))',
-        'physics coordinates',
-      ],
-      // A spinning (Kerr) black hole in its equatorial plane. Each ellipse is
-      // where light from its dot gets in the same short time: smaller near
-      // the hole, and dragged round with its spin. Inside the ergosurface
-      // r = 2M (red) the ellipse leaves its dot behind: nothing can stand
-      // still there. Slide a; the shaded disc is the horizon.
-      [
-        'light-speed ellipses around a spinning black hole',
-        'view(x = -3.2..3.2, y = -2.4..2.4); M = 1; a = clamp(0.95, -1, 1); r = sqrt(x^2 + y^2); phi = atan2(y, x); ' +
-          'ds^2 = -(1 - 2M/r) dt^2 - 4 M a/r dt dphi + r^2/(r^2 - 2M r + a^2) dr^2 + (r^2 + a^2 + 2M a^2/r) dphi^2; ' +
-          'r < M + sqrt(M^2 - a^2); r = 2M; lightcones',
-        'slider coordinates physics',
-      ],
-      // The Poincaré disk's metric, painted by its Gaussian curvature: −1
-      // everywhere, so one even tint (its row colour's complement, for K < 0),
-      // however crowded the geodesics fanning from P look near the edge.
-      // Hover the disk to read K.
-      [
-        'curvature of the Poincaré disk (drag P)',
-        'view(x = -1.6..1.6, y = -1.2..1.2); ds^2 = 4(dx^2 + dy^2)/(1 - x^2 - y^2)^2; gaussian(x, y); x^2 + y^2 = 1; ' +
-          'P = (0.3, 0.2); a = [0..17] pi/9; geodesic(P, (cos(a), sin(a)))',
-        'draggable scalar-field geometry',
-      ],
-      // gaussian(x, y) under a spacetime metric is the curvature of space at
-      // one instant: of Schwarzschild's slice t = constant, Flamm's
-      // paraboloid, K = −M/r³, strongest at the horizon r = 2M (shaded,
-      // where the slice stops being space). Slide M; hover to read K.
-      [
-        'space around a black hole is curved',
-        'view(x = -16..16, y = -12..12); M = 1; r = sqrt(x^2 + y^2); phi = atan2(y, x); ' +
-          'ds^2 = -(1 - 2M/r) dt^2 + dr^2/(1 - 2M/r) + r^2 dphi^2; gaussian(x, y); r < 2M',
-        'slider scalar-field coordinates physics',
-      ],
-      // What a black hole does to a small cloud of particles held at rest:
-      // pulled apart along the radius (arrowheads out, 2M/r³) and squeezed
-      // round it (in, M/r³) — spaghettified. The tides grow as 1/r³; the
-      // strongest glyphs are shrunk to fit. Drag P: a particle let go there
-      // falls in through the horizon (shaded).
-      [
-        'tidal stretching near a black hole (drag P)',
-        'view(x = -16..16, y = -12..12); M = 1; r = sqrt(x^2 + y^2); phi = atan2(y, x); ' +
-          'ds^2 = -(1 - 2M/r) dt^2 + dr^2/(1 - 2M/r) + r^2 dphi^2; r < 2M; tidal; P = (11, 6); geodesic(P, (0, 0))',
-        'draggable coordinates physics',
-      ],
-      // The tides of a spinning black hole, for observers held still against
-      // its drag: none can be inside the ergosurface r = 2M (the circle), so
-      // no glyph is drawn there. Slide a; the shaded disc is the horizon.
-      [
-        'tides around a spinning black hole (slide a)',
-        'view(x = -8..8, y = -6..6); M = 1; a = clamp(0.9, -1, 1); r = sqrt(x^2 + y^2); phi = atan2(y, x); ' +
-          'ds^2 = -(1 - 2M/r) dt^2 - 4 M a/r dt dphi + r^2/(r^2 - 2M r + a^2) dr^2 + (r^2 + a^2 + 2M a^2/r) dphi^2; ' +
-          'r < M + sqrt(M^2 - a^2); r = 2M; tidal',
-        'slider coordinates physics',
-      ],
-    ],
-  ],
-  [
     'systems',
     [
       [
@@ -1449,7 +1339,6 @@ export const COVERS: Record<string, string> = {
   'polar + plane coordinates': 'spiral traced in (r, θ)',
   'spherical + cylindrical': 'cylindrical chart',
   'drawing on surfaces': 'globe: a field, a loxodrome and a cap',
-  'curved space + spacetime': 'light bending around a black hole',
   '3D surfaces': 'gyroid',
   'fields in space': 'hydrogen 2p orbital',
   solids: 'icosahedron',

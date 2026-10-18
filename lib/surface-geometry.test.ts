@@ -355,9 +355,7 @@ describe('gaussian and meancurvature rows', () => {
     expect(readout([ON_SPHERE, 'S = (u, v, u^2 - v^2)', 'gaussian(S, 0, 0)'])).toBe('= -4');
   });
   it('say what they need', () => {
-    expect(last(['gaussian(x, y)']).error).toMatch(
-      /on\(…\) row, or its metric \(a ds\^2 row\), and this panel has neither/,
-    );
+    expect(last(['gaussian(x, y)']).error).toMatch(/on\(…\) row, and this panel has none/);
     expect(last(['C = (cos(u), sin(u), u)', 'gaussian(C)']).error).toMatch(/moves with both u and v/);
     expect(last(['gaussian(T)']).error).toMatch(/T is not a surface — define one first/);
     expect(last(['S = (u, v, u v)', 'gaussian(S, 1, 2, 3)']).error).toMatch(/takes a surface/);
@@ -451,7 +449,7 @@ describe('geodesic rows', () => {
     expect(arc(pts)).toBeCloseTo(30, 2);
   });
   it('says what it needs', () => {
-    expect(analyze(['geodesic((0.2, 0.3), (1, 1))']).r.error).toMatch(/this panel has neither/);
+    expect(analyze(['geodesic((0.2, 0.3), (1, 1))']).r.error).toMatch(/this panel has none/);
     expect(analyze([`S = ${SPHERE}`, 'geodesic(S, (0.2, x), (1, 1))']).r.error).toMatch(/found x/);
     expect(analyze([ON_TORUS, 'geodesic((0.2, y), (1, 1))']).r.error).toMatch(/, not y/);
     expect(analyze([`S = ${SPHERE}`, '2 geodesic(S, (0.2, 0.3), (1, 1))']).r.error).toMatch(/whole row/);

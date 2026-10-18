@@ -62,15 +62,7 @@ import {
   shadeNames,
   shadeRuns,
 } from '../lib/intshade.ts';
-import { compileProg, compileSampler, run as runProg } from '../lib/vm.ts';
-import {
-  type GainClock,
-  GAIN_THROTTLE_MS,
-  curvatureFloor,
-  curvatureGain,
-  gainRead,
-  isRealCurvature,
-} from '../lib/metric-curvature.ts';
+import { compileSampler } from '../lib/vm.ts';
 import { fieldScale } from '../lib/volume.ts';
 import { coordinateDragWriter, dragAxes } from '../lib/drag.ts';
 import { type SliderForm, sliderBounds, sliderForm, sliderValue, withBounds, writeSlider } from '../lib/slider.ts';
@@ -190,28 +182,8 @@ import {
   GEODESIC_MAX_POINTS,
   geodesicPlanKey,
   GEODESIC_MAX_STEPS,
-  metricOrientation,
-  metricValues,
   numericIn,
-  traceWindow,
 } from '../lib/surface-geometry.ts';
-import {
-  type ConeGlyphs,
-  type ConeView,
-  type Orient,
-  behindHorizon,
-  coneGlyphs,
-  coneViewKey,
-  indicatrixScale,
-} from '../lib/light-cone.ts';
-import {
-  type TidalRead,
-  type TidalScaleMemory,
-  heldTidalScale,
-  memoTides,
-  tidalGlyphs,
-  tidalReader,
-} from '../lib/tidal.ts';
 import { initPanelResize } from './panel-resize.ts';
 import { initPanelSwipe } from './panel-swipe.ts';
 import { initTheme, onThemeChange, theme, toggleTheme } from './theme.ts';
@@ -1566,196 +1538,18 @@ function geodesicNote(row: Equation, members: number) {
   reconcile();
 }
 
-/** A panel's metric as its light-cone rows read it — compiled once for all
- *  of them (a family of 256 lightcone(P) included), by its components — and
- *  the values it was compiled at. */
-const coneMetrics = new WeakMap<
-  readonly unknown[],
-  { names: string[]; key: string; read?: ReturnType<typeof metricValues>; orient?: Orient }
->();
-/** A light-cone row's glyphs, the names it reads, and what they were drawn
- *  at (its values and the view), by plan. */
-const coneRows = new WeakMap<CpuPlan, { names: string[]; glyphs?: ConeGlyphs; view?: string }>();
-/** The indicatrix scale of a panel's metric over a view, and which points
- *  a horizon cuts off (behindHorizon), by its components: worked out once a
- *  view for all the panel's light-cone rows (a family of 256 too), so
- *  lightcones and lightcone(P) agree — a lone lightcone(P) is drawn at the
- *  scale the lattice would be. */
-const coneScales = new WeakMap<
-  readonly unknown[],
-  { key: string; kappa: number; cut: (x: number, y: number) => boolean }
->();
-
-/**
- * The light-cone glyphs a lightcones or lightcone(P) row draws over the
- * view (lib/light-cone.ts), in x and y: worked out again only when the view
- * or a value the metric or the point reads changes.
- */
-function lightConesFor(eq: Equation, env: Record<string, number>, view: ConeView): ConeGlyphs {
-  const plot = eq.cpu as Extract<CpuPlan, { type: 'lightcone' }>;
-  const reads = (exprs: Expr[]) => [...freeVars({ kind: 'vec', items: exprs })].filter(n => n !== 'x' && n !== 'y');
-  let m = coneMetrics.get(plot.components);
-  if (!m) {
-    m = { names: reads([...plot.components, ...(plot.jacobian ?? []), ...(plot.future ?? [])]), key: '' };
-    coneMetrics.set(plot.components, m);
-  }
-  const key = JSON.stringify(m.names.map(n => env[n]));
-  if (m.key !== key || !m.read) {
-    m.key = key;
-    m.read = metricValues(plot, env);
-    m.orient = metricOrientation(plot.future, env);
-  }
-  let c = coneRows.get(plot);
-  if (!c) {
-    c = { names: reads(plot.at ? [...plot.at] : []) };
-    coneRows.set(plot, c);
-  }
-  // The view as far as the glyphs see it: which lattice cells, at what
-  // scale; a pan within a cell redraws the same glyphs.
-  const viewKey = coneViewKey(view);
-  const where = `${key}\n${JSON.stringify(c.names.map(n => env[n]))}\n${viewKey}`;
-  if (c.glyphs && c.view === where) return c.glyphs;
-  let scale: { kappa: number; cut: (x: number, y: number) => boolean } | undefined;
-  if (plot.n === 3) {
-    const scaleKey = `${key}\n${viewKey}`;
-    const known = coneScales.get(plot.components);
-    if (known?.key === scaleKey) scale = known;
-    else {
-      scale = { kappa: indicatrixScale(m.read, view), cut: horizonCut(plot, m.read, env, view) };
-      coneScales.set(plot.components, { key: scaleKey, ...scale });
-    }
-  }
-  let at: [number, number][] | undefined;
-  if (plot.at) {
-    const out = new Float64Array(2);
-    numericIn(plot.at, ['x', 'y'], env)(NaN, NaN, out);
-    at = [[out[0], out[1]]];
-  }
-  c.glyphs = coneGlyphs(m.read, view, {
-    ...(at ? { at } : {}),
-    ...(scale ? { kappa: scale.kappa, cut: scale.cut } : {}),
-    ...(m.orient ? { orient: m.orient } : {}),
-  });
-  c.view = where;
-  return c.glyphs;
-}
-
-/** The names a panel's metric reads (its components and Jacobian), and
- *  which points a horizon cuts off from the outside over a view at their
- *  values (lib/light-cone.ts behindHorizon), by its components: shared by
- *  the panel's light-cone and tidal rows. */
-const horizonCuts = new WeakMap<
-  readonly unknown[],
-  { names: string[]; key?: string; cut?: (x: number, y: number) => boolean }
->();
-
-/** behindHorizon of a panel's metric over a view, worked out once for its
- *  values and the lattice cells in view (coneViewKey). */
-function horizonCut(
-  metric: { components: readonly Expr[]; jacobian?: readonly Expr[] },
-  read: ReturnType<typeof metricValues>,
-  env: Record<string, number>,
-  view: ConeView,
-): (x: number, y: number) => boolean {
-  let h = horizonCuts.get(metric.components);
-  if (!h) {
-    const items = [...metric.components, ...(metric.jacobian ?? [])];
-    h = { names: [...freeVars({ kind: 'vec', items })].filter(n => n !== 'x' && n !== 'y') };
-    horizonCuts.set(metric.components, h);
-  }
-  const key = `${JSON.stringify(h.names.map(n => env[n]))}\n${coneViewKey(view)}`;
-  if (h.key !== key || !h.cut) {
-    h.key = key;
-    h.cut = behindHorizon(read, view);
-  }
-  return h.cut;
-}
-
-/** A panel's tides as its tidal rows read them — compiled once for all of
- *  them (a family of 256 tidal(P) included), by its curvature expressions,
- *  each point remembered (memoTides) while the values stay — with its
- *  metric for the horizon cut-off. */
-const tidalMetrics = new WeakMap<
-  readonly unknown[],
-  { names: string[]; key: string; read?: TidalRead; metric?: ReturnType<typeof metricValues> }
->();
-/** A tidal row's glyphs, the names its point reads, and what they were
- *  drawn at, by plan. */
-const tidalRows = new WeakMap<CpuPlan, { names: string[]; glyphs?: ConeGlyphs; view?: string }>();
-/** The panel's tidal scale over a view (lib/tidal.ts tidalScale), shared by
- *  its tidal rows so tidal and tidal(P) agree, and kept through pans while
- *  the median allows. */
-const tidalScales = new WeakMap<readonly unknown[], { memory: TidalScaleMemory; scale: number; view?: string }>();
-
-/**
- * The tidal glyphs a tidal or tidal(P) row draws over the view
- * (lib/tidal.ts), in x and y: worked out again only when the view's lattice
- * cells or a value the metric or the point reads changes.
- */
-function tidesFor(eq: Equation, env: Record<string, number>, view: ConeView): ConeGlyphs {
-  const plot = eq.cpu as Extract<CpuPlan, { type: 'tidal' }>;
-  const reads = (exprs: readonly Expr[]) =>
-    [...freeVars({ kind: 'vec', items: [...exprs] })].filter(n => n !== 'x' && n !== 'y' && !plot.params.includes(n));
-  let m = tidalMetrics.get(plot.curvature);
-  if (!m) {
-    m = {
-      names: reads([...plot.curvature, ...(plot.chart ?? []), ...plot.components, ...(plot.jacobian ?? [])]),
-      key: '',
-    };
-    tidalMetrics.set(plot.curvature, m);
-  }
-  const key = JSON.stringify(m.names.map(n => env[n]));
-  if (m.key !== key || !m.read) {
-    m.key = key;
-    m.read = memoTides(tidalReader(plot, env));
-    m.metric = plot.n === 3 ? metricValues(plot, env) : undefined;
-  }
-  let c = tidalRows.get(plot);
-  if (!c) {
-    c = { names: reads(plot.at ? [...plot.at] : []) };
-    tidalRows.set(plot, c);
-  }
-  const viewKey = coneViewKey(view);
-  const where = `${key}\n${JSON.stringify(c.names.map(n => env[n]))}\n${viewKey}`;
-  if (c.glyphs && c.view === where) return c.glyphs;
-  const cut = m.metric ? horizonCut(plot, m.metric, env, view) : undefined;
-  // Held through pans and zooms while the values stay; afresh when they
-  // change, so a slider's history does not set the scale.
-  let known = tidalScales.get(plot.curvature);
-  if (!known) tidalScales.set(plot.curvature, (known = { memory: {}, scale: NaN }));
-  if (known.view !== viewKey || known.memory.values !== key) {
-    known.scale = heldTidalScale(known.memory, m.read, view, key, cut);
-    known.view = viewKey;
-  }
-  let at: [number, number][] | undefined;
-  if (plot.at) {
-    const out = new Float64Array(2);
-    numericIn(plot.at, ['x', 'y'], env)(NaN, NaN, out);
-    at = [[out[0], out[1]]];
-  }
-  c.glyphs = tidalGlyphs(m.read, view, { ...(at ? { at } : {}), scale: known.scale, ...(cut ? { cut } : {}) });
-  c.view = where;
-  return c.glyphs;
-}
-
 /**
  * A geodesic's points, traced in the trace worker (lib/surface-geometry.ts
  * geodesicPath) whenever a value it reads changes — a slider, t, a dragged
  * point — and never on this thread. The last one traced keeps drawing until
  * the next arrives, so dragging stays smooth while the worker catches up.
  */
-function geodesicFor(
-  eq: Equation,
-  env: Record<string, number>,
-  /** The box a metric's geodesic is traced over (traceWindow). */
-  window?: GeodesicOptions['domain'],
-): Float32Array {
+function geodesicFor(eq: Equation, env: Record<string, number>): Float32Array {
   const plot = eq.cpu as Extract<CpuPlan, { type: 'geodesic' }>;
   let names = geodesicReads.get(plot);
   if (!names) {
     const exprs = [...plot.surface, ...plot.derivatives, ...plot.start, ...plot.direction, ...plot.domain];
     if (plot.length) exprs.push(plot.length);
-    if (plot.metric) exprs.push(...plot.metric.components, ...plot.metric.derivatives, ...(plot.metric.jacobian ?? []));
     names = [...freeVars({ kind: 'vec', items: exprs })].filter(n => !plot.params.includes(n));
     geodesicReads.set(plot, names);
   }
@@ -1780,7 +1574,7 @@ function geodesicFor(
   // The plan is in the key, so an edit to a row it reads (S, the list of
   // directions, the panel's surface) traces it again; the last path keeps
   // drawing until the new one arrives.
-  const key = `${plan}\n${member}\n${JSON.stringify(names.map(n => env[n]))}${window ? `\n${JSON.stringify(window)}` : ''}`;
+  const key = `${plan}\n${member}\n${JSON.stringify(names.map(n => env[n]))}`;
   if (slot.key === key || slot.pending === key) return slot.pts;
   slot.pending = key;
   const { type: _, ...spec } = plot;
@@ -1795,19 +1589,9 @@ function geodesicFor(
         spec,
         env: values,
         maxSteps: Math.min(GEODESIC_MAX_STEPS, Math.ceil(GEODESIC_FAMILY_STEPS / members)),
-        // A metric's family shares more time — its members may each cross a
-        // wide box, and a gallery fan of 33 should draw whole when cold —
-        // but at most three times as much in all: it holds the trace queue.
-        ms: plot.metric
-          ? Math.max(GEODESIC_FAMILY_MS / members, Math.min(150, (3 * GEODESIC_FAMILY_MS) / members))
-          : GEODESIC_FAMILY_MS / members,
-        // A metric's member may use the whole family's share; a surface's is
-        // carried onto it every frame, so held to GEODESIC_MAX_POINTS.
-        maxPoints: Math.min(
-          plot.metric ? GEODESIC_FAMILY_POINTS : GEODESIC_MAX_POINTS,
-          Math.max(300, Math.floor(GEODESIC_FAMILY_POINTS / members)),
-        ),
-        ...(window ? { window } : {}),
+        ms: GEODESIC_FAMILY_MS / members,
+        // Carried onto its surface every frame, so held to GEODESIC_MAX_POINTS.
+        maxPoints: Math.min(GEODESIC_MAX_POINTS, Math.max(300, Math.floor(GEODESIC_FAMILY_POINTS / members))),
       },
       residuals: [],
       dim: plot.dim,
@@ -1858,120 +1642,6 @@ function surfaceFieldGain(
   );
   fieldGains.set(plot, { key, surface, gain });
   return gain;
-}
-
-/** An expression in x, y and named values, compiled once (lib/vm.ts) and
- *  read with the values of the moment; NaN where it cannot be had. */
-interface FieldReader {
-  set(env: Readonly<Record<string, number>>): void;
-  at(x: number, y: number): number;
-}
-function fieldReader(e: Expr): FieldReader {
-  const slots = new Map(['x', 'y', ...freeVars(e)].filter((n, k, all) => all.indexOf(n) === k).map((n, k) => [n, k]));
-  const vars = new Float64Array(slots.size);
-  let prog: ReturnType<typeof compileProg> | null = null;
-  try {
-    prog = compileProg(e, slots);
-  } catch {
-    /* evaluated */
-  }
-  const stack = new Float64Array(Math.max(1, prog?.depth ?? 1));
-  let values: Readonly<Record<string, number>> = {};
-  return {
-    set(env) {
-      values = env;
-      for (const [n, k] of slots) vars[k] = env[n] ?? NaN;
-    },
-    at(x, y) {
-      vars[0] = x;
-      vars[1] = y;
-      try {
-        return prog ? runProg(prog, vars, stack) : evaluate(e, { ...values, x, y });
-      } catch {
-        return NaN;
-      }
-    },
-  };
-}
-
-/** A view box as the gain is read over, [[x0, x1], [y0, y1]]. */
-type ViewBox = GeodesicOptions['domain'];
-
-/**
- * The gain gaussian(x, y) on a plane panel with a metric (a ds^2 row) is
- * shaded with over the view (lib/metric-curvature.ts curvatureGain): 1.5
- * over its typical size where it is real, 0 where it is rounding. Its
- * evaluators are compiled once per plot, and gainRead says when to read it
- * again: a fine read (25 × 25) costs ~5 ms for a metric in its own
- * coordinates, and is made every time; one pulled back to x and y can cost
- * ten times that, and is read on 13 × 13 while things move, finely at least
- * twice a second and once they stand still.
- */
-const viewGains = new WeakMap<
-  CpuPlan,
-  GainClock & {
-    names: string[];
-    K: FieldReader;
-    size: FieldReader;
-    gain: number;
-    timer?: ReturnType<typeof setTimeout>;
-  }
->();
-function viewFieldGain(
-  plot: Extract<CpuPlan, { type: 'scalar2d' }>,
-  env: Record<string, number>,
-  box: ViewBox,
-): number {
-  let c = viewGains.get(plot);
-  if (!c) {
-    const exprs = plot.rounding ? [plot.expr, plot.rounding] : [plot.expr];
-    const names = [...freeVars({ kind: 'vec', items: exprs })].filter(n => n !== 'x' && n !== 'y');
-    const rounding = plot.rounding;
-    c = {
-      names,
-      K: fieldReader(plot.expr),
-      size: rounding ? fieldReader(rounding) : { set() {}, at: () => 0 },
-      gain: 0,
-      at: 0,
-      fine: 0,
-    };
-    viewGains.set(plot, c);
-  }
-  const values = JSON.stringify(c.names.map(n => env[n]));
-  const now = performance.now();
-  const { read, fine, settle } = gainRead(c, box, values, now);
-  if (settle) {
-    // A fine read once things stand still.
-    const entry = c;
-    clearTimeout(entry.timer);
-    entry.timer = setTimeout(() => {
-      entry.stale = true;
-      requestRender();
-    }, GAIN_THROTTLE_MS);
-  }
-  if (!read) return c.gain;
-  if (fine) clearTimeout(c.timer);
-  c.K.set(env);
-  c.size.set(env);
-  const { K, size } = c;
-  const gain = curvatureGain(
-    (x, y) => K.at(x, y),
-    (x, y) => size.at(x, y),
-    box,
-    { pulled: !!plot.pulled, n: fine ? 24 : 12 },
-  );
-  // A coarse read that misses a small patch of K keeps the last gain.
-  if (fine || gain > 0) c.gain = gain;
-  const done = performance.now();
-  if (fine) {
-    c.cost = done - now;
-    c.fine = done;
-  }
-  c.values = values;
-  c.box = box.map(r => [r[0], r[1]]) as unknown as ViewBox;
-  c.at = done;
-  c.stale = false;
-  return c.gain;
 }
 
 /** The gain a surface coloured by its curvature (gaussian(S)) shades it
@@ -2593,12 +2263,7 @@ function render() {
         // there, a panel's surface included): lifted a hair toward the eye so
         // the surface does not hide it.
         if (plot.type === 'geodesic') {
-          // A metric's (in a 3D panel, on z = 0): over a box round what the
-          // camera looks at, as wide as it stands off.
-          const [tx, ty] = camera.target;
-          const reach = camera.radius;
-          const box = plot.metric ? traceWindow([tx - reach, ty - reach], [tx + reach, ty + reach]) : undefined;
-          const pts = geodesicFor(eq, { ...constEnv, t: time }, box);
+          const pts = geodesicFor(eq, { ...constEnv, t: time });
           const lifted = towardEye(camera);
           const raised = new Float32Array(pts.length);
           for (let k = 0; k + 2 < pts.length; k += 3) raised.set(lifted([pts[k], pts[k + 1], pts[k + 2]]), k);
@@ -2990,22 +2655,7 @@ function render() {
             (extras.regions ??= []).push({ tris: sampleRegion(eq, plot.comps), fill: cssColorA(color, 0.22) });
             break;
           case 'scalar2d': {
-            // gaussian(x, y) under a metric: shaded to its own size in view.
-            let gain: number | undefined;
-            if (plot.autoscale) {
-              const { halfW, halfH } = hoverHalfSpan();
-              gain = viewFieldGain(plot, { ...constEnv, ...eq.gpu?.uniforms, t: time }, [
-                [view.cx - halfW, view.cx + halfW],
-                [view.cy - halfH, view.cy + halfH],
-              ]);
-            }
-            layers.scalars.push({
-              ...gpuFor(eq, 'scalar2d'),
-              color,
-              params,
-              uniforms,
-              ...(gain !== undefined ? { gain } : {}),
-            });
+            layers.scalars.push({ ...gpuFor(eq, 'scalar2d'), color, params, uniforms });
             break;
           }
           case 'complex2d':
@@ -3047,41 +2697,6 @@ function render() {
           case 'orbit':
             extras.polylines.push({ pts: orbitFor(eq).flat(), color: css });
             break;
-          // A geodesic of the panel's metric (a ds^2 row), traced in the
-          // worker over a box round the window and drawn in x and y.
-          case 'geodesic': {
-            const box = traceWindow([xmin, view.cy - halfH], [xmax, view.cy + halfH]);
-            const pts = geodesicFor(eq, env, box);
-            const xy: number[] = [];
-            for (let k = 0; k + 2 < pts.length; k += 3) xy.push(pts[k], pts[k + 1]);
-            if (xy.length >= 4) extras.polylines.push({ pts: xy, color: css });
-            break;
-          }
-          // The light cones of the panel's metric, sized in CSS pixels.
-          case 'lightcone': {
-            const upp = view.upp * dpr;
-            const glyphs = lightConesFor(eq, env, {
-              lo: [xmin, view.cy - halfH],
-              hi: [xmax, view.cy + halfH],
-              upp,
-              uppY: upp / (view.ratio ?? 1),
-            });
-            (extras.glyphs ??= []).push({ ...glyphs, color: css, fill: cssColorA(color, 0.2) });
-            break;
-          }
-          // The tidal forces of the panel's metric on an observer at rest:
-          // solid bars and arrowheads, sized in CSS pixels.
-          case 'tidal': {
-            const upp = view.upp * dpr;
-            const glyphs = tidesFor(eq, env, {
-              lo: [xmin, view.cy - halfH],
-              hi: [xmax, view.cy + halfH],
-              upp,
-              uppY: upp / (view.ratio ?? 1),
-            });
-            (extras.glyphs ??= []).push({ ...glyphs, color: css, fill: css, lineWidth: 1.5, lineAlpha: 1 });
-            break;
-          }
           case 'automaton': {
             const params = (eq.cls?.params ?? []).map(p => env[p]);
             if (plot.dims === 2) {
@@ -6010,50 +5625,6 @@ function updateHover(clientX: number, clientY: number) {
           : ['on curve', `x = ${read(maps?.x, hit.x, sx)}`, `y = ${read(maps?.y, hit.y, sy)}`];
         best = { pt: { x: hit.x, y: hit.y, lines }, color: cssColor(baseColor(eq)), panel: cur };
       }
-    }
-  }
-  // Nor a curve: over a panel painted by its metric's curvature
-  // (gaussian(x, y)), K under the pointer.
-  if (!best && !panelMaps(cur)) {
-    const [wx, wy] = toMath(clientX, clientY);
-    const env = { ...constEnv, t: graphTime(), x: wx, y: wy };
-    const uppCss = view.upp * (window.devicePixelRatio || 1);
-    for (const eq of equations) {
-      const plot = eq.cpu;
-      if (panelOf(eq) !== here || eq.error || plot?.type !== 'scalar2d' || !plot.autoscale) continue;
-      let value: number;
-      try {
-        value = evaluate(plot.expr, env);
-      } catch {
-        continue;
-      }
-      if (!Number.isFinite(value)) continue;
-      // Rounding (a flat metric written in fields of x and y) reads 0.
-      try {
-        const { halfW, halfH } = hoverHalfSpan();
-        const floor = curvatureFloor(
-          [
-            [view.cx - halfW, view.cx + halfW],
-            [view.cy - halfH, view.cy + halfH],
-          ],
-          !!plot.pulled,
-        );
-        const size = plot.rounding ? evaluate(plot.rounding, env) : 0;
-        if (!isRealCurvature(value, size, floor)) value = 0;
-      } catch {
-        /* as it is */
-      }
-      const name = eq.text.length > 24 ? `${eq.text.slice(0, 23)}…` : eq.text;
-      best ??= {
-        pt: {
-          x: wx,
-          y: wy,
-          lines: ['curvature', `x = ${fmtTraced(wx, uppCss)}`, `y = ${fmtTraced(wy, uppCss / (view.ratio ?? 1))}`],
-        },
-        color: cssColor(baseColor(eq)),
-        panel: cur,
-      };
-      best.pt.lines.push(`${name} ${valueReadout(value)}`);
     }
   }
   setHover(best);

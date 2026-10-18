@@ -290,12 +290,6 @@ export function surfaceMapping(object: MathObject): SurfaceMapping | null {
     case 'note':
     case 'tuple':
       return 'none';
-    // A panel drawn on a surface has that surface's metric: no ds^2 row
-    // (lib/analysis.ts refuses one there).
-    case 'metric':
-    case 'lightcone':
-    case 'tidal':
-      return null;
     case 'curve':
       return object.form === 'parametric' ? 'carry' : 'paint';
     case 'region':

@@ -51,7 +51,7 @@ import {
   toProbability,
   variableRow,
 } from './dist.ts';
-import { type Expr, MAP, childrenOf, evaluate, freeVars, parseExpr, substVars } from './expr.ts';
+import { type Expr, MAP, childrenOf, freeVars, parseExpr, substVars } from './expr.ts';
 import { usesComplex } from './complex.ts';
 import { intervalsIn, lengthOf, replaceIntervals } from './interval.ts';
 import { PAINT_CALL, lowerGeom } from './geom.ts';
@@ -68,10 +68,7 @@ import { type ViewSpec, parseViewRow } from './view.ts';
 import { MAX_PANELS, gridCoordinateProblem, isDividerRow } from './panels.ts';
 import { type AxisMaps, unmappedReason, axisMapping, inlineFields, mapRowExpr, tensorJacobian } from './axis-map.ts';
 import { OFF_SURFACE_MESSAGE, type SurfaceMap, onSurface, surfaceMapping } from './surface-map.ts';
-import { type MetricSpec, type Params, smoothPartial, surfaceDerivatives } from './surface-geometry.ts';
-import { METRIC_ROW, type PanelMetric, parseMetric } from './metric.ts';
-import { type Curvature, metricCurvature } from './metric-curvature.ts';
-import { type TidalSpec, tidalSpec } from './tidal.ts';
+import { type Params, smoothPartial, surfaceDerivatives } from './surface-geometry.ts';
 import { FLOW_NODE_LIMIT } from './flow.ts';
 import { exceedsNodes } from './size.ts';
 import { lowerCoordinateFlow } from './coordinate.ts';
@@ -618,14 +615,6 @@ const GEODESIC_USAGE =
   'geodesic takes a surface, where to start on it and which way: geodesic(S, (0.5, 0.5), (1, 0)) with S = (u, v, u^2 - v^2), and optionally how far, geodesic(S, P, (1, 0), 4).';
 const PANEL_GEODESIC_USAGE =
   'On a panel drawn on a surface, geodesic takes where to start and which way, in x and y: geodesic((0, 0.5), (1, 0)) or geodesic(P, (1, 1), 6).';
-const METRIC_GEODESIC_USAGE =
-  'On a panel with a metric (a ds^2 row), geodesic takes where to start and which way in x and y — for a particle in a spacetime, its velocity d(x, y)/dt: geodesic((10, 0), (0, 0.3)), or with how far, geodesic(P, v, 200).';
-const LIGHTRAY_USAGE =
-  'lightray takes where a light ray starts and which way, in x and y: lightray((-30, 4), (1, 0)), or with how far, lightray(P, d, 60).';
-
-/** A panel's metric for its geodesic rows: what its ds^2 row gives, or why
- *  that row is in error. */
-type PanelMetricState = { metric: PanelMetric } | { error: string };
 
 /**
  * A geodesic row: geodesic(S, (u0, v0), (du, dv)[, L]), or on a panel drawn
@@ -636,17 +625,10 @@ type PanelMetricState = { metric: PanelMetric } | { error: string };
  * traced in the trace worker, so the start, direction and length may move
  * with sliders, t and named points. A list of starts, directions or lengths draws one
  * geodesic per element, a family.
- *
- * On a plane panel with a metric (a ds^2 row, lib/metric.ts),
- * geodesic(P, d[, L]) follows that metric in x and y — at unit speed, or, in
- * a spacetime, as a massive particle with coordinate velocity d — and
- * lightray(P, d[, L]) is a light ray in it.
  */
 function classifyGeodesic(
-  name: 'geodesic' | 'lightray',
   args: readonly Expr[],
   surface: SurfaceMap | undefined,
-  metricState: PanelMetricState | undefined,
   getFn: GetFn,
   ropts: ResolveOpts,
   lower: (e: Expr) => Expr,
@@ -655,7 +637,7 @@ function classifyGeodesic(
 ): Classified {
   let operand: ReturnType<typeof surfaceOperand> | null = null;
   let failure: unknown = null;
-  if (name === 'geodesic' && args.length >= 3) {
+  if (args.length >= 3) {
     try {
       // The surface as the resolver writes it — a named one or a tuple, over
       // u's and v's intervals where they are ones; a function of two
@@ -669,68 +651,28 @@ function classifyGeodesic(
   }
   const panelForm = !operand && (args.length === 2 || args.length === 3);
   const onPanel = panelForm && !!surface;
-  const onMetric = panelForm && !surface && !!metricState;
-  if (name === 'lightray') {
-    if (!metricState || surface)
-      throw new Error(
-        `lightray(P, d) traces a light ray of its panel's metric, a ds^2 row (like ds^2 = -(1 - 2/r) dt^2 + dr^2/(1 - 2/r) + r^2 dphi^2), and this panel has none. ${LIGHTRAY_USAGE}`,
-      );
-    if (!panelForm) throw new Error(LIGHTRAY_USAGE);
-  }
-  if (!operand && !onPanel && !onMetric) {
+  if (!operand && !onPanel) {
     if (args.length === 2)
       throw new Error(
-        `geodesic(P, d) draws on its panel's surface (an on(…) row) or under its metric (a ds^2 row), and this panel has neither. ${GEODESIC_USAGE}`,
+        `geodesic(P, d) draws on its panel's surface (an on(…) row), and this panel has none. ${GEODESIC_USAGE}`,
       );
     throw failure instanceof Error && args.length >= 3 ? failure : new Error(GEODESIC_USAGE);
   }
   if (operand && args.length > 4) throw new Error(GEODESIC_USAGE);
-  let metric: MetricSpec | undefined;
-  if (onMetric) {
-    if ('error' in metricState!) throw new Error("This panel's metric (its ds^2 row) has an error.");
-    const m = metricState!.metric;
-    if (name === 'lightray' && m.n === 2 && !m.lorentzian)
-      throw new Error(
-        `lightray needs a spacetime: a metric with a time coordinate, like ds^2 = -dt^2 + dx^2 + dy^2, or a spacetime diagram, like ds^2 = -dy^2 + dx^2. This one, in ${m.coords.join(' and ')}, is positive definite everywhere it was checked; draw its geodesics with geodesic(P, d).`,
-      );
-    metric = {
-      n: m.n,
-      components: m.components,
-      derivatives: m.derivatives,
-      ...(m.jacobian ? { jacobian: m.jacobian } : {}),
-      // With a diagram's signature anywhere, a geodesic takes the kind at
-      // its start (metricStart): mixed metrics are planes in places.
-      motion: m.n === 2 && !m.lorentzian ? 'riemannian' : name === 'lightray' ? 'null' : 'timelike',
-      ...(m.time !== undefined ? { time: m.time } : {}),
-    };
-  }
-  const usage =
-    name === 'lightray'
-      ? LIGHTRAY_USAGE
-      : onMetric
-        ? METRIC_GEODESIC_USAGE
-        : onPanel
-          ? PANEL_GEODESIC_USAGE
-          : GEODESIC_USAGE;
-  const params: Params = onPanel || onMetric ? ['x', 'y'] : ['u', 'v'];
+  const name = 'geodesic';
+  const usage = onPanel ? PANEL_GEODESIC_USAGE : GEODESIC_USAGE;
+  const params: Params = onPanel ? ['x', 'y'] : ['u', 'v'];
   const num = (value: number): Expr => ({ kind: 'num', value });
-  const items: readonly Expr[] = operand
-    ? operand.items
-    : onPanel
-      ? surface!.embed
-      : [{ kind: 'var', name: 'x' }, { kind: 'var', name: 'y' }, num(0)];
+  const items: readonly Expr[] = operand ? operand.items : surface!.embed;
   // The parameters' ranges: u's and v's intervals where they are defined as
-  // ones, else [0, 1]; the panel's x and y ranges. A metric's geodesic is
-  // traced over the window it is drawn in.
+  // ones, else [0, 1]; the panel's x and y ranges.
   const range = (over: Expr | undefined): Expr[] =>
     over?.kind === 'call' ? [over.args[0], over.args[1]] : [num(0), num(1)];
   const domain: Expr[] = operand
     ? [...range(operand.over.u), ...range(operand.over.v)]
-    : onPanel
-      ? [...surface!.x, ...surface!.y].map(num)
-      : [];
+    : [...surface!.x, ...surface!.y].map(num);
   // The connection is formed from these at each point as it is traced.
-  const derivatives = metric ? [] : surfaceDerivatives(items, smoothPartial, params);
+  const derivatives = surfaceDerivatives(items, smoothPartial, params);
   if (exceedsNodes(derivatives, 4 * FLOW_NODE_LIMIT))
     throw new Error('This surface is too large to trace geodesics on.');
   // Where it starts, which way and how far, each one value or a list.
@@ -752,18 +694,7 @@ function classifyGeodesic(
     });
   };
   const starts = elements(rest[0], 2, 'where it starts');
-  // A particle's velocity in a spacetime; in a metric of mixed signature, a
-  // plane's direction where it starts positive definite.
-  const mixed = !!metricState && 'metric' in metricState && !!metricState.metric.mixed;
-  const directions = elements(
-    rest[1],
-    2,
-    metric?.motion !== 'timelike'
-      ? 'its direction'
-      : mixed
-        ? 'its velocity (or direction, in a plane)'
-        : 'its velocity',
-  );
+  const directions = elements(rest[1], 2, 'its direction');
   const lengths = rest[2] ? elements(rest[2], 1, 'its length') : [[]];
   const n = Math.max(starts.length, directions.length, lengths.length);
   for (const list of [starts, directions, lengths])
@@ -771,8 +702,7 @@ function classifyGeodesic(
       throw new Error(
         `${name}: lists of starts, directions and lengths go element by element, so they must be as long.`,
       );
-  if (n > 64)
-    throw new Error(`A family of ${name === 'lightray' ? 'light rays' : 'geodesics'} has at most 64 members.`);
+  if (n > 64) throw new Error('A family of geodesics has at most 64 members.');
   const member = (k: number): Classified => {
     const pick = <T>(list: readonly T[]) => list[list.length === 1 ? 0 : k];
     const object: MathObject = {
@@ -785,18 +715,9 @@ function classifyGeodesic(
       direction: pick(directions),
       ...(rest[2] ? { length: pick(lengths)[0] } : {}),
       domain,
-      ...(metric ? { metric } : {}),
     };
     const used = new Set<string>();
-    for (const e of [
-      ...items,
-      ...derivatives,
-      ...domain,
-      ...pick(starts),
-      ...pick(directions),
-      ...pick(lengths),
-      ...(metric ? [...metric.components, ...metric.derivatives, ...(metric.jacobian ?? [])] : []),
-    ])
+    for (const e of [...items, ...derivatives, ...domain, ...pick(starts), ...pick(directions), ...pick(lengths)])
       for (const name of freeVars(e)) used.add(name);
     return {
       object,
@@ -815,161 +736,11 @@ function classifyGeodesic(
   };
 }
 
-const LIGHTCONE_USAGE =
-  'lightcone(P) draws the light cone at a point, in x and y: lightcone((4, 0)), or a list, lightcone(([3..8], 0)); lightcones alone on a row draws them over the panel.';
-
-/** A `lightcones` row: the light cones of its panel's metric on a lattice. */
-const LIGHTCONES_ROW = /^\s*lightcones\s*$/;
-
-/**
- * A `lightcones` row (no `at`), or lightcone(P): the light cones of the
- * panel's metric (lib/light-cone.ts), drawn as it is in view — a spacetime
- * diagram's wedges, or with a time beside x and y, the ellipses of the
- * speeds light can have. A list of points draws one each, a family.
- */
-function classifyLightCone(
-  at: Expr | undefined,
-  surface: SurfaceMap | undefined,
-  metricState: PanelMetricState | undefined,
-  lower: (e: Expr) => Expr,
-  constNames: ReadonlySet<string>,
-  moving: ReadonlySet<string>,
-): Classified {
-  const what = at ? 'lightcone(P)' : 'lightcones';
-  if (!metricState || surface)
-    throw new Error(
-      `${what} draws the light cones of its panel's metric, a ds^2 row — a spacetime, like ds^2 = -(1 - 2/r) dt^2 + dr^2/(1 - 2/r) + r^2 dphi^2, or a spacetime diagram, like ds^2 = -dy^2 + dx^2 — and this panel has none.`,
-    );
-  if ('error' in metricState) throw new Error("This panel's metric (its ds^2 row) has an error.");
-  const m = metricState.metric;
-  if (m.n === 2 && !m.lorentzian)
-    throw new Error(
-      `A Riemannian metric has no light cones: this one, in ${m.coords.join(' and ')}, is positive definite everywhere it was checked. A spacetime has a time, like -dt^2 + dx^2 + dy^2, or one minus sign, like -dy^2 + dx^2.`,
-    );
-  const metric = {
-    n: m.n,
-    components: m.components,
-    ...(m.jacobian ? { jacobian: m.jacobian } : {}),
-    ...(m.future ? { future: m.future } : {}),
-  };
-  const metricReads = new Set(
-    [...m.components, ...(m.jacobian ?? []), ...(m.future ?? [])].flatMap(e => [...freeVars(e)]),
-  );
-  const member = (point: readonly Expr[] | undefined): Classified => {
-    const used = new Set(metricReads);
-    for (const e of point ?? []) for (const n of freeVars(e)) used.add(n);
-    return {
-      object: { kind: 'lightcone', ...metric, ...(point ? { at: point } : {}) },
-      animated: [...used].some(n => n === 't' || moving.has(n)),
-      needs3D: false,
-      params: [...used].filter(n => constNames.has(n)).sort(),
-    };
-  };
-  if (!at) return member(undefined);
-  const lowered = lower(at);
-  const each = lowered.kind === 'list' ? lowered.items : [lowered];
-  const points = each.map(item => {
-    if (item.kind !== 'vec' || item.items.length !== 2 || item.items.some(p => p.kind === 'vec' || p.kind === 'list'))
-      throw new Error(`lightcone: its point is a pair, like (4, 0). ${LIGHTCONE_USAGE}`);
-    for (const p of item.items)
-      for (const n of freeVars(p))
-        if (n !== 't' && !constNames.has(n))
-          throw new Error(
-            `lightcone: its point is numbers, sliders, t and named points${n === 'x' || n === 'y' ? `, not ${n}` : ` (found ${n})`}. ${LIGHTCONE_USAGE}`,
-          );
-    return item.items;
-  });
-  if (points.length > 256) throw new Error('A family of light cones has at most 256 members.');
-  const members = points.map(member);
-  if (members.length === 1) return members[0];
-  return {
-    object: { kind: 'family', members },
-    animated: members.some(c => c.animated),
-    needs3D: false,
-    params: [...new Set(members.flatMap(c => c.params))].sort(),
-  };
-}
-
-const TIDAL_USAGE =
-  'tidal(P) draws the tidal forces at a point, in x and y: tidal((6, 0)), or a list, tidal(([4..9], 0)); tidal alone on a row draws them over the panel.';
-
-/** A `tidal` row: the tidal forces of its panel's metric on a lattice. */
-const TIDAL_ROW = /^\s*tidal\s*$/;
-
-/**
- * A `tidal` row (no `at`), or tidal(P): the tidal forces of the panel's
- * metric on an observer held at rest (lib/tidal.ts), drawn as glyphs as
- * it is in view. It needs a time: a metric with one beside the panel's two
- * coordinates, or a spacetime diagram. A list of points draws one each, a
- * family. `spec` makes the panel's curvature expressions, once.
- */
-function classifyTidal(
-  at: Expr | undefined,
-  surface: SurfaceMap | undefined,
-  metricState: PanelMetricState | undefined,
-  spec: () => Omit<TidalSpec, 'at'>,
-  lower: (e: Expr) => Expr,
-  constNames: ReadonlySet<string>,
-  moving: ReadonlySet<string>,
-): Classified {
-  const what = at ? 'tidal(P)' : 'tidal';
-  if (!metricState || surface)
-    throw new Error(
-      `${what} draws the tidal forces of its panel's metric, a ds^2 row with a time — like ds^2 = -(1 - 2/r) dt^2 + dr^2/(1 - 2/r) + r^2 dphi^2 — and this panel has none.`,
-    );
-  if ('error' in metricState) throw new Error("This panel's metric (its ds^2 row) has an error.");
-  const m = metricState.metric;
-  if (m.n === 2 && !m.lorentzian)
-    throw new Error(
-      `Tidal forces need a time: write the ds^2 with a dt term, like -(1 - 2/r) dt^2 + dr^2/(1 - 2/r) + r^2 dphi^2. This one, in ${m.coords.join(' and ')}, is a Riemannian plane.`,
-    );
-  const tides = spec();
-  const metricReads = new Set(
-    [...tides.curvature, ...(tides.chart ?? []), ...tides.components, ...(tides.jacobian ?? [])].flatMap(e => [
-      ...freeVars(e),
-    ]),
-  );
-  for (const p of tides.params) metricReads.delete(p);
-  const member = (point: readonly Expr[] | undefined): Classified => {
-    const used = new Set(metricReads);
-    for (const e of point ?? []) for (const n of freeVars(e)) used.add(n);
-    return {
-      object: { kind: 'tidal', ...tides, ...(point ? { at: point } : {}) },
-      animated: [...used].some(n => n === 't' || moving.has(n)),
-      needs3D: false,
-      params: [...used].filter(n => constNames.has(n)).sort(),
-    };
-  };
-  if (!at) return member(undefined);
-  const lowered = lower(at);
-  const each = lowered.kind === 'list' ? lowered.items : [lowered];
-  const points = each.map(item => {
-    if (item.kind !== 'vec' || item.items.length !== 2 || item.items.some(p => p.kind === 'vec' || p.kind === 'list'))
-      throw new Error(`tidal: its point is a pair, like (6, 0). ${TIDAL_USAGE}`);
-    for (const p of item.items)
-      for (const n of freeVars(p))
-        if (n !== 't' && !constNames.has(n))
-          throw new Error(
-            `tidal: its point is numbers, sliders, t and named points${n === 'x' || n === 'y' ? `, not ${n}` : ` (found ${n})`}. ${TIDAL_USAGE}`,
-          );
-    return item.items;
-  });
-  if (points.length > 256) throw new Error('A family of tidal glyphs has at most 256 members.');
-  const members = points.map(member);
-  if (members.length === 1) return members[0];
-  return {
-    object: { kind: 'family', members },
-    animated: members.some(c => c.animated),
-    needs3D: false,
-    params: [...new Set(members.flatMap(c => c.params))].sort(),
-  };
-}
-
 /**
  * The surface of a row that is gaussian(S) or meancurvature(S) alone — which
  * draws S coloured by it — or null: for any other row, for one of the
  * document's own functions of those names, and for a point of a panel's
- * surface or metric, gaussian(P) or gaussian(P + (0, 1)), which is a number.
+ * surface, gaussian(P) or gaussian(P + (0, 1)), which is a number.
  */
 function curvaturePaint(e: Expr, fnNames: ReadonlySet<string>, isPoint: (arg: Expr) => boolean): Expr | null {
   if (e.kind !== 'call' || (e.name !== 'gaussian' && e.name !== 'meancurvature') || fnNames.has(e.name)) return null;
@@ -977,32 +748,6 @@ function curvaturePaint(e: Expr, fnNames: ReadonlySet<string>, isPoint: (arg: Ex
   const [arg] = e.args;
   if ((arg.kind === 'vec' && arg.items.length === 2) || isPoint(arg)) return null;
   return arg;
-}
-
-/**
- * The constant factor a row multiplies a panel metric's gaussian(x, y) by —
- * 1 for it alone, -1 for -gaussian(x, y), c for c gaussian(x, y) or
- * gaussian(x, y)/(1/c) with c a number or slider — or null for any other row.
- * Such a row is shaded to its own size, as gaussian(x, y) is.
- */
-function gaussianFactor(e: Expr, fnNames: ReadonlySet<string>, constNames: ReadonlySet<string>): Expr | null {
-  const constant = (c: Expr) => c.kind === 'num' || (c.kind === 'var' && constNames.has(c.name));
-  const times = (a: Expr | null, b: Expr, op: '*' | '/'): Expr | null => a && { kind: 'bin', op, a, b };
-  switch (e.kind) {
-    case 'call':
-      return e.name === 'gaussian' && !fnNames.has('gaussian') ? { kind: 'num', value: 1 } : null;
-    case 'neg': {
-      const f = gaussianFactor(e.a, fnNames, constNames);
-      return f && { kind: 'neg', a: f };
-    }
-    case 'bin':
-      if (e.op === '*' && constant(e.a)) return times(gaussianFactor(e.b, fnNames, constNames), e.a, '*');
-      if (e.op === '*' && constant(e.b)) return times(gaussianFactor(e.a, fnNames, constNames), e.b, '*');
-      if (e.op === '/' && constant(e.b)) return times(gaussianFactor(e.a, fnNames, constNames), e.b, '/');
-      return null;
-    default:
-      return null;
-  }
 }
 
 export function analyzePrepared(document: PreparedDocument, context: AnalysisContext = {}): Analysis {
@@ -1112,15 +857,11 @@ export function analyzePrepared(document: PreparedDocument, context: AnalysisCon
   const panelMaps: AxisMaps[] = [];
   // And the surface a panel's rows are drawn on (lib/surface-map.ts).
   const panelSurfaces: SurfaceMap[] = [];
-  // And the rows that give a panel a metric (`ds^2 = …`, lib/metric.ts).
-  const panelMetricRows: number[][] = [];
-  const metricRow = (text: string) => METRIC_ROW.test(text) && !ropts.documentNames?.has('ds');
   {
     let at = 0;
-    for (const [ri, row] of rows.entries()) {
+    for (const row of rows) {
       if (!row.text || row.def || row.comment) continue;
       if (isDividerRow(row.text)) at++;
-      else if (metricRow(row.text)) (panelMetricRows[at] ??= []).push(ri);
       else if (/^\s*(view|on)\s*\(/.exec(row.text) && !fnNames.has(/^\s*(\w+)/.exec(row.text)![1]))
         try {
           const spec = parseViewRow(row.text, ropts.consts!, viewDoc);
@@ -1131,69 +872,6 @@ export function analyzePrepared(document: PreparedDocument, context: AnalysisCon
         }
     }
   }
-  // Each panel's metric, from its first ds^2 row, worked out when a row of
-  // the panel first asks for it.
-  const panelMetrics: (PanelMetricState | undefined)[] = [];
-  const metricOf = (at: number): PanelMetricState | undefined => {
-    const ri = panelMetricRows[at]?.[0];
-    if (ri === undefined) return undefined;
-    const known = panelMetrics[at];
-    if (known) return known;
-    let state: PanelMetricState;
-    try {
-      if (panelSurfaces[at])
-        throw new Error(
-          'This panel is drawn on a surface, which gives it its metric: a ds^2 row is for a plane panel.',
-        );
-      if (panelMaps[at])
-        throw new Error(
-          "This panel's view(…) maps its axes, and a ds^2 metric is traced on a panel without one, for now.",
-        );
-      const parsed = parseExpr(rows[ri].text, fnNames, listNames, valueNames);
-      if (parsed.kind !== 'eq') throw new Error('A metric row is ds^2 = … in the differentials of its coordinates.');
-      const metric = parseMetric(parsed.r, {
-        resolve: e => inlineFields(lowerObjects(resolveRow(e, getFn, ropts).expr, defs, ropts), fieldEnv),
-        fields: fieldEnv,
-        isDefined: n => !!ropts.documentNames?.has(n),
-        constNames,
-        values: constEnv,
-      });
-      state = { metric };
-    } catch (err) {
-      state = { error: err instanceof Error ? err.message : String(err) };
-    }
-    return (panelMetrics[at] = state);
-  };
-  // And its curvature, gaussian(x, y) there, worked out when first read.
-  const panelCurvatures: (Curvature | undefined)[] = [];
-  const curvatureOf = (at: number): Curvature => {
-    const state = metricOf(at);
-    if (!state) throw new Error('This panel has no metric.');
-    if ('error' in state) throw new Error("This panel's metric (its ds^2 row) has an error.");
-    const known = panelCurvatures[at];
-    if (known) return known;
-    const parsed = parseExpr(rows[panelMetricRows[at]![0]].text, fnNames, listNames, valueNames);
-    if (parsed.kind !== 'eq') throw new Error('A metric row is ds^2 = … in the differentials of its coordinates.');
-    return (panelCurvatures[at] = metricCurvature(parsed.r, state.metric, {
-      written: e => lowerObjects(resolveRow(e, getFn, ropts).expr, defs, ropts),
-      fields: fieldEnv,
-    }));
-  };
-  // And what its tidal glyphs read (lib/tidal.ts), made when first asked.
-  const panelTides: (Omit<TidalSpec, 'at'> | undefined)[] = [];
-  const tidesOf = (at: number) => (): Omit<TidalSpec, 'at'> => {
-    const state = metricOf(at);
-    if (!state || 'error' in state) throw new Error("This panel's metric (its ds^2 row) has an error.");
-    const known = panelTides[at];
-    if (known) return known;
-    const parsed = parseExpr(rows[panelMetricRows[at]![0]].text, fnNames, listNames, valueNames);
-    if (parsed.kind !== 'eq') throw new Error('A metric row is ds^2 = … in the differentials of its coordinates.');
-    return (panelTides[at] = tidalSpec(parsed.r, state.metric, {
-      written: e => lowerObjects(resolveRow(e, getFn, ropts).expr, defs, ropts),
-      fields: fieldEnv,
-      inXY: e => inlineFields(e, fieldEnv),
-    }));
-  };
   const seenViewKinds = new Set<string>();
   let panel = 0;
   for (const [ri, row] of rows.entries()) {
@@ -1232,44 +910,6 @@ export function analyzePrepared(document: PreparedDocument, context: AnalysisCon
           throw new Error('This panel draws on a surface (on(…)), so it is 3D: frame it with camera(…), not view(…).');
         seenViewKinds.add(view.kind);
         row.view = view;
-        continue;
-      }
-      // ds^2 = …: the panel's metric, which its geodesic and lightray rows
-      // follow. It draws nothing itself.
-      if (metricRow(row.text)) {
-        if (panelMetricRows[panel]?.[0] !== ri)
-          throw new Error('This panel already has a metric: one ds^2 row a panel (a --- row starts a new panel).');
-        const state = metricOf(panel)!;
-        if ('error' in state) throw new Error(state.error);
-        const { n, coords, lorentzian, mixed } = state.metric;
-        row.cls = {
-          object: { kind: 'metric', n, coords, ...(lorentzian ? { lorentzian } : {}), ...(mixed ? { mixed } : {}) },
-          animated: false,
-          needs3D: false,
-          params: [],
-        };
-        continue;
-      }
-      // lightcones: the light cones of the panel's metric over the window.
-      if (LIGHTCONES_ROW.test(row.text) && !ropts.documentNames?.has('lightcones')) {
-        const lower = (e: Expr): Expr => lowerObjects(resolveRow(e, getFn, ropts).expr, defs, ropts);
-        const moving = new Set([...animatedConstNames(defs), ...defs.states.keys()]);
-        row.cls = classifyLightCone(undefined, panelSurfaces[panel], metricOf(panel), lower, constNames, moving);
-        continue;
-      }
-      // tidal: the tidal forces of the panel's metric over the window.
-      if (TIDAL_ROW.test(row.text) && !ropts.documentNames?.has('tidal')) {
-        const lower = (e: Expr): Expr => lowerObjects(resolveRow(e, getFn, ropts).expr, defs, ropts);
-        const moving = new Set([...animatedConstNames(defs), ...defs.states.keys()]);
-        row.cls = classifyTidal(
-          undefined,
-          panelSurfaces[panel],
-          metricOf(panel),
-          tidesOf(panel),
-          lower,
-          constNames,
-          moving,
-        );
         continue;
       }
       // `P(…)` shades an area under a declared density — unless the user has
@@ -1424,57 +1064,11 @@ export function analyzePrepared(document: PreparedDocument, context: AnalysisCon
         row.cls = classifyOrbit(lower(rawParsed.a), rawParsed.b.args.map(lower) as [Expr, Expr], defs, constNames);
         continue;
       }
-      // geodesic(S, start, direction), or lightray(P, d) under the panel's
-      // metric: traced as it is drawn.
-      if (
-        rawParsed.kind === 'call' &&
-        (rawParsed.name === 'geodesic' || rawParsed.name === 'lightray') &&
-        !fnNames.has(rawParsed.name)
-      ) {
+      // geodesic(S, start, direction): traced as it is drawn.
+      if (rawParsed.kind === 'call' && rawParsed.name === 'geodesic' && !fnNames.has('geodesic')) {
         const lower = (e: Expr): Expr => lowerObjects(resolveRow(e, getFn, ropts).expr, defs, ropts);
         const moving = new Set([...animatedConstNames(defs), ...defs.states.keys()]);
-        row.cls = classifyGeodesic(
-          rawParsed.name,
-          rawParsed.args,
-          panelSurfaces[panel],
-          metricOf(panel),
-          getFn,
-          ropts,
-          lower,
-          constNames,
-          moving,
-        );
-        continue;
-      }
-      // lightcone(P): the light cone of the panel's metric at a point.
-      if (rawParsed.kind === 'call' && rawParsed.name === 'lightcone' && !fnNames.has('lightcone')) {
-        if (rawParsed.args.length !== 1) throw new Error(LIGHTCONE_USAGE);
-        const lower = (e: Expr): Expr => lowerObjects(resolveRow(e, getFn, ropts).expr, defs, ropts);
-        const moving = new Set([...animatedConstNames(defs), ...defs.states.keys()]);
-        row.cls = classifyLightCone(
-          rawParsed.args[0],
-          panelSurfaces[panel],
-          metricOf(panel),
-          lower,
-          constNames,
-          moving,
-        );
-        continue;
-      }
-      // tidal(P): the tidal forces of the panel's metric at a point.
-      if (rawParsed.kind === 'call' && rawParsed.name === 'tidal' && !fnNames.has('tidal')) {
-        if (rawParsed.args.length !== 1) throw new Error(TIDAL_USAGE);
-        const lower = (e: Expr): Expr => lowerObjects(resolveRow(e, getFn, ropts).expr, defs, ropts);
-        const moving = new Set([...animatedConstNames(defs), ...defs.states.keys()]);
-        row.cls = classifyTidal(
-          rawParsed.args[0],
-          panelSurfaces[panel],
-          metricOf(panel),
-          tidesOf(panel),
-          lower,
-          constNames,
-          moving,
-        );
+        row.cls = classifyGeodesic(rawParsed.args, panelSurfaces[panel], getFn, ropts, lower, constNames, moving);
         continue;
       }
       // A graph's vertices are whole numbers, so its cases may test equality,
@@ -1483,15 +1077,9 @@ export function analyzePrepared(document: PreparedDocument, context: AnalysisCon
       // (it would be a curve's sliver), here on the row that draws it.
       const plane = (e: Expr) => ['x', 'y', 'z'].some(v => freeVars(e).has(v));
       const exact = graphArgs !== null || !plane(rawParsed);
-      // On a panel drawn on a surface, gaussian(x, y) reads that surface;
-      // on one with a metric (a ds^2 row), that metric.
+      // On a panel drawn on a surface, gaussian(x, y) reads that surface.
       const surface = panelSurfaces[panel];
-      const at = panel;
-      const rowOpts = surface
-        ? { ...ropts, surface }
-        : panelMetricRows[panel]
-          ? { ...ropts, metric: { gaussian: () => curvatureOf(at).K } }
-          : ropts;
+      const rowOpts = surface ? { ...ropts, surface } : ropts;
       // gaussian(S) alone: S coloured by its curvature (lib/plot.ts PAINT_CALL).
       const painted = curvaturePaint(rawParsed, fnNames, arg => {
         if (arg.kind === 'var') return defs.pointDims.get(arg.name) === 2;
@@ -1627,35 +1215,6 @@ export function analyzePrepared(document: PreparedDocument, context: AnalysisCon
         )
           row.cls = { ...row.cls, object: { ...object, autoscale: true } };
       }
-      // gaussian(x, y) on a panel with a metric: its curvature, shaded to
-      // its own size over the view, and said what it is.
-      let curvatureInfo: string | null = null;
-      const factor =
-        !surface && panelMetricRows[panel] && row.cls.object.kind === 'scalar-field'
-          ? gaussianFactor(rawParsed, fnNames, constNames)
-          : null;
-      if (factor && row.cls.object.kind === 'scalar-field') {
-        const { size, pulled } = curvatureOf(panel);
-        const rounding: Expr =
-          factor.kind === 'num' && Math.abs(factor.value) === 1
-            ? size
-            : { kind: 'bin', op: '*', a: { kind: 'call', name: 'abs', args: [factor] }, b: size };
-        row.cls = {
-          ...row.cls,
-          object: { ...row.cls.object, autoscale: true, rounding, ...(pulled ? { pulled } : {}) },
-        };
-        const { time, lorentzian } = (metricOf(panel) as { metric: PanelMetric }).metric;
-        // The row's colour is where the row is positive: where K is
-        // negative under a negative factor (-gaussian(x, y)).
-        let sign = 1;
-        try {
-          sign = Math.sign(evaluate(factor, constEnv)) || 1;
-        } catch {
-          /* as written */
-        }
-        const [up, down] = sign < 0 ? ['<', '>'] : ['>', '<'];
-        curvatureInfo = `${time !== undefined ? `the curvature of space at one instant (K of the slice ${time} = constant)` : lorentzian ? "the spacetime's curvature K = R/2, half its scalar curvature" : "the metric's Gaussian curvature K"}: row colour where K ${up} 0, its complement where K ${down} 0`;
-      }
       if (graphArgs !== null) {
         row.cls = graphObject(row.cls);
         continue;
@@ -1668,7 +1227,7 @@ export function analyzePrepared(document: PreparedDocument, context: AnalysisCon
       }
       // A solid whose shape reads sliders is checked for folds at their values.
       checkSolid(row.cls.object, ropts.consts!);
-      const hint = curvatureInfo ?? curveHint(row.cls.object, row.text);
+      const hint = curveHint(row.cls.object, row.text);
       if (hint) row.info = hint;
       // `e = 0.6` parsed with e already a number; only the text still says e.
       // `i = [0..9]` is a family of such claims, one per member.
