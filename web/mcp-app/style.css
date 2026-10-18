@@ -60,6 +60,9 @@ html[data-mcp-app] {
   color: var(--text);
 }
 #app-toolbar #app-expand:hover {
+  background: rgba(0, 0, 0, 0.06);
+}
+html[data-theme='dark'] #app-toolbar #app-expand:hover {
   background: rgba(255, 255, 255, 0.1);
 }
 #app-toolbar #app-expand svg {
