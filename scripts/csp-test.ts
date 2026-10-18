@@ -26,16 +26,13 @@ try {
       body: 'ok',
     }),
   );
-  for (const path of ['/', '/about/', '/g/y%3Dx%5E2', '/implicit/']) {
+  for (const path of ['/', '/about/', '/g/y%3Dx%5E2']) {
     const page = await context.newPage();
     const response = await page.goto(`http://localhost:5198${path}`);
     const csp = response?.headers()['content-security-policy'] ?? '';
     assert.ok(csp, `CSP missing on ${path}`);
     assert.equal((csp.match(/default-src/g) ?? []).length, 1, `duplicate CSP on ${path}: ${csp}`);
-    if (path === '/implicit/') {
-      assert.match(csp, /frame-src 'self'/);
-      assert.match(csp, /frame-ancestors 'none'/);
-    } else if (path.startsWith('/g/')) {
+    if (path.startsWith('/g/')) {
       assert.match(csp, /frame-ancestors \*/);
       assert.equal(csp.includes("frame-ancestors 'none'"), false, csp);
     } else {
@@ -49,16 +46,10 @@ try {
     }
     const themeResponse = await context.request.get(new URL((await themeScript.getAttribute('src'))!, page.url()).href);
     assert.match(themeResponse.headers()['cache-control'], /max-age=31536000.*immutable/);
-    const ready = path === '/about/' ? '#gallery img' : path === '/implicit/' ? 'iframe#graph[src*="/g/"]' : '.eq-line';
+    const ready = path === '/about/' ? '#gallery img' : '.eq-line';
     await page.waitForSelector(ready);
-    if (path === '/implicit/') {
-      await page.waitForFunction(() => {
-        const iframe = document.querySelector<HTMLIFrameElement>('iframe#graph');
-        return !!iframe?.contentDocument?.getElementById('gl');
-      });
-    }
     assert.equal(await page.locator('html').getAttribute('data-theme'), 'dark');
-    if (path !== '/about/' && path !== '/implicit/') await page.locator('#theme-toggle').click();
+    if (path !== '/about/') await page.locator('#theme-toggle').click();
     assert.deepEqual(await page.evaluate(() => (window as any).violations), []);
     const beacon = await page.evaluate(
       () =>

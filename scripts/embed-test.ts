@@ -27,13 +27,6 @@ try {
   assert.equal(await page.locator('#panel').evaluate(el => el.classList.contains('is-parked')), false);
   assert.equal(await page.locator('#panel-links').isVisible(), true);
 
-  // The landing page embeds the same URL as its full-editor link.
-  await page.goto(origin + '/implicit/');
-  const landingFrame = page.frameLocator('#graph');
-  await landingFrame.locator('#panel-chip.shown').waitFor();
-  assert.match((await page.locator('#graph').getAttribute('src'))!, /^\/g\//);
-  assert.equal(await landingFrame.locator('#panel').evaluate(el => el.classList.contains('is-parked')), true);
-
   // A different host verifies frame-ancestors and cross-origin detection.
   await context.route('http://127.0.0.1:5198/embed-test-parent', route =>
     route.fulfill({
@@ -56,7 +49,7 @@ try {
   await page.waitForTimeout(500);
   assert.equal(child.url(), before, 'Editing an embedded graph must not rewrite its URL');
 
-  console.log('PASS: direct graph, landing iframe, cross-origin iframe, editor reopening, stable embedded URL');
+  console.log('PASS: direct graph, cross-origin iframe, editor reopening, stable embedded URL');
 } finally {
   await browser.close();
 }

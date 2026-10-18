@@ -1,10 +1,9 @@
-import { GRAPH_CSP, LANDING_CSP } from '../lib/csp.ts';
-import { landingFromPath, graphUrl, type Landing } from '../lib/landings.ts';
+import { GRAPH_CSP } from '../lib/csp.ts';
 import { decodePayload } from '../lib/link.ts';
 import { handleDiscovery } from './discovery.ts';
 import { handleMcp } from './mcp.ts';
 
-/** The site's static card: share links and most landings unfurl with it. */
+/** The site's static card: share links unfurl with it. */
 const SITE_OG = '/shots/hero.png';
 
 const escapeAttr = (s: string) =>
@@ -33,30 +32,6 @@ export function shareMeta(equations: string[], payload: string, origin: string):
     ['twitter:image', `${origin}${SITE_OG}`],
   ];
   return { title, meta };
-}
-
-/**
- * Title and og:/twitter: pairs for an intent landing page. `shot` pages use
- * their own stable PNG in /shots/; the rest use the site card.
- */
-export function landingMeta(
-  page: Landing,
-  origin: string,
-): { title: string; description: string; canonical: string; meta: string[][] } {
-  const title = `${page.title} — Equation.io`;
-  const description = page.lead;
-  const canonical = `${origin}${page.path}`;
-  const image = `${origin}${page.og === 'shot' ? `/shots/${page.slug}.png` : SITE_OG}`;
-  const meta: string[][] = [
-    ['og:title', title],
-    ['og:description', description],
-    ['og:type', 'website'],
-    ['og:url', canonical],
-    ['og:image', image],
-    ['twitter:card', 'summary_large_image'],
-    ['twitter:image', image],
-  ];
-  return { title, description, canonical, meta };
 }
 
 /**
@@ -100,89 +75,6 @@ async function handleShare(request: Request, url: URL, env: Env): Promise<Respon
         },
       })
       .transform(shell)
-  );
-}
-
-/**
- * /implicit/, /slope-field/, /complex/, … — intent pages. The shell is the
- * shared /landing/ template; title, description, canonical, and og: tags
- * are injected here so crawlers see them without running JS.
- */
-async function handleLanding(request: Request, url: URL, env: Env, page: Landing): Promise<Response> {
-  if (url.pathname !== page.path) {
-    return Response.redirect(new URL(page.path, url).toString(), 301);
-  }
-  const shell = await env.ASSETS.fetch(new Request(new URL('/landing/', url), request));
-  if (!shell.headers.get('content-type')?.includes('text/html')) return shell;
-
-  const { title, description, canonical, meta } = landingMeta(page, url.origin);
-  const share = `${url.origin}${graphUrl(page.heroEqs)}`;
-  const extra = meta
-    .filter(([k]) => k === 'twitter:card' || k === 'twitter:image')
-    .map(([p, c]) => `<meta ${p.startsWith('twitter:') ? 'name' : 'property'}="${p}" content="${escapeAttr(c)}">`)
-    .join('\n  ');
-  return withCsp(
-    new HTMLRewriter()
-      .on('head', {
-        element(el) {
-          el.append(`${extra}\n  `, { html: true });
-        },
-      })
-      .on('title', {
-        element(el) {
-          el.setInnerContent(title);
-        },
-      })
-      .on('meta[name="description"]', {
-        element(el) {
-          el.setAttribute('content', description);
-        },
-      })
-      .on('link[rel="canonical"]', {
-        element(el) {
-          el.setAttribute('href', canonical);
-        },
-      })
-      .on('meta[property="og:title"]', {
-        element(el) {
-          el.setAttribute('content', title);
-        },
-      })
-      .on('meta[property="og:description"]', {
-        element(el) {
-          el.setAttribute('content', description);
-        },
-      })
-      .on('meta[property="og:url"]', {
-        element(el) {
-          el.setAttribute('content', canonical);
-        },
-      })
-      .on('meta[property="og:image"]', {
-        element(el) {
-          const image = meta.find(([k]) => k === 'og:image')![1];
-          el.setAttribute('content', image);
-        },
-      })
-      .on('h1#h1', {
-        element(el) {
-          el.setInnerContent(page.h1);
-        },
-      })
-      .on('p#lead', {
-        element(el) {
-          el.setInnerContent(page.lead);
-        },
-      })
-      .on('noscript', {
-        element(el) {
-          el.prepend(`<p>${escapeAttr(page.lead)}</p><p><a href="${escapeAttr(share)}">${escapeAttr(share)}</a></p>`, {
-            html: true,
-          });
-        },
-      })
-      .transform(shell),
-    LANDING_CSP,
   );
 }
 
@@ -234,8 +126,6 @@ export default {
     if (url.pathname.startsWith('/g/')) {
       return handleShare(request, url, env);
     }
-    const landing = landingFromPath(url.pathname);
-    if (landing) return handleLanding(request, url, env, landing);
     return withCharset(await env.ASSETS.fetch(request));
   },
 } satisfies ExportedHandler<Env>;
