@@ -43,6 +43,10 @@ html[data-mcp-app] #equations,
 html[data-mcp-app] #panel-chip {
   font-family: var(--font-mono, ui-monospace, monospace);
 }
+/* Sized to sit with the host's message text rather than above it. */
+html[data-mcp-app] #equations {
+  font-size: 13px;
+}
 html[data-mcp-app] .eq-widget,
 html[data-mcp-app] #syntax-help {
   font-family: var(--font-sans, system-ui, sans-serif);
