@@ -22,7 +22,6 @@
  * Uses your wrangler login (`wrangler login`) for the zone analytics.
  */
 import { execFileSync } from 'node:child_process';
-import { LANDINGS } from '../lib/landings.ts';
 
 const days = Number(process.argv[2] ?? 7);
 if (!Number.isInteger(days) || days < 1 || days > 30) {
@@ -94,7 +93,6 @@ const PAGES: [string, string][] = [
   ['/', 'clientRequestPath: "/"'],
   ['/g/', 'clientRequestPath_like: "/g/%"'],
   ['/about/', 'clientRequestPath: "/about/"'],
-  ...LANDINGS.map(l => [l.path, `clientRequestPath: "${l.path}"`] as [string, string]),
   ['/privacy/', 'clientRequestPath: "/privacy/"'],
   ['/terms/', 'clientRequestPath: "/terms/"'],
 ];

@@ -40,9 +40,6 @@ describe('llms.txt', () => {
       '## Definitions',
       'Reserved names', // t is time, not a constant
       'Do: `k = 3`',
-      'https://equation.io/implicit/',
-      'https://equation.io/slope-field/',
-      'https://equation.io/complex/',
     ]) {
       expect(llms).toContain(marker);
     }
