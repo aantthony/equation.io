@@ -7,7 +7,6 @@
  */
 import { existsSync, readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
-import { landingWorkerPaths } from './landings.ts';
 
 const assets = (() => {
   const src = readFileSync(new URL('../wrangler.jsonc', import.meta.url), 'utf8');
@@ -40,7 +39,6 @@ describe('wrangler run_worker_first covers the worker routes', () => {
     ['/.well-known/ard.json'],
     ['/api/health'],
     ['/g/y%20%3D%20x'],
-    ...landingWorkerPaths().map(p => [p]),
     ['/llms.txt'],
     ['/robots.txt'],
   ])('%s reaches the worker', path => {
@@ -49,7 +47,7 @@ describe('wrangler run_worker_first covers the worker routes', () => {
 
   it('leaves the app shell and its assets to the asset server', () => {
     // Marking these worker-first would make every page load pay for the worker.
-    for (const path of ['/', '/index.html', '/style.css', '/about/', '/landing/', '/mcp-app/app.js']) {
+    for (const path of ['/', '/index.html', '/style.css', '/about/', '/mcp-app/app.js']) {
       expect(covered(path), `${path} should be served directly by the asset server`).toBe(false);
     }
   });
