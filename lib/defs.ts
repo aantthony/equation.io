@@ -301,7 +301,6 @@ function positions(table: Table): Float64Array {
 }
 
 /** Expression elements of a numeric column, built once per parsed column. */
-const colExprs = new WeakMap<Column, Expr[]>();
 /** Character counts are stable for a parsed column, including filtered copies. */
 const colLengths = new WeakMap<Column, Float64Array>();
 
@@ -318,15 +317,6 @@ function textLengths(col: Column): Float64Array {
     colLengths.set(col, values);
   }
   return values;
-}
-
-export function columnExprs(col: Column): Expr[] {
-  let hit = colExprs.get(col);
-  if (!hit) {
-    hit = [...col.nums!].map((value): Expr => ({ kind: 'num', value }));
-    colExprs.set(col, hit);
-  }
-  return hit;
 }
 
 /**

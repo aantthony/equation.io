@@ -39,17 +39,6 @@
   "observability": {
     "enabled": true
   },
-  // The app's one database; tables are prefixed by feature (voice_…: voice
-  // mode credit, worker/voice-credit.ts). No database_id: `wrangler deploy`
-  // provisions it on first deploy and records the id. Apply the schema with
-  // `wrangler d1 migrations apply DB [--remote]`.
-  "d1_databases": [
-    {
-      "binding": "DB",
-      "database_name": "equation",
-      "migrations_dir": "migrations"
-    }
-  ],
   // MCP tool usage (worker/mcp-usage.ts): tool, client, graph types and row
   // counts, never equation text. Read with scripts/traffic.ts; Analytics
   // Engine keeps three months.

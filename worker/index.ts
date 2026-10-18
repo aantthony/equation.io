@@ -1,26 +1,18 @@
 import { GRAPH_CSP, LANDING_CSP } from '../lib/csp.ts';
 import { landingFromPath, graphUrl, type Landing } from '../lib/landings.ts';
-import { decodePayload, encodePayload } from '../lib/link.ts';
+import { decodePayload } from '../lib/link.ts';
 import { handleDiscovery } from './discovery.ts';
 import { handleMcp } from './mcp.ts';
-import { OG_HEIGHT, OG_WIDTH, canRenderOg, renderOgPng } from './og.ts';
-import { handleVoiceConnect } from './voice.ts';
 
-/** Static card used when a graph is not one the preview renderer can draw. */
-const FALLBACK_OG = '/shots/hero.png';
+/** The site's static card: share links and most landings unfurl with it. */
+const SITE_OG = '/shots/hero.png';
 
 const escapeAttr = (s: string) =>
   s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 
 /**
- * Title and og:/twitter: pairs for a share link.
- *
- * The page never analyzes its graph: a heavy graph (thousands of list
- * elements) can take a second or more of CPU to analyze, past the Worker's
- * limit, and the page must load regardless. The preview image is always
- * advertised; /api/og/ decides whether it can draw the graph and otherwise
- * redirects to the static site card — a truthful generic card beats a
- * picture of an empty grid, which reads as a broken graph.
+ * Title and og:/twitter: pairs for a share link: the graph's equations as
+ * text, over the static site card.
  *
  * Split out from handleShare so this is testable without the Workers
  * runtime (HTMLRewriter is a runtime global).
@@ -36,22 +28,16 @@ export function shareMeta(equations: string[], payload: string, origin: string):
     ['og:description', description],
     ['og:type', 'website'],
     ['og:url', `${origin}/g/${payload}`],
-    ['og:image', `${origin}/api/og/${payload}`],
-    ['og:image:width', String(OG_WIDTH)],
-    ['og:image:height', String(OG_HEIGHT)],
+    ['og:image', `${origin}${SITE_OG}`],
     ['twitter:card', 'summary_large_image'],
-    ['twitter:image', `${origin}/api/og/${payload}`],
+    ['twitter:image', `${origin}${SITE_OG}`],
   ];
   return { title, meta };
 }
 
 /**
- * Title and og:/twitter: pairs for an intent landing page.
- *
- * `preview` pages advertise the CPU-rendered /api/og/ of the hero graph.
- * `shot` pages use a stable PNG in /shots/ — the preview renderer cannot
- * draw those heroes (complex potentials, domain coloring), and a generic
- * site card would be a lie.
+ * Title and og:/twitter: pairs for an intent landing page. `shot` pages use
+ * their own stable PNG in /shots/; the rest use the site card.
  */
 export function landingMeta(
   page: Landing,
@@ -60,18 +46,13 @@ export function landingMeta(
   const title = `${page.title} — Equation.io`;
   const description = page.lead;
   const canonical = `${origin}${page.path}`;
-  const image =
-    page.og === 'preview' ? `${origin}/api/og/${encodePayload(page.heroEqs)}` : `${origin}/shots/${page.slug}.png`;
-  const width = page.og === 'preview' ? String(OG_WIDTH) : '900';
-  const height = page.og === 'preview' ? String(OG_HEIGHT) : '600';
+  const image = `${origin}${page.og === 'shot' ? `/shots/${page.slug}.png` : SITE_OG}`;
   const meta: string[][] = [
     ['og:title', title],
     ['og:description', description],
     ['og:type', 'website'],
     ['og:url', canonical],
     ['og:image', image],
-    ['og:image:width', width],
-    ['og:image:height', height],
     ['twitter:card', 'summary_large_image'],
     ['twitter:image', image],
   ];
@@ -80,7 +61,7 @@ export function landingMeta(
 
 /**
  * /g/<payload>: the share form of a graph link. Serves the app shell with
- * og:/twitter: meta tags injected so the link unfurls with a rendered preview
+ * og:/twitter: meta tags injected so the link unfurls with the graph's title
  * (crawlers never see URL fragments, which is why this form exists). The web
  * app boots from the path and keeps the address bar on the canonical /g/ form.
  */
@@ -101,9 +82,8 @@ async function handleShare(request: Request, url: URL, env: Env): Promise<Respon
     .join('\n  ');
   return (
     new HTMLRewriter()
-      // The shell carries the site's own og:/twitter: tags (the homepage card).
-      // Crawlers take the first og:image, so leaving them in would unfurl every
-      // graph as the site card; drop them and append the graph's.
+      // The shell carries the homepage's own og:/twitter: tags; crawlers take
+      // the first of each, so drop them and append the graph's.
       .on('meta[property^="og:"], meta[name^="twitter:"]', {
         element(el) {
           el.remove();
@@ -138,7 +118,7 @@ async function handleLanding(request: Request, url: URL, env: Env, page: Landing
   const { title, description, canonical, meta } = landingMeta(page, url.origin);
   const share = `${url.origin}${graphUrl(page.heroEqs)}`;
   const extra = meta
-    .filter(([k]) => k === 'twitter:card' || k === 'twitter:image' || k === 'og:image:width' || k === 'og:image:height')
+    .filter(([k]) => k === 'twitter:card' || k === 'twitter:image')
     .map(([p, c]) => `<meta ${p.startsWith('twitter:') ? 'name' : 'property'}="${p}" content="${escapeAttr(c)}">`)
     .join('\n  ');
   return withCsp(
@@ -206,38 +186,9 @@ async function handleLanding(request: Request, url: URL, env: Env, page: Landing
   );
 }
 
-async function handleOgImage(url: URL): Promise<Response> {
-  const payload = url.pathname.slice('/api/og/'.length);
-  let equations: string[] = [];
-  try {
-    equations = decodePayload(payload);
-  } catch {
-    return Response.json({ error: 'bad_payload' }, { status: 400 });
-  }
-  // handleShare advertises this URL for every graph without analyzing it, so
-  // this is where an undrawable graph is sent to the static site image rather
-  // than rendered as an empty grid.
-  if (!canRenderOg(equations)) {
-    return Response.redirect(new URL(FALLBACK_OG, url).toString(), 302);
-  }
-  const png = await renderOgPng(equations);
-  return new Response(png as unknown as BodyInit, {
-    headers: {
-      'Content-Type': 'image/png',
-      'Cache-Control': 'public, max-age=86400',
-    },
-  });
-}
-
-async function handleApi(request: Request, url: URL, env: Env): Promise<Response> {
+function handleApi(url: URL): Response {
   if (url.pathname === '/api/health') {
     return Response.json({ ok: true });
-  }
-  if (url.pathname === '/api/voice/connect') {
-    return handleVoiceConnect(request, env);
-  }
-  if (url.pathname.startsWith('/api/og/')) {
-    return handleOgImage(url);
   }
   return Response.json({ error: 'not_found' }, { status: 404 });
 }
@@ -278,7 +229,7 @@ export default {
       return handleMcp(request, url, env);
     }
     if (url.pathname === '/api' || url.pathname.startsWith('/api/')) {
-      return handleApi(request, url, env);
+      return handleApi(url);
     }
     if (url.pathname.startsWith('/g/')) {
       return handleShare(request, url, env);

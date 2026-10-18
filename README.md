@@ -46,8 +46,7 @@ Agent-facing surface:
 - `/llms.txt` — link format + expression syntax reference
   ([`web/public/llms.txt`](web/public/llms.txt))
 - `/g/<eqs>` — share form of a graph link; the worker injects og:/twitter:
-  meta tags and `/api/og/<eqs>` renders the preview PNG on the CPU
-  (expressions compile to a stack machine — no WebGL in Workers)
+  meta tags (the graph's equations as the title, over the site card)
 - `/mcp` — stateless MCP server (Streamable HTTP) with `encode_graph_url`
   (validates rows, returns links), `decode_graph_url` (decodes links for editing),
   and `show_graph` (renders the interactive grapher inside MCP Apps hosts).
@@ -67,36 +66,6 @@ pnpm typecheck  # lib + web + worker
 pnpm web:build  # build to dist-web/ (client + worker)
 pnpm deploy     # build and deploy to Cloudflare
 ```
-
-### Voice mode (credit keys)
-
-A mic button talks to an OpenAI Realtime model
-([`web/voice.ts`](web/voice.ts)) over WebRTC, and the model edits the graph
-with `get_graph` / `set_graph` tools, which report each row's readouts (values,
-intercepts, extrema in view). `look_at_graph` puts a screenshot of the canvas
-into the conversation as an image.
-
-The page never holds an OpenAI credential. It opens a control WebSocket to the
-Worker ([`worker/voice-call.ts`](worker/voice-call.ts)) and sends its WebRTC
-offer with a **credit key**. The Worker checks the key's balance in D1, creates
-the call with a fixed session, and attaches a sideband WebSocket to it before
-answering. The sideband charges every response's token usage to the key
-([`worker/voice-credit.ts`](worker/voice-credit.ts)); the call is hung up when
-the balance runs out, after 30 minutes, if the page changes the session, or
-when the page's control socket closes. Audio flows between the browser and OpenAI directly.
-
-```sh
-wrangler secret put OPENAI_API_KEY     # locally: in .dev.vars
-wrangler d1 migrations apply DB --remote   # locally: --local
-node scripts/voice-key.ts create "Sam" 5   # a key with $5; prints it once
-node scripts/voice-key.ts list             # balances and spend
-node scripts/voice-key.ts grant <id> 10    # top up; disable/enable <id>
-```
-
-Each `scripts/voice-key.ts` command takes `--remote` for the deployed database.
-Visit any page once with `#voice=<key>` to show the mic in that browser
-(`#voice=` forgets it). `?voice=<key>` works too, but a query string reaches
-the server, which may log it; the fragment never does.
 
 ### Traffic and MCP usage
 

@@ -1,8 +1,8 @@
-/** Production sandbox smoke test. Start wrangler on 5196 after web:build. */
+/** Production sandbox smoke test, run by scripts/prod-test.ts (wrangler on 5198). */
 import assert from 'node:assert/strict';
 import { chromium } from 'playwright';
 
-const origin = process.env.MCP_TEST_ORIGIN ?? 'http://localhost:5196';
+const origin = process.env.MCP_TEST_ORIGIN ?? 'http://localhost:5198';
 async function rpc(method: string, params: object = {}) {
   const res = await fetch(`${origin}/mcp`, {
     method: 'POST',

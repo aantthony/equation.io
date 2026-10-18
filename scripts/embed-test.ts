@@ -1,4 +1,4 @@
-/** Run against a production build served by wrangler dev on port 5198. */
+/** Run by scripts/prod-test.ts against the production build on port 5198. */
 import assert from 'node:assert/strict';
 import { chromium } from 'playwright';
 

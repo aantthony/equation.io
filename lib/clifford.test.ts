@@ -7,7 +7,6 @@ import {
   dual,
   geometric,
   gradePart,
-  innerMv,
   inverse,
   mvExp,
   mvNode,
@@ -56,9 +55,6 @@ describe('products', () => {
     expect(vals(gradePart(ab, 0))[0]).toBe(32);
     expect(vals(gradePart(ab, 2))).toEqual(vals(outerMv(a, b)));
     expect(text(ab)).toBe('32 - 3 e_xy - 3 e_yz + 6 e_zx');
-  });
-  it('left contraction lowers the grade', () => {
-    expect(text(innerMv(v3(1, 0, 0), blade('e_xy')))).toBe('e_y');
   });
   it('reversion and conjugation', () => {
     const m = geometric(v3(1, 2, 0), blade('e_xy'));

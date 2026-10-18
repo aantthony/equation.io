@@ -20,6 +20,7 @@
     "test:objects": "node scripts/objects-test.ts",
     "test:editor": "node scripts/editor-test.ts",
     "test:swipe": "node scripts/swipe-test.ts",
+    "test:prod": "vite build && node scripts/prod-test.ts",
     "bench": "vitest bench --run",
     "perf": "node scripts/perf.ts",
     "perf:update": "node scripts/perf.ts --update",

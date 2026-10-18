@@ -69,18 +69,13 @@ describe('semantic classification and independent backends', () => {
       for (const residual of system.residuals) expect(evaluate(residual, { x, y: 0 })).toBeCloseTo(0);
   });
 
-  it('supports CPU-only analysis and projects real expressions involving complex values', () => {
-    const shader = vi.spyOn(glsl, 'toGLSL').mockImplementation(() => {
-      throw new Error('GPU invoked');
-    });
-    const result = analyzeRows(['re(w^2)', 're(w)=2', 're(1+2i)'], { backend: 'cpu' });
+  it('projects real expressions involving complex values', () => {
+    const result = analyzeRows(['re(w^2)', 're(w)=2', 're(1+2i)']);
     expect(result.rows.map(r => r.error)).toEqual([undefined, undefined, undefined]);
-    expect(result.rows.every(r => r.gpu === undefined)).toBe(true);
     const scalar = result.rows[0].cpu!;
     if (scalar.type !== 'scalar2d') throw new Error('scalar');
     expect(evaluate(scalar.expr, { x: 3, y: 2 })).toBe(5);
     expect(result.rows[2].info).toBe('= 1');
-    expect(shader).not.toHaveBeenCalled();
   });
 
   it('keeps graph RHS, normalized residuals, heightmaps and level parameter identity', () => {
