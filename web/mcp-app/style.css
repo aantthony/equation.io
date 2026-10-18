@@ -45,23 +45,22 @@ html[data-mcp-app] {
   white-space: nowrap;
   cursor: pointer;
 }
-/* A round, borderless chip that reads over any graph, like the host's own. */
+/* A round, borderless chip in the panel's colour, lifted by a faint shadow. */
 #app-toolbar #app-expand {
   width: 32px;
   height: 32px;
   padding: 0;
   border: 0;
   border-radius: 50%;
-  box-shadow: none;
-  background: color-mix(in srgb, var(--text) 10%, transparent);
-  backdrop-filter: blur(8px);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.08);
+  background: var(--panel-bg);
   display: inline-flex;
   align-items: center;
   justify-content: center;
   color: var(--text);
 }
 #app-toolbar #app-expand:hover {
-  background: color-mix(in srgb, var(--text) 16%, transparent);
+  background: color-mix(in srgb, var(--text) 5%, var(--panel-bg));
 }
 #app-toolbar #app-expand svg {
   width: 16px;
