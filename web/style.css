@@ -542,9 +542,6 @@ body {
 #equations .eq-hidden {
   display: none;
 }
-.eq-line.focused {
-  background: var(--row-focus);
-}
 .eq-line.focused:not(.is-comment)::before {
   width: 7px;
 }

@@ -3,38 +3,80 @@ html[data-mcp-app] {
   --safe-area-right: max(env(safe-area-inset-right), var(--host-safe-right, 0px));
   --safe-area-bottom: max(env(safe-area-inset-bottom), var(--host-safe-bottom, 0px));
   --safe-area-left: max(env(safe-area-inset-left), var(--host-safe-left, 0px));
-  --panel-bottom-inset: var(--app-toolbar-height, 40px);
+  --panel-bottom-inset: var(--safe-area-bottom);
 }
+/* Controls float over the graph's bottom edge rather than taking a bar. The
+   strip itself lets pointer events through to the graph. */
 #app-toolbar {
   position: fixed;
-  bottom: 0;
-  left: 0;
-  right: 0;
+  bottom: calc(12px + var(--safe-area-bottom));
+  left: calc(12px + var(--safe-area-left));
+  right: calc(12px + var(--safe-area-right));
   z-index: 20;
-  min-height: 40px;
-  padding: 8px max(12px, var(--safe-area-right)) calc(8px + var(--safe-area-bottom)) max(12px, var(--safe-area-left));
   display: flex;
   align-items: center;
-  gap: 12px;
-  background: var(--panel-bg);
-  border-top: 1px solid var(--panel-border);
+  justify-content: flex-end;
+  gap: 8px;
+  pointer-events: none;
   color: var(--text);
   font: 12px var(--font-sans, system-ui, sans-serif);
 }
+#app-status,
+#app-toolbar button {
+  pointer-events: auto;
+  background: var(--panel-bg);
+  border: 1px solid var(--panel-border);
+  border-radius: 6px;
+  box-shadow: 0 2px 8px var(--panel-shadow);
+}
 #app-status {
-  flex: 1;
+  margin-right: auto;
+  padding: 4px 8px;
   color: var(--muted);
 }
-#app-toolbar a,
-#app-toolbar button {
-  color: var(--accent);
-  white-space: nowrap;
+#app-status:empty {
+  display: none;
 }
 #app-toolbar button {
+  height: 28px;
+  padding: 0 10px;
   font: inherit;
-  background: none;
-  border: 0;
+  color: var(--accent);
+  white-space: nowrap;
   cursor: pointer;
+}
+/* A bare icon over the graph; a round wash appears on hover. */
+#app-toolbar #app-expand {
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  box-shadow: none;
+  background: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text);
+}
+#app-toolbar #app-expand:hover {
+  background: rgba(0, 0, 0, 0.06);
+}
+html[data-theme='dark'] #app-toolbar #app-expand:hover {
+  background: rgba(255, 255, 255, 0.1);
+}
+#app-toolbar #app-expand svg {
+  width: 16px;
+  height: 16px;
+}
+/* As specific as the id rules above, which would otherwise un-hide it. */
+#app-toolbar button[hidden],
+#app-toolbar #app-expand[hidden] {
+  display: none;
+}
+/* Not shown in chat; its href still supplies share_url to the model context. */
+#app-open {
+  display: none;
 }
 html[data-mcp-app] #panel {
   max-height: calc(100% - 24px - var(--safe-area-top) - var(--panel-bottom-inset));
@@ -65,10 +107,6 @@ html[data-mcp-app] #state-reset {
   right: 34px;
 }
 @media (max-width: 440px) {
-  #app-toolbar {
-    gap: 8px;
-    padding-inline: max(8px, var(--safe-area-left)) max(8px, var(--safe-area-right));
-  }
   #app-status {
     font-size: 11px;
   }
