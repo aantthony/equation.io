@@ -45,20 +45,32 @@ html[data-mcp-app] {
   white-space: nowrap;
   cursor: pointer;
 }
-#app-toolbar button[hidden] {
-  display: none;
-}
+/* A round, borderless chip that reads over any graph, like the host's own. */
 #app-toolbar #app-expand {
-  width: 28px;
+  width: 32px;
+  height: 32px;
   padding: 0;
+  border: 0;
+  border-radius: 50%;
+  box-shadow: none;
+  background: color-mix(in srgb, var(--text) 10%, transparent);
+  backdrop-filter: blur(8px);
   display: inline-flex;
   align-items: center;
   justify-content: center;
   color: var(--text);
 }
+#app-toolbar #app-expand:hover {
+  background: color-mix(in srgb, var(--text) 16%, transparent);
+}
 #app-toolbar #app-expand svg {
   width: 16px;
   height: 16px;
+}
+/* As specific as the id rules above, which would otherwise un-hide it. */
+#app-toolbar button[hidden],
+#app-toolbar #app-expand[hidden] {
+  display: none;
 }
 /* Not shown in chat; its href still supplies share_url to the model context. */
 #app-open {

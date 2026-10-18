@@ -21,11 +21,11 @@ interface WidgetState {
   privateContent?: { source?: string; equations?: unknown };
 }
 
-// Corner arrows pointing out (expand) or in (collapse).
+// Corner brackets at top-right and bottom-left, opening out (expand) or in (collapse).
 const icon = (d: string) =>
-  `<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="${d}"/></svg>`;
-const EXPAND_ICON = icon('M9.5 2.5h4v4M13.5 2.5 9 7M6.5 13.5h-4v-4M2.5 13.5 7 9');
-const COLLAPSE_ICON = icon('M13 7H9V3M9 7l4.5-4.5M3 9h4v4M7 9l-4.5 4.5');
+  `<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="${d}"/></svg>`;
+const EXPAND_ICON = icon('M9.5 3H13v3.5M6.5 13H3V9.5');
+const COLLAPSE_ICON = icon('M13 6.5H9.5V3M3 9.5h3.5V13');
 
 const strings = (value: unknown): value is string[] =>
   Array.isArray(value) && value.every(row => typeof row === 'string');
@@ -51,6 +51,14 @@ export async function connectGraphApp(editor: GraphEditor) {
   const open = document.getElementById('app-open') as HTMLAnchorElement;
   const expand = document.getElementById('app-expand') as HTMLButtonElement;
   const reset = document.getElementById('app-reset') as HTMLButtonElement;
+  // The page markup says "Expand" in text; swap in the icon before any host context.
+  const labelExpand = (label: 'Expand' | 'Collapse') => {
+    if (expand.getAttribute('aria-label') === label) return;
+    expand.setAttribute('aria-label', label);
+    expand.title = label;
+    expand.innerHTML = label === 'Collapse' ? COLLAPSE_ICON : EXPAND_ICON;
+  };
+  labelExpand('Expand');
   const configuredOrigin = document.querySelector<HTMLMetaElement>('meta[name="equation-origin"]')!.content;
   const origin = configuredOrigin === '__EQUATION_ORIGIN__' ? location.origin : new URL(configuredOrigin).origin;
   // Optional ChatGPT persistence; all communication uses the standard bridge.
@@ -178,12 +186,7 @@ export async function connectGraphApp(editor: GraphEditor) {
     }
     const nextMode = context.displayMode === 'fullscreen' ? 'inline' : 'fullscreen';
     expand.hidden = !context.availableDisplayModes?.includes(nextMode);
-    const label = context.displayMode === 'fullscreen' ? 'Collapse' : 'Expand';
-    if (expand.getAttribute('aria-label') !== label) {
-      expand.setAttribute('aria-label', label);
-      expand.title = label;
-      expand.innerHTML = label === 'Collapse' ? COLLAPSE_ICON : EXPAND_ICON;
-    }
+    labelExpand(context.displayMode === 'fullscreen' ? 'Collapse' : 'Expand');
     if (connected && context.displayMode !== 'fullscreen') {
       const dims = context.containerDimensions;
       const height = dims && 'height' in dims ? dims.height : Math.min(520, dims?.maxHeight ?? 520);
