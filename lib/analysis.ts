@@ -118,11 +118,10 @@ export interface RowInfo extends RowSource {
 }
 
 export interface AnalyzeOpts {
-  backend?: 'cpu' | 'gpu' | 'both';
   /** Compute the rows' numeric readouts (`info`): P(…) and E(…) values, a
    *  derived pmf's μ and σ. They are what MCP validation reports, and they are
    *  the expensive part — a joint enumeration, or a 131072-point sample, per
-   *  row — so a caller that only draws (the og image) says false. */
+   *  row — so a caller that only compiles (perf guards) says false. */
   readouts?: boolean;
 }
 
@@ -157,7 +156,6 @@ export interface PreparedDocument {
 }
 
 export interface AnalysisContext {
-  backend?: 'cpu' | 'gpu' | 'both';
   /** Caller-owned integrated values. Analysis never resets or mutates them. */
   stateValues?: Record<string, number>;
   /** Reuse this engine across recompiles to retain numerical sample caches. */
@@ -1014,7 +1012,7 @@ export function analyzePrepared(document: PreparedDocument, context: AnalysisCon
   const rows = document.rows.map(row => ({ ...row }));
   /** Rows whose calls apply per member in a way that reads like a wrapper (perMemberNote). */
   const memberNotes = new Map<(typeof rows)[number], string>();
-  const { stateValues: stateVals = {}, time = 0, readouts = true, readoutPolicy = 'frame', backend = 'both' } = context;
+  const { stateValues: stateVals = {}, time = 0, readouts = true, readoutPolicy = 'frame' } = context;
   let constEnv: Record<string, number> = { ...stateVals };
   try {
     constEnv = evaluateFrame(defs, time, stateVals);
@@ -1698,13 +1696,13 @@ export function analyzePrepared(document: PreparedDocument, context: AnalysisCon
     }
   }
 
-  // Backend compilation is explicit and never changes the semantic object.
-  // OG requests only CPU plans; readouts do not enter compilation identity.
+  // Both backends compile from the semantic object and never change it; a
+  // GPU failure is a row error, so the MCP validates exactly as the app draws.
   for (const row of rows) {
     if (!row.cls || row.error || row.dataLocal) continue;
     try {
-      if (backend !== 'gpu' || readouts) row.cpu = compileCpu(row.cls);
-      if (backend !== 'cpu') row.gpu = compileGpu(row.cls);
+      row.cpu = compileCpu(row.cls);
+      row.gpu = compileGpu(row.cls);
       if (readouts && row.cpu) {
         try {
           const info = plotReadout(row.cpu, {
@@ -1763,12 +1761,12 @@ export function analyzePrepared(document: PreparedDocument, context: AnalysisCon
   return { rows, defs, constEnv, rvs, rvNames, gridFields, document };
 }
 
-/** Worker/preview convenience: initial state at t=0, with a fresh sampler. */
+/** Worker convenience: initial state at t=0, with a fresh sampler. */
 export function analyzeRows(
   sources: readonly (string | RowSource)[],
   options: AnalyzeOpts & PrepareOptions = {},
 ): Analysis {
   const document = prepareDocument(sources, options);
   const stateValues = document.stateSystem ? initialState(document.defs, document.stateSystem) : {};
-  return analyzePrepared(document, { stateValues, readouts: options.readouts, backend: options.backend });
+  return analyzePrepared(document, { stateValues, readouts: options.readouts });
 }

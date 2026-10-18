@@ -1,10 +1,8 @@
 /**
- * A row's kind as the tools report it: the MCP's rows (worker/mcp.ts) and
- * voice mode's get_graph (web/main.ts) share this one vocabulary.
+ * A row's kind as the MCP tools report it (worker/mcp.ts).
  */
 import type { CpuPlan } from './compiler.ts';
 import type { Definition } from './defs.ts';
-import type { PublicKind } from './math-object.ts';
 import { type Classified, publicKind } from './plot.ts';
 import type { ViewSpec } from './view.ts';
 import type { Expr } from './expr.ts';
@@ -54,75 +52,6 @@ export function rowKind(row: KindSource, names: KindNames): string | undefined {
   if (row.dataLocal) return "data (reads a file on the author's device)";
   return row.cls ? publicKind(row.cls.object) : undefined;
 }
-
-/** What each drawn row kind looks like, for the voice agent: kind names like
- *  `implicit2d` are the MCP's public vocabulary, not words a model can reason
- *  about. The Record keeps it total — a new kind fails the typecheck here. */
-export const KIND_MEANINGS: Record<PublicKind, string> = {
-  implicit2d: '2D curve (the set of points satisfying an equation)',
-  ineq2d: 'shaded 2D region (an inequality)',
-  scalar2d: '2D scalar field, shaded by sign and size (row colour positive, its complement negative)',
-  scalar3d:
-    '3D scalar field, drawn as a translucent cloud denser where the field is larger in size (row colour positive, its complement negative)',
-  implicit3d: '3D surface (the points satisfying an equation in x, y, z)',
-  spacecurve: '3D curve where surfaces intersect',
-  pcurve: 'parametric curve, traced as u runs from 0 to 1',
-  psurface: 'parametric surface over u and v in 0..1',
-  pregion: 'filled 2D region traced by two parameters (u, v, or intervals), each over its range',
-  solid: 'solid in 3D filled by three parameters (u, v, or intervals), drawn as the faces of their range',
-  projected2d: 'shaded 2D region swept by a family over an interval, like y = sin(a x) for a = interval(1, 2)',
-  vfield2d: '2D vector field, drawn as flowing streamlines',
-  tfield2d:
-    '2D matrix (tensor) field, drawn as a grid of glyphs: each the image of a small circle under the matrix, with a spoke where e_x goes; streamlines(M), or a toggle, traces its major eigenvector instead',
-  vfield3d: '3D vector field',
-  point: 'a point',
-  polygon: 'geometric figure (segment, polyline, vector arrow, polygon, circle, …)',
-  label: 'text label at a point',
-  trail: 'motion trail behind a moving point',
-  orbit: 'path of a simulated state over a time range',
-  geodesic:
-    "geodesic from a start point in a direction, integrated along a parametric surface, or in the plane under its panel's ds^2 metric (a massive particle's path in a spacetime, or a light ray from lightray(…))",
-  metric:
-    'a panel’s own metric, ds^2 = … in the differentials of its coordinates: draws nothing; geodesic and lightray rows in the panel follow it',
-  lightcone:
-    'light cones of the panel’s ds^2 metric: lightcones draws them over the panel, lightcone(P) one at a point — on a spacetime diagram the two null directions as a wedge opening to the future, with a time beside x and y the ellipse of the coordinate velocities light can have',
-  tidal:
-    'tidal forces of the panel’s ds^2 metric on an observer held at rest: tidal draws them over the panel, tidal(P) at a point — crossed bars along the directions a small cloud of free particles is stretched (arrowheads out) or squeezed (arrowheads in), as long as the tide is strong',
-  system: 'solutions of a system of equations (points or curves)',
-  value:
-    'number readout under the row; draws nothing on the graph, except a definite integral, which shades the area it measures',
-  note: 'true/false readout under the row; draws nothing on the graph',
-  tuple: 'tuple of more than 3 numbers, like sort(L) of 5 values: a readout under the row; draws nothing',
-  family: 'one copy of the row per list element',
-  multivector:
-    'multivector or quaternion, like e_xy or quat(1, 2, 3, 4): its grades drawn as arrows, oriented discs and cubes (a rotor as the turn it makes), its value read out',
-  flat: "point, line or plane of projective geometry, like join(A, B) or meet(L, M): drawn, with its equation (or an ideal point's direction) read out",
-  action: 'action(M): where a matrix sends the unit square, circle and axes, with the matrix read out',
-  complex2d: 'complex function shown on the plane',
-  domain2d: 'domain colouring of a complex function',
-  conformal2d: 'conformal map: the image of a grid under a complex function',
-  fractal2d: 'escape-time fractal',
-  rgb2d: 'colour field (RGB), filling the plane',
-  hsl2d: 'colour field (HSL), filling the plane',
-  oklch2d: 'colour field (OKLCH), filling the plane',
-  sequence: 'sequence, drawn as dots at whole numbers n',
-  cobweb: 'cobweb diagram of a recurrence',
-  bifurcation: 'bifurcation / orbit diagram of a recurrence',
-  vlist: 'list of numbers, a dot plot on the number line: each value at x = value, copies stacked upward',
-  plist: 'list of points',
-  dlist: 'data column, a dot plot on the number line: each value at x = value, copies stacked upward',
-  dscatter: 'scatter plot of data',
-  histogram: 'histogram',
-  automaton:
-    'cellular automaton on the integer lattice: a 1D rule draws its space-time diagram (cells across, steps down), a 2D rule one generation of its board, stepping with t',
-  graph:
-    'graph drawn node-link: one arrow per (from, to) element, parallel edges counted, labels on edges; laid out automatically',
-  lattice: 'table of values on the integer lattice, one cell per (i, j), shaded by value and printed when zoomed in',
-  density: 'probability density curve of a random variable',
-  pmf: 'probability mass function (stems) of a discrete random variable',
-  prob: 'probability, shaded under the density, with its value as a readout',
-  expect: 'expected value readout, marked on the density',
-};
 
 function constKind(name: string, names: KindNames): string {
   // `adults = person[…]` scans as a constant, but what it defines is another data file.

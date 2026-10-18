@@ -61,10 +61,7 @@ improvement.
 ## Local verification
 
 ```sh
-pnpm web:build
-pnpm exec wrangler dev --config dist-web/equation/wrangler.json --port 5196
-# In another terminal:
-node scripts/mcp-app-test.ts
+pnpm test:prod   # builds, serves it with wrangler dev, runs scripts/mcp-app-test.ts and friends
 pnpm exec vitest run worker/mcp.test.ts
 pnpm typecheck
 ```

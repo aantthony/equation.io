@@ -33,7 +33,6 @@ import { nextFeatured } from '../lib/featured.ts';
 import { declaredNames } from '../lib/regression.ts';
 import { PointTrail } from '../lib/point-trail.ts';
 import {
-  animatedConstNames,
   constsAnimated,
   definitionDependencies,
   formatTableRow,
@@ -75,7 +74,7 @@ import {
 import { fieldScale } from '../lib/volume.ts';
 import { coordinateDragWriter, dragAxes } from '../lib/drag.ts';
 import { type SliderForm, sliderBounds, sliderForm, sliderValue, withBounds, writeSlider } from '../lib/slider.ts';
-import { DRAW_OP_SRC, type Expr, canonicalName, evaluate, freeVars, parseExpr, substVars } from '../lib/expr.ts';
+import { type Expr, canonicalName, evaluate, freeVars, parseExpr, substVars } from '../lib/expr.ts';
 import { gpuFor, shaderBindings } from './render-plan.ts';
 import { typedEscape } from '../lib/escapes.ts';
 import { fieldEvaluator, streamline, traceField } from '../lib/flow.ts';
@@ -94,9 +93,7 @@ import {
   pathSampler,
   regionSampler,
 } from '../lib/path.ts';
-import { type Classified, dotPlot, plotReadout, publicKind, valueReadout } from '../lib/plot.ts';
-import { KIND_MEANINGS, rowKind } from '../lib/row-kind.ts';
-import { mvOfNode } from '../lib/clifford.ts';
+import { type Classified, dotPlot, plotReadout, valueReadout } from '../lib/plot.ts';
 import { solveSystem } from '../lib/solve.ts';
 import { TraceQueue, traceEnvironment, type TraceMessage, type TraceResult } from '../lib/trace-queue.ts';
 import { type SpecialPoint, curveTracer, fmtTraced, mappedSpecialPoints, specialPoints } from '../lib/special.ts';
@@ -110,7 +107,6 @@ import {
   clampPhi,
   scaleViewAt,
   fitPanelWindow,
-  fitView2D,
   linkedWindow,
   formatCameraRow,
   formatViewSpec,
@@ -138,8 +134,6 @@ import {
 import { type Table, tableNameFor } from '../lib/csv.ts';
 import { shortHash } from '../lib/hash.ts';
 import EmbeddedTraceWorker from './trace-worker.ts?worker&inline';
-import type { GraphState, MoveViewTarget, RowStatus, VoiceHost } from './voice.ts';
-import { readKey as readVoiceKey } from './voice-key.ts';
 import { ingest, listFiles, loadRefs, lookup as lookupFile, removeFile } from './filestore.ts';
 import { type Frame, fullscreenQuad } from './gl.ts';
 import {
@@ -565,9 +559,8 @@ interface Panel {
   /** Row texts last applied to the live view/camera (see applyViewportRows). */
   appliedViewText: string | null;
   appliedCameraText: string | null;
-  /** A camera row's `spin = …` in radians per second, and the ease-in factor. */
+  /** A camera row's `spin = …` in radians per second. */
   spin: number;
-  spinScale: number;
   /** Click-dropped seeds for integral curves through vector fields / ODEs. */
   drops: Array<{ x: number; y: number }>;
   /** What the pointer can grab, in math coords (x and y on a surface);
@@ -597,7 +590,6 @@ function makePanel(key: number): Panel {
     appliedViewText: null,
     appliedCameraText: null,
     spin: 0,
-    spinScale: 1,
     drops: [],
     grabs: [],
     surfaceDots: [],
@@ -606,7 +598,7 @@ function makePanel(key: number): Panel {
 }
 
 const panels: Panel[] = [makePanel(0)];
-/** The panel gestures, hover and voice mode act on: the one under the pointer. */
+/** The panel gestures and hover act on: the one under the pointer. */
 let activePanel = panels[0];
 let cur = panels[0];
 let view = cur.view;
@@ -660,7 +652,7 @@ function panelAtClient(clientX: number, clientY: number): Panel {
   return panels[i] ?? panels[0];
 }
 
-/** Point gestures, hover and voice mode at `p` from now on. */
+/** Point gestures and hover at `p` from now on. */
 function activate(p: Panel) {
   activePanel = p;
   usePanel(p);
@@ -896,75 +888,6 @@ function resetState() {
   stateTime = graphTime();
 }
 
-// --- tweens: voice mode's slider animations and camera moves ---
-
-interface Tween {
-  start: number;
-  ms: number;
-  ease: (k: number) => number;
-  step: (k: number) => void;
-  /** Settles the change (row, URL): `finished` on arrival, not when cancelled. */
-  done?: (finished: boolean) => void;
-}
-const tweens = new Map<string, Tween>();
-let tweenFrame: number | null = null;
-const linear = (k: number) => k;
-const easeInOut = (k: number) => (k < 0.5 ? 4 * k * k * k : 1 - (-2 * k + 2) ** 3 / 2);
-
-function tween(
-  key: string,
-  seconds: number,
-  ease: (k: number) => number,
-  step: (k: number) => void,
-  done?: (finished: boolean) => void,
-) {
-  cancelTween(key);
-  tweens.set(key, { start: performance.now(), ms: Math.max(0, seconds) * 1000, ease, step, done });
-  if (document.hidden) finishTweens();
-  else tweenFrame ??= requestAnimationFrame(runTweens);
-}
-
-/**
- * Jumps every tween to its end. A hidden tab gets no animation frames, so a
- * glide would otherwise stall half way, and a tool call waiting on it forever.
- */
-function finishTweens() {
-  for (const [key, t] of tweens) {
-    tweens.delete(key);
-    t.step(t.ease(1));
-    t.done?.(true);
-  }
-}
-document.addEventListener('visibilitychange', () => {
-  if (document.hidden) finishTweens();
-});
-
-function cancelTween(key: string) {
-  const t = tweens.get(key);
-  if (!t) return;
-  tweens.delete(key);
-  t.done?.(false);
-}
-
-/** The student's undo, or a new document, takes the graph back from voice mode's animations. */
-function stopVoiceTweens() {
-  for (const key of [...tweens.keys()]) if (key === 'view' || key.startsWith('slider:')) cancelTween(key);
-}
-
-function runTweens(now: number) {
-  for (const [key, t] of tweens) {
-    const k = t.ms ? Math.min(1, Math.max(0, (now - t.start) / t.ms)) : 1;
-    t.step(t.ease(k));
-    // A step may have cancelled its own tween.
-    if (k >= 1 && tweens.get(key) === t) {
-      tweens.delete(key);
-      t.done?.(true);
-    }
-  }
-  // Cleared only now: a tween started by a done() above joins this chain, not a second one.
-  tweenFrame = tweens.size ? requestAnimationFrame(runTweens) : null;
-}
-
 // --- viewport rows: the two-way binding ---
 //
 // A `view(…)` / `camera(…)` row is the framing as document state. Row → view:
@@ -978,7 +901,7 @@ function runTweens(now: number) {
 
 // A camera row's `spin = …`: the live camera turns about the vertical axis at
 // its rate (radians per second) while the row keeps its starting angle, so a
-// spin never rewrites the URL. A panel's spinScale eases a new spin in from rest.
+// spin never rewrites the URL.
 let lastSpinAt: number | null = null;
 
 /** Whether eq is a real system on a mapped panel, solved rewritten in its
@@ -1245,7 +1168,7 @@ function applyViewportRows() {
 // gesture by a beat instead of running per move; release flushes it so the
 // row, URL, and undo entry are settled the moment the gesture ends.
 let viewportWriteTimer: ReturnType<typeof setTimeout> | null = null;
-/** The pending writeback makes its own undo entry: a gesture's does; a voice-mode move made one up front. */
+/** The pending writeback makes its own undo entry. */
 let viewportWriteUndo = false;
 /** Panels whose window or camera moved since the last writeback: only their
  *  rows are rewritten, so a gesture never reformats an untouched panel's row. */
@@ -1299,15 +1222,14 @@ function resetViewport() {
 }
 
 /** Turns each live camera by its spin since the last frame. A hand on the
- *  graph or a camera move in flight holds it, and it resumes from there. */
+ *  graph holds it, and it resumes from there. */
 function advanceSpin() {
   const now = performance.now();
   const dt = lastSpinAt === null ? 0 : Math.min(0.1, (now - lastSpinAt) / 1000);
   lastSpinAt = now;
-  if (tweens.has('view')) return;
   for (const p of panels) {
     if (p.mode !== '3d' || !p.spin || (pointers.size && p === activePanel)) continue;
-    p.camera.theta += p.spin * p.spinScale * dt;
+    p.camera.theta += p.spin * dt;
   }
 }
 
@@ -1316,25 +1238,6 @@ function panelRowEnd(p: Panel): number {
   const i = panels.indexOf(p);
   const next = equations.findIndex(e => (e.panel ?? 0) > i);
   return next < 0 ? equations.length : next;
-}
-
-/** Sets the current panel's camera-row spin (creating the row if needed), easing it in. */
-function setCameraSpin(spin: number) {
-  if (mode !== '3d') return;
-  const p = cur;
-  p.spin = spin;
-  movedPanels.add(p);
-  if (viewportRow('camera')) writebackViewport(true);
-  else {
-    pushUndo(null);
-    p.appliedCameraText = addEquation(formatCameraRow({ ...camera, spin }), panelRowEnd(p)).text;
-    recompileAll();
-    renderAll();
-    saveUrl();
-  }
-  p.spinScale = 0;
-  tween(`spin:${p.key}`, 1.2, easeInOut, k => (p.spinScale = k));
-  requestRender();
 }
 
 function ensureViewRow() {
@@ -3754,7 +3657,6 @@ function recompileAll() {
     stateValues: stateVals,
     rvs: rvSys,
     readoutPolicy: 'static',
-    backend: 'both',
   });
   runtimeSliders = runtimeSliderNames(analysis);
   gridFields = analysis.gridFields.map(spec => ({ ...compileGridCpu(spec), ...compileGridGpu(spec) }));
@@ -4402,7 +4304,6 @@ function restoreSnapshot(s: Snapshot) {
 function doUndo() {
   const s = undoStack.pop();
   if (!s) return;
-  stopVoiceTweens();
   redoStack.push(takeSnapshot(caretPos()));
   coalesce = null;
   restoreSnapshot(s);
@@ -4411,7 +4312,6 @@ function doUndo() {
 function doRedo() {
   const s = redoStack.pop();
   if (!s) return;
-  stopVoiceTweens();
   undoStack.push(takeSnapshot(caretPos()));
   coalesce = null;
   restoreSnapshot(s);
@@ -4466,8 +4366,6 @@ function makeSlider(eq: Equation): SliderUI {
   box.append(min, range, max);
 
   range.addEventListener('input', () => {
-    // A hand on the slider takes it back from a voice-mode animation.
-    cancelTween(`slider:${eq.id}`);
     setSlider(eq, Number(range.value));
   });
   // A drag is one undo entry: coalesced while it lasts, sealed on release.
@@ -5538,7 +5436,6 @@ document.addEventListener('selectionchange', () => {
 let emptyDefault = ['y = sin(x)'];
 
 function replaceDocument(rows: string[], share: boolean) {
-  stopVoiceTweens();
   pushUndo(null);
   resetViewport();
   equations.length = 0;
@@ -6347,7 +6244,6 @@ function zoomAt(clientX: number, clientY: number, factor: number) {
 }
 
 canvas.addEventListener('pointerdown', e => {
-  cancelTween('view'); // the user's hand beats a voice-mode camera move
   setHover(null); // a tooltip must not survive the gesture that moves the plot
   lastHoverAt = null; // nor may a deferred recompute re-pick mid-gesture
   // A gesture belongs to the panel it starts in, wherever it wanders.
@@ -6537,7 +6433,6 @@ canvas.addEventListener(
   'wheel',
   e => {
     e.preventDefault();
-    cancelTween('view');
     setHover(null);
     if (!pointers.size) activate(panelAtClient(e.clientX, e.clientY));
     const factor = Math.exp(Math.max(-60, Math.min(60, e.deltaY)) * 0.002);
@@ -6614,466 +6509,6 @@ initPanelSwipe(
 // persists; double-click resets).
 initPanelResize(document.getElementById('panel')!, document.getElementById('panel-resize')!);
 
-// --- voice mode ---
-
-const hexColor = (rgb: [number, number, number]) =>
-  '#' +
-  rgb
-    .map(c =>
-      Math.round(c * 255)
-        .toString(16)
-        .padStart(2, '0'),
-    )
-    .join('');
-/** Voice readouts are spoken: six significant digits is already plenty. */
-const round6 = (v: number) => parseFloat(v.toPrecision(6));
-/** Notable points per row: a wiggly curve can have dozens, and each costs tokens. */
-const MAX_VOICE_POINTS = 12;
-
-/** Intercepts and extrema in view, computed now: the hover cache is filled lazily and may be stale. */
-function visiblePoints(eq: Equation): string[] {
-  if (!eq.cls || eq.error || eq.cpu?.type !== 'implicit2d' || eq.cls.animated || mode !== '2d') return [];
-  computeSpecialPoints(eq);
-  const { halfW, halfH } = hoverHalfSpan();
-  // Cached on the screen; a mapped panel's points read in x and y.
-  const maps = panelMaps(panels[panelOf(eq)]);
-  const world = (map: AxisMap | undefined, v: number) => (map ? toWorld(map, v) : v);
-  const read = (p: SpecialPoint): [number, number] =>
-    maps?.plane ? planeToWorld(maps.plane, p.x, p.y) : [world(maps?.x, p.x), world(maps?.y, p.y)];
-  return (eq.spCache?.pts ?? [])
-    .filter(p => Math.abs(p.x - view.cx) <= halfW && Math.abs(p.y - view.cy) <= halfH)
-    .slice(0, MAX_VOICE_POINTS)
-    .map(p => {
-      const [x, y] = read(p);
-      return `(${round6(x)}, ${round6(y)}): ${p.lines.join(', ')}`;
-    });
-}
-
-/**
- * Whether any other row reads `name`. A definition nothing reads draws
- * nothing, yet validates fine — `r = sin(8t)` is a perfectly good constant —
- * so voice mode flags it; otherwise the voice model announces a curve that isn't there.
- *
- * A plot's compiled parameters, followed through the constants they read,
- * are exact. Functions are inlined and points drawn apart from plots, so
- * those fall back to the row's text: canonical names (T₀ is T_0), a digit
- * coefficient allowed before (`2f(x)`), comments and label text ignored.
- */
-function usedElsewhere(eq: Equation, name: string): boolean {
-  const others = equations.filter(other => other !== eq && !other.comment && !other.viewSpec);
-  const read = definitionDependencies(
-    others.flatMap(other => other.cls?.params ?? []),
-    defs,
-  );
-  if (read.has(name)) return true;
-  const word = new RegExp(`(?<![\\p{L}_])${name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?![\\p{L}\\p{N}_])`, 'u');
-  return others.some(other => word.test(canonicalName(stripNote(other.text).replace(/"[^"]*"/g, '""'))));
-}
-
-/**
- * What a definition row makes, from its typed binding: `r = sin(16t)` is "a
- * scalar constant that changes with time", not just "definition (const)". The
- * binding is what later rows see, so this is the type the model has to reason
- * about when it uses the name.
- */
-function definitionMeaning(def: Definition, eq: Equation, animated: ReadonlySet<string>): string {
-  const { name } = def;
-  switch (def.kind) {
-    case 'init':
-      return `sets where the state ${name} starts (its value at t = 0)`;
-    case 'table':
-      return `opens the data file ${def.file} as the table ${name}`;
-    case 'regression':
-      return `fits the model ${def.lhs} ~ ${def.rhs} to data, defining its parameters`;
-    case 'fn':
-      return `defines the function ${name}(${def.params.join(', ')}); draws nothing until another row uses it${
-        def.params.length === 1 && def.params[0] === 'x' ? `, e.g. y = ${name}(x)` : ''
-      }`;
-  }
-  const entry = defs.names.get(name);
-  const b = entry?.kind === 'binding' ? entry.binding : undefined;
-  const quiet = '; draws nothing by itself';
-  if (!b) return `defines ${name}${quiet}`;
-  switch (b.tag) {
-    case 'scalar':
-      if (b.role === 'state')
-        return `defines ${name}: a scalar state, integrated forward in time from its derivative${quiet}`;
-      if (b.role === 'complex') return `defines ${name}: a complex number${quiet}`;
-      if (b.role === 'condition') return `defines ${name}: a condition, read in braces like {${name}: 1}${quiet}`;
-      if (b.role === 'field')
-        return `defines ${name}: a scalar field (a value at every point, e.g. a coordinate like r or theta)${quiet}`;
-      if (sliderOf(eq)) return `defines ${name}: a scalar constant with a slider${quiet}`;
-      return `defines ${name}: a scalar constant${animated.has(name) ? ' that changes with time (t)' : ''}${quiet}`;
-    case 'vector': {
-      const dim = b.role === 'state' ? b.init.length : b.components.length;
-      if (b.role === 'state')
-        return `defines ${name}: a ${dim}D vector state, integrated forward in time from its derivative${quiet}; a row "${name}" draws it as a moving point`;
-      if (b.role === 'field') return `defines ${name}: a ${dim}D vector field${quiet}`;
-      return defs.points.has(name)
-        ? `defines ${name}: a named ${dim}D point, drawn on the graph`
-        : `defines ${name}: a ${dim}D vector${quiet}`;
-    }
-    case 'fn':
-      return `defines the function ${name}${quiet}`;
-    case 'matrix':
-      return `defines ${name}: a matrix${quiet}`;
-    case 'tensor':
-      return `defines ${name}: a ${b.tensor.shape.join('×')} tensor${quiet}`;
-    case 'seq':
-      return `defines ${name}: a list${quiet}`;
-    case 'table':
-      return `defines ${name}: a data table${quiet}`;
-    case 'rv':
-      return `defines ${name}: a random variable`;
-    case 'missing':
-      return `defines ${name} from a data file that is not on this device`;
-    case 'multivector':
-      return `defines ${name}: a ${mvOfNode(b.value)?.quat ? 'quaternion' : 'multivector'}${quiet}`;
-    case 'interval':
-      return `defines ${name}: a continuous interval, one hidden parameter shared by every row that uses ${name}${quiet}`;
-  }
-}
-
-function rowStatus(eq: Equation, index: number, animated: ReadonlySet<string>): RowStatus {
-  if (eq.error) {
-    const row: RowStatus = { index, text: eq.text, status: 'error', error: eq.error };
-    // `surface((…))` fails as an unknown *variable* times a bracket, and the
-    // app's slider suggestion then misleads a model; name the real problem.
-    // The call may sit in a helper the row uses: `f(x) = surface(x)`, then `y = f(x)`.
-    const unknown = /^Unknown variable: (\w+)\./.exec(eq.error)?.[1];
-    const call = unknown && new RegExp(`(?<![\\w])${unknown}\\s*\\(`);
-    if (call && [eq, ...equations.filter(o => o.def?.kind === 'fn')].some(o => call.test(stripNote(o.text)))) {
-      row.hint = `${unknown}(…) is not a built-in function; call read_syntax to find the right form`;
-    }
-    return row;
-  }
-  const row: RowStatus = { index, text: eq.text, status: 'ok' };
-  if (!eq.text.trim()) return row;
-  row.kind = rowKind({ ...eq, view: eq.viewSpec }, defs);
-  row.meaning = eq.comment
-    ? 'group heading; draws nothing'
-    : eq.def
-      ? definitionMeaning(eq.def, eq, animated)
-      : eq.viewSpec
-        ? {
-            view: 'sets the 2D window',
-            camera: 'sets the 3D camera',
-            grid: "sets what draws behind its panel's plots",
-            split: 'starts a new panel; the rows below it draw there',
-            surface: "sets the surface its panel's rows are drawn on, in 3D",
-          }[eq.viewSpec.kind]
-        : eq.dist
-          ? row.kind
-          : eq.cls
-            ? KIND_MEANINGS[publicKind(eq.cls.object)] +
-              (eq.cls.needs3D && !KIND_MEANINGS[publicKind(eq.cls.object)].includes('3D') ? ' (in 3D)' : '') +
-              (eq.cls.animated ? '; moves with time t' : '')
-            : undefined;
-  // A 3D scene leaves 2D-only plots out (render()), however valid they are.
-  const surface = panels[panelOf(eq)] && panelSurface(panels[panelOf(eq)]);
-  const skipped =
-    panels[panelOf(eq)]?.mode === '3d' &&
-    !!eq.cls &&
-    !eq.def &&
-    renderMembers(eq).every(m => SKIPPED_IN_3D.has(m.cpu!.type) && !(surface && m.cls && surfaceMapping(m.cls.object)));
-  if (skipped) {
-    row.warning = 'not drawn: another row makes this graph 3D, and a 3D scene leaves out 2D-only plots like this one';
-  }
-  const draws = eq.cls && !eq.def && !eq.comment && !eq.viewSpec && !skipped;
-  if (draws) row.color = hexColor(rowColor(eq));
-  if (eq.info) row.value = eq.info;
-  else if (eq.def?.kind === 'const' && constEnv[eq.def.name] !== undefined)
-    row.value = String(round6(constEnv[eq.def.name]));
-  if (eq.cls?.animated) row.animated = true;
-  const def = eq.def;
-  if ((def?.kind === 'const' || def?.kind === 'fn') && !defs.points.has(def.name) && !usedElsewhere(eq, def.name)) {
-    row.warning = `this defines ${def.name}, but no other row uses it, so nothing is drawn`;
-  }
-  const points = draws ? visiblePoints(eq) : [];
-  if (points.length) row.points = points;
-  return row;
-}
-
-/** The name a row defines, or draws (`p ∈ A`, `p \in A`), as matchRows reads it. */
-const ROW_NAME_RE = new RegExp(String.raw`^([^=<>~]+?)\s*(?:=(?!=)|${DRAW_OP_SRC})`);
-
-/**
- * Which existing row each of set_graph's texts continues, so rows keep their
- * color and widgets when the model inserts or drops one: the same text first,
- * then a row defining the same name (`a = 2` → `a = 3` keeps a's slider
- * range), then what is left in order (an edited curve keeps its color, but
- * not another row's toggles). Undefined for texts that start a new row.
- */
-function matchRows(texts: string[]): (Equation | undefined)[] {
-  const free = new Set(equations);
-  const out: (Equation | undefined)[] = texts.map(() => undefined);
-  const claim = (i: number, eq: Equation | undefined) => {
-    if (!eq || out[i]) return;
-    out[i] = eq;
-    free.delete(eq);
-  };
-  const lhs = (t: string) => ROW_NAME_RE.exec(stripNote(t))?.[1];
-  texts.forEach((t, i) =>
-    claim(
-      i,
-      [...free].find(eq => eq.text === t),
-    ),
-  );
-  texts.forEach((t, i) => {
-    const name = lhs(t);
-    if (name)
-      claim(
-        i,
-        [...free].find(eq => lhs(eq.text) === name),
-      );
-  });
-  texts.forEach((t, i) => {
-    const eq = [...free][0];
-    // A fresh object with the old color: another row's toggles don't carry over.
-    if (eq && !out[i]) {
-      free.delete(eq);
-      out[i] = { id: nextId++, text: t, colorIndex: eq.colorIndex };
-    }
-  });
-  return out;
-}
-
-/** Voice mode frames the first panel of a split view: the graph's own. */
-function voiceGraph(): GraphState {
-  return withPanel(panels[0], panelGraph);
-}
-
-function panelGraph(): GraphState {
-  // Slider values as of now: render() refreshes these on the next frame,
-  // which a tool call answering straight after set_graph would not wait for.
-  constEnv = currentConstEnv(graphTime());
-  const animated = animatedConstNames(defs);
-  const { halfW, halfH } = hoverHalfSpan();
-  return {
-    mode,
-    ...(mode === '2d'
-      ? {
-          window: {
-            x: [round6(view.cx - halfW), round6(view.cx + halfW)] as [number, number],
-            y: [round6(view.cy - halfH), round6(view.cy + halfH)] as [number, number],
-          },
-        }
-      : {
-          // The live camera, spin included, so a move can be relative ("turn a bit left").
-          camera: {
-            theta: round6(camera.theta - 2 * Math.PI * Math.round(camera.theta / (2 * Math.PI))),
-            phi: round6(camera.phi),
-            radius: round6(camera.radius),
-            target: camera.target.map(round6) as [number, number, number],
-            spin: cur.spin,
-          },
-        }),
-    rows: equations.map((eq, i) => rowStatus(eq, i, animated)),
-  };
-}
-
-/** Voice mode's animate_slider: glides a slider row to a value at a constant rate. */
-function animateSlider(name: string, to: number, seconds: number, from?: number): object {
-  const eq = equations.find(e => sliderOf(e)?.def.name === name);
-  if (!eq) {
-    const names = equations.flatMap(e => sliderOf(e)?.def.name ?? []);
-    return { error: `no slider named "${name}"${names.length ? `; sliders: ${names.join(', ')}` : ''}` };
-  }
-  // The slider's own value: for a(0) that is where the state starts, not
-  // where it has integrated to.
-  const start = from ?? sliderOf(eq)!.form.literal;
-  const whole = sliderWhole(eq);
-  // moveSlider holds values to the slider's range: report where it will stop.
-  const end = moveSlider(eq, whole ? Math.round(to) : to)?.value ?? to;
-  const key = `slider:${eq.id}`;
-  cancelTween(key);
-  // One undo entry for the whole glide; its frames write without one, so
-  // glides running together can't flood the stack.
-  pushUndo(null);
-  if (from !== undefined) setSlider(eq, start, false);
-  let written = eq.text;
-  tween(key, seconds, linear, k => {
-    // The student typed in the row, undid, or opened another graph: it's theirs now.
-    if (eq.text !== written || !equations.includes(eq)) return cancelTween(key);
-    // Whole-number sliders (Σ bounds, the n of Binomial(n, p)) glide in
-    // steps: a fraction would error the row for the whole glide.
-    const v = start + (to - start) * k;
-    setSlider(eq, whole ? Math.round(v) : v, false);
-    written = eq.text;
-  });
-  return { slider: name, from: start, to: end, seconds, ...(end !== to ? { note: `held to the slider's range` } : {}) };
-}
-
-/**
- * Voice mode's move_view: eases the 2D window or the 3D camera to a new
- * framing, answering once it is there, so a point_at straight after sees the
- * new view.
- */
-function moveView(target: MoveViewTarget, seconds: number): object | Promise<object> {
-  return withPanel(panels[0], () => movePanelView(target, seconds));
-}
-
-/** The current panel's move; the eases hold on to it, whatever panel is current when they run. */
-function movePanelView(target: MoveViewTarget, seconds: number): object | Promise<object> {
-  const p = cur;
-  const { view, camera } = p;
-  if (mode === '2d') {
-    if (target.spin !== undefined) return { error: 'spin turns the 3D camera; this graph is 2D' };
-    if (!target.x && !target.y) return { error: 'the graph is 2D: give x and/or y ranges' };
-    const bad = [target.x, target.y].some(r => r && !(r[1] > r[0]));
-    if (bad) return { error: 'each range must be [low, high] with high > low' };
-    const a = { cx: view.cx, cy: view.cy, upp: view.upp };
-    const b = fitView2D(
-      { kind: 'view', x: target.x, y: target.y, ratio: view.ratio },
-      p.layout.rect.w,
-      p.layout.rect.h,
-    );
-    // One range given: the other axis keeps its centre (fitView2D would put it at 0).
-    if (!target.x) b.cx = a.cx;
-    if (!target.y) b.cy = a.cy;
-    cancelTween('view');
-    // One undo entry for the move; its frames' writebacks make none.
-    if (viewportRow('view')) pushUndo(null);
-    return new Promise(resolve =>
-      tween(
-        'view',
-        seconds,
-        easeInOut,
-        k => {
-          view.cx = a.cx + (b.cx - a.cx) * k;
-          view.cy = a.cy + (b.cy - a.cy) * k;
-          // Zoom geometrically, so a 100x zoom doesn't spend its first half barely moving.
-          view.upp = a.upp * (b.upp / a.upp) ** k;
-          scheduleViewportWriteback(false, p);
-          requestRender();
-        },
-        finished => {
-          flushViewportWriteback();
-          resolve(finished ? { ...voiceGraph().window!, seconds } : STOPPED);
-        },
-      ),
-    );
-  }
-  const moves =
-    target.theta !== undefined || target.phi !== undefined || target.radius !== undefined || !!target.target;
-  if (!moves && target.spin === undefined)
-    return { error: 'the graph is 3D: give theta, phi, radius, target and/or spin' };
-  if (!moves) {
-    withPanel(p, () => setCameraSpin(target.spin!));
-    return { spin: target.spin, note: 'saved in the camera row' };
-  }
-  const a = { ...camera, target: [...camera.target] };
-  // The short way round, not a spin through 350 degrees.
-  const turn = 2 * Math.PI;
-  const dTheta = target.theta === undefined ? 0 : ((((target.theta - a.theta) % turn) + 3 * Math.PI) % turn) - Math.PI;
-  const phi = target.phi === undefined ? a.phi : clampPhi(target.phi);
-  const radius = target.radius ?? a.radius;
-  const goal = target.target ?? a.target;
-  cancelTween('view');
-  if (viewportRow('camera')) pushUndo(null);
-  return new Promise(resolve =>
-    tween(
-      'view',
-      seconds,
-      easeInOut,
-      k => {
-        camera.theta = a.theta + dTheta * k;
-        camera.phi = a.phi + (phi - a.phi) * k;
-        camera.radius = a.radius * (radius / a.radius) ** k;
-        camera.target = [0, 1, 2].map(i => a.target[i] + (goal[i] - a.target[i]) * k) as [number, number, number];
-        scheduleViewportWriteback(false, p);
-        requestRender();
-      },
-      finished => {
-        flushViewportWriteback();
-        if (!finished) return resolve(STOPPED);
-        // Arrive, then ease into the spin: the camera never jerks from rest to
-        // full speed. A hand that stopped the move stops the spin too.
-        if (target.spin !== undefined) withPanel(p, () => setCameraSpin(target.spin!));
-        resolve({
-          ...voiceGraph().camera!,
-          seconds,
-          ...(target.spin !== undefined ? { note: 'spinning now; saved in the camera row' } : {}),
-        });
-      },
-    ),
-  );
-}
-
-/** A move the student cut short by grabbing the graph, or one a new graph replaced. */
-const STOPPED = { stopped: 'the view was taken over before the move finished; call get_graph for where it is' };
-
-/** Where a math point is on the page (client pixels), or null when it can't be seen. */
-function toClient(x: number, y: number, z = 0): { x: number; y: number } | null {
-  return withPanel(panels[0], () => {
-    const rect = panelClientRect();
-    let sx: number, sy: number;
-    if (mode === '2d') {
-      const m = screenMap();
-      sx = m.rect.left + m.toSx(x) - rect.left;
-      sy = m.rect.top + m.toSy(y) - rect.top;
-    } else {
-      const vp = cameraMatrices(camera, rect.width / rect.height).vp;
-      const at = projectToScreen(vp, [x, y, z], rect.width, rect.height);
-      if (!at) return null;
-      [sx, sy] = at;
-    }
-    if (sx < 0 || sy < 0 || sx > rect.width || sy > rect.height) return null;
-    return { x: rect.left + sx, y: rect.top + sy };
-  });
-}
-
-// Before boot: boot canonicalizes the URL, which would drop the ?voice=
-// unlock before it could be read. Voice mode itself loads only for an
-// unlocked browser; everyone else never downloads it.
-const voiceBtn = document.getElementById('voice') as HTMLButtonElement | null;
-if (voiceBtn && !embedded && readVoiceKey()) {
-  const host: VoiceHost = {
-    graph: voiceGraph,
-    setRows(rows) {
-      // Like an edit, not like opening an example: rows keep their objects
-      // (colors, slider ranges, toggles), and the viewport stays put.
-      // A running animation or camera move would now drive whatever took its place.
-      stopVoiceTweens();
-      pushUndo(null);
-      // One entry per row, as MCP and pasting read them: `y = x^2; y = 2x` is two.
-      const texts = rows
-        .flatMap(t => splitStatements(t))
-        .map(t => t.trim())
-        .filter(Boolean);
-      if (!texts.length) texts.push('');
-      const next = matchRows(texts);
-      equations.length = 0;
-      for (const [i, t] of texts.entries()) {
-        const eq = next[i] ?? addEquation(t);
-        eq.text = t;
-        equations[i] = eq;
-      }
-      recompileAll();
-      renderAll();
-      // render() settles 2D vs 3D and applies view()/camera() rows on the next
-      // frame, but the reply, and the model's next call (a 3D move_view, say),
-      // come before it.
-      syncPanels();
-      applyViewportRows();
-      activate(panels[0]);
-      urlPending = true;
-      flushUrl();
-      requestRender();
-      return voiceGraph();
-    },
-    animateSlider,
-    moveView,
-    toClient,
-    screenshot(maxEdge) {
-      if (!capture) throw new Error('screenshots unavailable');
-      return { canvas: capture.still(maxEdge), rect: canvas.getBoundingClientRect() };
-    },
-    notice: showNotice,
-  };
-  void import('./voice.ts').then(voice => voice.initVoice(voiceBtn, host));
-}
-
 // --- boot ---
 
 /** The graph payload the current URL names: the /g/ path, or a legacy
@@ -7123,7 +6558,6 @@ function loadFromUrl() {
   const wanted = rows.length ? rows : emptyDefault;
   const current = equations.map(e => e.text);
   if (wanted.length === current.length && wanted.every((t, i) => t === current[i])) return;
-  stopVoiceTweens();
   resetViewport();
   equations.length = 0;
   wanted.forEach(t => addEquation(t));

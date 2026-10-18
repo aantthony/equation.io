@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { arrowConeInstances, buildUnitCone, coneBasis, CONE_SIDES } from './cone.ts';
+import { arrowConeInstances, buildUnitCone, CONE_SIDES } from './cone.ts';
 import { finiteRuns } from './curve3d.ts';
 
 const cross = (a: number[], b: number[]) => [
@@ -51,37 +51,6 @@ describe('buildUnitCone', () => {
       sub(vert(mesh.positions, i2), vert(mesh.positions, i0)),
     );
     expect(n[2]).toBeLessThan(0);
-  });
-});
-
-describe('coneBasis', () => {
-  it('for dir = +x: x = +y, y = +z (right-handed, z-up world)', () => {
-    // dir +x, helper (0,0,1): x = (0,0,1)×(1,0,0) = (0,1,0), y = (1,0,0)×(0,1,0) = (0,0,1).
-    const b = coneBasis([1, 0, 0]);
-    expect(b.z).toEqual([1, 0, 0]);
-    expect(b.x[0]).toBeCloseTo(0);
-    expect(b.x[1]).toBeCloseTo(1);
-    expect(b.x[2]).toBeCloseTo(0);
-    expect(b.y[0]).toBeCloseTo(0);
-    expect(b.y[1]).toBeCloseTo(0);
-    expect(b.y[2]).toBeCloseTo(1);
-  });
-
-  it('maps the unit tip to the instance tip and the base behind it', () => {
-    const tip: [number, number, number] = [3, 4, 5];
-    const { x, y, z } = coneBasis([0, 0, 2]);
-    const height = 2,
-      radius = 0.8;
-    const world = (p: [number, number, number]) => [
-      tip[0] + x[0] * p[0] * radius + y[0] * p[1] * radius + z[0] * p[2] * height,
-      tip[1] + x[1] * p[0] * radius + y[1] * p[1] * radius + z[1] * p[2] * height,
-      tip[2] + x[2] * p[0] * radius + y[2] * p[1] * radius + z[2] * p[2] * height,
-    ];
-    expect(world([0, 0, 0])).toEqual(tip);
-    const base = world([0, 0, -1]);
-    expect(base[0]).toBeCloseTo(3);
-    expect(base[1]).toBeCloseTo(4);
-    expect(base[2]).toBeCloseTo(3);
   });
 });
 

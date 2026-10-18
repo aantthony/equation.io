@@ -5,7 +5,7 @@
  *   blob1    kind     call | type
  *   blob2    tool     encode_graph_url | show_graph | decode_graph_url
  *   blob3    client   the User-Agent's product name (claude-user, node, …)
- *   blob4    type     a graph type (lib/row-kind.ts KIND_MEANINGS); '' on a call
+ *   blob4    type     a graph type (PublicKind, lib/math-object.ts); '' on a call
  *   blob5    reason   failed calls only: a FailReason, never the error message
  *   double1  rows           calls only
  *   double2  error rows     calls only: rows that came back status "error"

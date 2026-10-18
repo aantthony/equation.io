@@ -18,7 +18,7 @@ const sphere = (n: number) => [
 ];
 
 const polygonPlan = (rows: string[], at = rows.length - 1) => {
-  const analysis = analyzeRows(rows, { backend: 'cpu', readouts: false });
+  const analysis = analyzeRows(rows, { readouts: false });
   const row = analysis.rows[at];
   expect(row.error).toBeUndefined();
   if (row.cpu?.type !== 'polygon') throw new Error(`expected a polygon plan, got ${row.cpu?.type}`);
@@ -94,7 +94,7 @@ describe('packed figures', () => {
   });
 
   it('keep the limits and messages of an unpacked figure', () => {
-    const error = (rows: string[]) => analyzeRows(rows, { backend: 'cpu', readouts: false }).rows.at(-1)!.error;
+    const error = (rows: string[]) => analyzeRows(rows, { readouts: false }).rows.at(-1)!.error;
     expect(error(['a = 1', 'k = sort([0])', 'polyline((k, a k))'])).toMatch(/at least 2 points/);
     expect(error(['a = 1', 'k = sort([0, 1])', 'polygon((k, a k))'])).toMatch(/at least 3 vertices/);
     // A path walks its points in order: a multiset has none (§3).

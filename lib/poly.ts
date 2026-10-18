@@ -145,28 +145,6 @@ export function fpgcd(a: FPoly, b: FPoly): FPoly {
   return x;
 }
 
-/**
- * Extended Euclid: g = gcd(a, b) with s·a + t·b = g (g as fpgcd computes it,
- * up to a rational scale absorbed into s and t). Exact Frac arithmetic, no
- * primitive-part shortcuts — the cofactors are the point (Hermite reduction
- * in integrate.ts solves A = s·D + t·D′ with them).
- */
-export function fpextgcd(a: FPoly, b: FPoly): { g: FPoly; s: FPoly; t: FPoly } {
-  let r0 = a.slice();
-  let r1 = b.slice();
-  let s0: FPoly = [{ n: 1n, d: 1n }];
-  let s1: FPoly = [];
-  let t0: FPoly = [];
-  let t1: FPoly = [{ n: 1n, d: 1n }];
-  while (r1.length) {
-    const { q, r } = fpdivmod(r0, r1);
-    [r0, r1] = [r1, r];
-    [s0, s1] = [s1, fpadd(s0, fpscale(fpmul(q, s1), { n: -1n, d: 1n }))];
-    [t0, t1] = [t1, fpadd(t0, fpscale(fpmul(q, t1), { n: -1n, d: 1n }))];
-  }
-  return { g: r0, s: s0, t: t0 };
-}
-
 // --- expression → polynomial coefficients ---
 
 const MAX_DEGREE = 128;
