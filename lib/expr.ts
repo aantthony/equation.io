@@ -252,9 +252,6 @@ export function legacyCallArgs(name: string, args: readonly Expr[]): readonly Ex
     'gaussian',
     'meancurvature',
     'geodesic',
-    'lightray',
-    'lightcone',
-    'tidal',
     // sort((s, sin(s)), s): the points to order, then their key.
     'sort',
     'fourier',
@@ -397,12 +394,6 @@ export const FUNCTIONS = new Set([
   'gaussian',
   'meancurvature',
   'geodesic',
-  // A light ray of a panel's ds^2 metric (lib/metric.ts), traced like a
-  // geodesic, and its light cone at a point (lib/light-cone.ts).
-  'lightray',
-  'lightcone',
-  // Tidal forces at a point (lib/tidal.ts).
-  'tidal',
   'fourier',
   'reconstruct',
   // Whole-expression plot modes (see classify): domain coloring, conformal
@@ -475,9 +466,6 @@ export const SHADOWABLE_FNS: ReadonlySet<string> = new Set([
   'gaussian',
   'meancurvature',
   'geodesic',
-  'lightray',
-  'lightcone',
-  'tidal',
   'log2',
   'fourier',
   'reconstruct',

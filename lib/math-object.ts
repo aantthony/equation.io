@@ -8,8 +8,6 @@ import type { Column, Expr } from './expr.ts';
 import type { ProbBounds } from './dist.ts';
 import type { IntShade } from './intshade.ts';
 import type { GeodesicSpec } from './surface-geometry.ts';
-import type { LightConeSpec } from './light-cone.ts';
-import type { TidalSpec } from './tidal.ts';
 
 export type ColorSpace = 'rgb' | 'hsl' | 'oklch';
 
@@ -88,13 +86,6 @@ export type MathObject =
        *  surface (or over the view) to about 1, rather than as it stands:
        *  gaussian(x, y). */
       readonly autoscale?: true;
-      /** The size of the terms an autoscaled field is the difference of
-       *  (lib/metric-curvature.ts): where the field is a tiny part of it, it
-       *  is rounding, and is not scaled up. */
-      readonly rounding?: Expr;
-      /** The field was pulled back to x and y (lib/metric-curvature.ts
-       *  Curvature.pulled): its rounding is floored by the view too. */
-      readonly pulled?: true;
     }
   | { readonly kind: 'color-field'; readonly space: ColorSpace; readonly channels: readonly Expr[] }
   | { readonly kind: 'vector-field'; readonly components: Components }
@@ -264,21 +255,6 @@ export type MathObject =
   // `constant`: the row reads like a slider named e, pi or i (see
   // takenDefinitionName), which the readout explains. `identity`: an equation
   // in x, y, z or t whose sides agree everywhere (see holdsEverywhere).
-  /** A plane panel's metric, a `ds^2 = …` row (lib/metric.ts): it draws
-   *  nothing itself; geodesic and lightray rows in its panel trace it. */
-  | {
-      readonly kind: 'metric';
-      readonly n: 2 | 3;
-      readonly coords: readonly string[];
-      readonly lorentzian?: true;
-      readonly mixed?: true;
-    }
-  /** Light cones of a panel's metric (lib/light-cone.ts): over the window,
-   *  a `lightcones` row, or at a point, lightcone(P). */
-  | ({ readonly kind: 'lightcone' } & LightConeSpec)
-  /** Tidal forces of a panel's metric on a static observer (lib/tidal.ts):
-   *  over the window, a `tidal` row, or at a point, tidal(P). */
-  | ({ readonly kind: 'tidal' } & TidalSpec)
   | {
       readonly kind: 'note';
       readonly expr: Expr;
@@ -366,14 +342,11 @@ export function publicKind(object: MathObject) {
     case 'label':
     case 'orbit':
     case 'geodesic':
-    case 'lightcone':
-    case 'tidal':
     case 'system':
     case 'histogram':
     case 'value':
     case 'tuple':
     case 'note':
-    case 'metric':
     case 'automaton':
     case 'lattice':
     case 'graph':
@@ -432,9 +405,6 @@ export function objectNeeds3D(object: MathObject): boolean {
     case 'value':
     case 'tuple':
     case 'note':
-    case 'metric':
-    case 'lightcone':
-    case 'tidal':
       return false;
   }
 }

@@ -2,7 +2,7 @@ import { type Env } from './env.ts';
 import { exprKey } from './expr.ts';
 import type { Expr } from './expr.ts';
 import type { OrbitInput } from './orbit.ts';
-import type { GeodesicOptions, GeodesicSpec } from './surface-geometry.ts';
+import type { GeodesicSpec } from './surface-geometry.ts';
 import { animatedConstNames, definitionDependencies } from './defs.ts';
 
 /** Separate moving values from the definitions and fixed inputs of a trace.
@@ -36,8 +36,6 @@ export interface TraceInput {
     maxSteps: number;
     ms: number;
     maxPoints: number;
-    /** Where a metric's geodesic is traced: a box round its window. */
-    window?: GeodesicOptions['domain'];
   };
 }
 export type TraceResult = {
