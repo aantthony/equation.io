@@ -26,8 +26,6 @@
   --gold: #f0ad5c;
   --gold-fill: #f0ad5c;
   --gold-hi: #f8d58c;
-  /* The intent landing pages import this sheet and still say --accent. */
-  --accent: var(--gold);
   --copper: #d4735a;
   --nav-bg: linear-gradient(rgba(7, 9, 14, 0.85), rgba(7, 9, 14, 0.55));
   --hero-glow: #111726;
@@ -508,19 +506,6 @@ a {
   color: var(--muted);
   margin-bottom: 12px;
   letter-spacing: 0.04em;
-}
-.group-head .more {
-  font: 500 13px/1 var(--mono);
-  color: var(--gold);
-  text-decoration: none;
-  white-space: nowrap;
-  padding: 8px 12px;
-  border: 1px solid color-mix(in srgb, var(--gold) 35%, transparent);
-  border-radius: 999px;
-  transition: background 0.15s;
-}
-.group-head .more:hover {
-  background: color-mix(in srgb, var(--gold) 12%, transparent);
 }
 .grid {
   display: grid;
