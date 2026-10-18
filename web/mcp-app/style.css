@@ -41,7 +41,7 @@ html[data-mcp-app] {
   height: 28px;
   padding: 0 10px;
   font: inherit;
-  color: var(--accent);
+  color: var(--text);
   white-space: nowrap;
   cursor: pointer;
 }
@@ -103,8 +103,13 @@ html[data-mcp-app] #rec,
 html[data-mcp-app] #try-another {
   display: none;
 }
+/* The widget follows the host's theme; a local toggle would recolour the
+   graph while the panel keeps the host's colours. */
+html[data-mcp-app] #theme-toggle {
+  display: none;
+}
 html[data-mcp-app] #state-reset {
-  right: 34px;
+  right: 6px;
 }
 @media (max-width: 440px) {
   #app-status {
