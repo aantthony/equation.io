@@ -6069,6 +6069,15 @@ if (framed) {
   document.getElementById('panel-chip')!.classList.add('shown');
   document.documentElement.removeAttribute('data-embed-boot');
 }
+// The chat widget opens with the panel shown. Hosts cache the widget HTML,
+// whose older copies start parked, so unpark here, where updates still reach.
+if (mcpApp) {
+  const panel = document.getElementById('panel')!;
+  panel.classList.remove('is-parked');
+  panel.style.visibility = '';
+  document.getElementById('panel-chip')!.hidden = true;
+  document.getElementById('panel-chip')!.classList.remove('shown');
+}
 initPanelSwipe(
   document.getElementById('panel')!,
   document.getElementById('panel-chip')!,
