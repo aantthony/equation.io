@@ -981,6 +981,8 @@ export function explicitDefinitionError(text: string): string | null {
         : n.startsWith('u_')
           ? 'names starting u_ are kept for sliders'
           : `${n} is a built-in function`;
+  if (PARAMS.has(n))
+    return `${n} is ${RESERVED_FN_MEANING[n]}, so it is redefined as the interval it runs over, like ${n} := interval(0, 2pi).`;
   const fn = SPACE.has(n) ? ` A function's parameters may still be called ${n}, like f(${n}) := ${n}^2.` : '';
   return `${n} cannot be redefined: ${why}.${fn}`;
 }

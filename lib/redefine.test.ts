@@ -50,7 +50,7 @@ describe('explicit definitions (:=)', () => {
     expect(infos(['e := 1', 'e = 2'])[1]).toBe('False now (1 ≠ 2)');
   });
 
-  it('keeps x, y, z, t, u, v and d, and says why', () => {
+  it('keeps x, y, z, t and d, and says why', () => {
     const error = (row: string) => analyzeRows([row]).rows[0].error;
     expect(error('x := 3')).toBe(
       "x cannot be redefined: x is a plot axis. A function's parameters may still be called x, like f(x) := x^2.",
@@ -59,8 +59,17 @@ describe('explicit definitions (:=)', () => {
     expect(error('d := 3')).toBe('d cannot be redefined: d starts derivatives (d/dx).');
     expect(error('sin := 3')).toBe('sin cannot be redefined: sin is a built-in function.');
     expect(error('2 := 3')).toBe('The left side of := names what it defines, like a := 2 or f(x) := x^2.');
-    // An interval still sets u's range.
+  });
+
+  it('redefines u and v as intervals', () => {
     expect(analyzeRows(['u := interval(0, 2pi)']).rows[0].def?.kind).toBe('const');
+    // The same range `u = interval(…)` sets.
+    const curve = (op: string) => analyzeRows([`u ${op} interval(0, 2pi)`, '(cos(u), sin(u))']).rows[1];
+    expect(curve(':=').error).toBeUndefined();
+    expect(JSON.stringify(curve(':=').cls)).toBe(JSON.stringify(curve('=').cls));
+    expect(analyzeRows(['u := 3']).rows[0].error).toBe(
+      'u is a curve/surface parameter, so it is redefined as the interval it runs over, like u := interval(0, 2pi).',
+    );
   });
 
   it('names a redefined built-in as written in messages and write-backs', () => {
