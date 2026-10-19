@@ -35,6 +35,7 @@ import { PointTrail } from '../lib/point-trail.ts';
 import {
   constsAnimated,
   definitionDependencies,
+  definitionHead,
   formatTableRow,
   freeTableName,
   scanDefinition,
@@ -66,7 +67,7 @@ import { compileSampler } from '../lib/vm.ts';
 import { fieldScale } from '../lib/volume.ts';
 import { coordinateDragWriter, dragAxes } from '../lib/drag.ts';
 import { type SliderForm, sliderBounds, sliderForm, sliderValue, withBounds, writeSlider } from '../lib/slider.ts';
-import { type Expr, canonicalName, evaluate, freeVars, parseExpr, substVars } from '../lib/expr.ts';
+import { type Expr, canonicalName, evaluate, freeVars, parseExpr, substVars, writtenName } from '../lib/expr.ts';
 import { gpuFor, shaderBindings } from './render-plan.ts';
 import { typedEscape } from '../lib/escapes.ts';
 import { fieldEvaluator, streamline, traceField } from '../lib/flow.ts';
@@ -2491,7 +2492,13 @@ function render() {
           }
           case 'point': {
             const p = samplePoint(eq);
-            if (p) scene.points.push({ pos: [p[0], p[1], p[2] ?? 0], color, label: eq.def?.name, group: eq });
+            if (p)
+              scene.points.push({
+                pos: [p[0], p[1], p[2] ?? 0],
+                color,
+                label: eq.def && writtenName(eq.def.name),
+                group: eq,
+              });
             break;
           }
           case 'system':
@@ -2519,7 +2526,7 @@ function render() {
           const [px, py] = [constEnv[cx], constEnv[cy]];
           if (!isFinite(px) || !isFinite(py)) continue;
           const mark = markScene(scene);
-          scene.points.push({ pos: [px, py, 0], color: baseColor(eq), label: eq.def.name, group: eq });
+          scene.points.push({ pos: [px, py, 0], color: baseColor(eq), label: writtenName(eq.def.name), group: eq });
           carry(mark);
           // Dragged along the surface, in x and y (see surfaceAt); not by a
           // slider the surface itself reads, which would move it under the drag.
@@ -3120,7 +3127,7 @@ function render() {
           y: py,
           color: cssColor(baseColor(eq)),
           hot: hotPoint === key,
-          label: eq.def.name,
+          label: writtenName(eq.def.name),
         });
         const set = defPointWriter(eq);
         if (set) grabs.push({ key, x: px, y: py, edits: true, set });
@@ -3756,8 +3763,7 @@ function moveSlider(eq: Equation, v: number): { text: string; rhs: string; value
   const { def, form } = slider;
   const value = sliderValue(form, v, sliderBounds(form, sliderEnv(), new Set(defs.fns.keys())));
   const rhs = writeSlider(slider.rhs, form, fmtNum(value));
-  const lhs = def.kind === 'init' ? `${def.name}(0)` : def.name;
-  return { text: `${lhs} = ${rhs}`, rhs, value: Number(fmtNum(value)) };
+  return { text: `${definitionHead(def, stripNote(eq.text))} ${rhs}`, rhs, value: Number(fmtNum(value)) };
 }
 
 const lineEls = (): HTMLElement[] =>
@@ -3996,8 +4002,7 @@ function makeSlider(eq: Equation): SliderUI {
     if (slider && min.value.trim() && max.value.trim() && isFinite(lo) && isFinite(hi) && hi > lo) {
       pushUndo(`bounds:${eq.id}`);
       const { def, rhs, form } = slider;
-      const lhs = def.kind === 'init' ? `${def.name}(0)` : def.name;
-      eq.text = `${lhs} = ${withBounds(rhs, form, fmtNum(lo), fmtNum(hi))}`;
+      eq.text = `${definitionHead(def, stripNote(eq.text))} ${withBounds(rhs, form, fmtNum(lo), fmtNum(hi))}`;
       const line = lineEls()[equations.indexOf(eq)];
       if (line) line.textContent = eq.text;
       recompileAll();
@@ -5255,7 +5260,7 @@ const defPointWriter = (eq: Equation, pinned?: ReadonlySet<string>) => {
   return makePairWriter(
     def.rhs,
     p => {
-      eq.text = keepNote(eq.text, `${def.name} = ${p}`);
+      eq.text = keepNote(eq.text, `${definitionHead(def, stripNote(eq.text))} ${p}`);
     },
     undefined,
     pinned,

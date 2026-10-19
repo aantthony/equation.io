@@ -43,7 +43,9 @@ import {
   SUM_MAX_TERMS,
   type Expr,
   builtinFn,
+  boundName,
   canonicalName,
+  writtenName,
   compDims,
   evaluate,
   markOrigins,
@@ -791,6 +793,22 @@ export const nameable = (n: string): boolean =>
   (!FUNCTIONS.has(n) || SHADOWABLE_FNS.has(n)) && !RESERVED.has(n) && !n.startsWith('u_');
 
 /**
+ * Reserved names an explicit definition may still claim: `e := 0.6` is a
+ * slider, `i := 3` an index, `w := x - iy` a field, each shadowing the
+ * built-in for the whole graph. `e = 0.6` stays a claim about Euler's number,
+ * as old links mean it. The rest stay the language's: x, y, z, t, u and v are
+ * what every other row plots against (a function's own parameters may still
+ * be called that, scoped to it), and d starts d/dx.
+ */
+export const REDEFINABLE: ReadonlySet<string> = new Set(['e', 'i', 'w', 'pi']);
+
+/** `:=` as the first assignment of a definition row (not `::` or `:==`). */
+const DEFINE_RE = /^([^=:]*):=(?!=)/;
+
+/** A row written `name := …` (or `f(x) := …`, `a' := …`): explicitly a definition. */
+export const isExplicitDefinition = (text: string): boolean => DEFINE_RE.test(text);
+
+/**
  * A definable name for a dropped file, starting from the one its file name
  * suggests: the stem itself where a definition may claim it, `data_…` where it
  * may not, then numbered until nothing else has taken it.
@@ -819,22 +837,28 @@ const BRACED_TERM_RE = new RegExp(
 );
 
 export function scanDefinition(text: string): Definition | null {
+  // `a := …` says outright what `a = …` leaves to the name: this is a
+  // definition, so it may claim e, i, w or pi too.
+  const explicit = isExplicitDefinition(text);
+  if (explicit) text = text.replace(DEFINE_RE, '$1=');
+  const claimable = (n: string): boolean => nameable(n) || (explicit && REDEFINABLE.has(n));
   text = text.replace(
     BRACED_TERM_RE,
     (_, head: string, braced?: string, paren?: string) => `${head}_${braced ?? paren}`,
   );
   // Captured names canonicalize (T₀ → T_0) so a definition binds the same
-  // name the tokenizer reads in expressions.
-  const name = (m: RegExpExecArray): string => canonicalName(m[1]);
+  // name the tokenizer reads in expressions — a redefined built-in's alias.
+  const written = (m: RegExpExecArray): string => canonicalName(m[1]);
+  const name = (m: RegExpExecArray): string => boundName(written(m));
   // Primes first: `a' = …` is a state, but the reserved coordinate names keep
   // their ODE meaning, so `y' = x - y` stays a slope field (see plot.ts).
   let m = STATE_RE.exec(text);
-  if (m && nameable(name(m))) return { kind: 'state', name: name(m), rhs: m[2] };
+  if (m && claimable(written(m))) return { kind: 'state', name: name(m), rhs: m[2] };
   m = INIT_RE.exec(text);
-  if (m && nameable(name(m))) return { kind: 'init', name: name(m), rhs: m[2] };
+  if (m && claimable(written(m))) return { kind: 'init', name: name(m), rhs: m[2] };
   // Before the function form: `open(…)` takes a file name, not parameters.
   m = TABLE_RE.exec(text);
-  if (m && nameable(name(m))) {
+  if (m && claimable(written(m))) {
     return { kind: 'table', name: name(m), file: m[2] ?? m[3], hash: (m[4] ?? '').toLowerCase() };
   }
   // A row that plainly means to open a file but does not parse as one is NOT
@@ -843,16 +867,37 @@ export function scanDefinition(text: string): Definition | null {
   // short hash — never runs on definition rows. Leave it to badTableRow.
   if (OPEN_HEAD_RE.test(text)) return null;
   m = FN_RE.exec(text);
-  if (m && nameable(name(m))) {
-    return { kind: 'fn', name: name(m), params: m[2].split(/\s*,\s*/).map(canonicalName), rhs: m[3] };
+  if (m && claimable(written(m))) {
+    return {
+      kind: 'fn',
+      name: name(m),
+      params: m[2].split(/\s*,\s*/).map(p => boundName(canonicalName(p))),
+      rhs: m[3],
+    };
   }
   m = CONST_RE.exec(text);
-  if (m && nameable(name(m))) return { kind: 'const', name: name(m), rhs: m[2] };
+  if (m && claimable(written(m))) return { kind: 'const', name: name(m), rhs: m[2] };
   // `u = interval(0, 2pi)` sets the range u runs over, (0, 1) by default.
-  if (m && PARAMS.has(name(m)) && INTERVAL_RHS_RE.test(m[2])) return { kind: 'const', name: name(m), rhs: m[2] };
+  if (m && PARAMS.has(written(m)) && INTERVAL_RHS_RE.test(m[2])) return { kind: 'const', name: name(m), rhs: m[2] };
   m = DRAW_RE.exec(text);
-  if (m && nameable(name(m))) return { kind: 'const', name: name(m), rhs: m[2], draw: true };
+  if (m && claimable(written(m))) return { kind: 'const', name: name(m), rhs: m[2], draw: true };
   return null;
+}
+
+/** A definition row's left side and assignment as the row wrote them, for
+ *  writing it back (`e :=`, `a(0) =`): a slider or drag keeps `:=` and the
+ *  written name, never the alias. */
+export const definitionHead = (def: Definition, text: string): string =>
+  `${writtenName(def.name)}${def.kind === 'init' ? '(0)' : ''} ${isExplicitDefinition(text) ? ':=' : '='}`;
+
+/** The built-ins a document redefines (`e := 0.6`): what parses as an alias. */
+export function redefinedBuiltins(texts: readonly string[]): Set<string> {
+  const names = new Set<string>();
+  for (const text of texts) {
+    const d = isExplicitDefinition(text) ? scanDefinition(text) : null;
+    if (d && REDEFINABLE.has(d.name)) names.add(d.name);
+  }
+  return names;
 }
 
 /** Why a row that reads as a binder, `p ∈ A` (or `\\in`), binds no
@@ -913,8 +958,31 @@ export function reservedFnHint(text: string): string | null {
 /** Why a name from takenDefinitionName (other than `d`) names no value. */
 export function takenNameHint(name: string): string {
   return name === 'i'
-    ? 'i is the imaginary unit; name it something else, like k'
-    : `${name} is a constant; name a slider something else`;
+    ? 'i is the imaginary unit; to use it as a name, write i := …'
+    : `${name} is a constant; to redefine it, write ${name} := …`;
+}
+
+/**
+ * Why a `:=` row defines nothing: it claims a name the language keeps even
+ * from an explicit definition (REDEFINABLE says which it gives up), or its
+ * left side names nothing. Null for a row that is no `:=`, or defines.
+ */
+export function explicitDefinitionError(text: string): string | null {
+  if (!isExplicitDefinition(text) || scanDefinition(text)) return null;
+  const row = text.replace(DEFINE_RE, '$1=');
+  const m = FN_RE.exec(row) ?? CONST_RE.exec(row) ?? STATE_RE.exec(row);
+  const n = m && canonicalName(m[1]);
+  if (!n) return 'The left side of := names what it defines, like a := 2 or f(x) := x^2.';
+  const why =
+    n === 'd'
+      ? 'd starts derivatives (d/dx)'
+      : n in RESERVED_FN_MEANING
+        ? `${n} is ${RESERVED_FN_MEANING[n]}`
+        : n.startsWith('u_')
+          ? 'names starting u_ are kept for sliders'
+          : `${n} is a built-in function`;
+  const fn = SPACE.has(n) ? ` A function's parameters may still be called ${n}, like f(${n}) := ${n}^2.` : '';
+  return `${n} cannot be redefined: ${why}.${fn}`;
 }
 
 export type GetFn = (name: string) => FnDef | undefined;

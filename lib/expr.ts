@@ -511,6 +511,37 @@ export const CONSTANTS: Record<string, number> = {
   e: Math.E,
 };
 
+/**
+ * Built-in names the document in analysis redefined (`e := 0.6`, `i := 3`;
+ * see REDEFINABLE in defs.ts). Each parses to its alias, a name no row can
+ * write, so the code that knows `i` as the imaginary unit or `w` as x + iy
+ * never mistakes the document's own value for the built-in.
+ */
+let activeRebound: ReadonlySet<string> = new Set();
+
+/** The internal name of a redefined built-in: `#` starts no written name. */
+export const reboundName = (name: string): string => `#${name}`;
+
+/** A written name as the document in analysis binds it: its alias if redefined. */
+export const boundName = (name: string): string => (activeRebound.has(name) ? reboundName(name) : name);
+
+/** A name as its row wrote it, undoing reboundName. */
+export const writtenName = (name: string): string => name.replace(/^#/, '');
+
+/** Every `#name` alias in a message, as written. */
+export const unaliased = (text: string): string => text.replace(/#(?=[A-Za-z])/g, '');
+
+/** Run fn with the given built-ins redefined for every parse inside it. */
+export function withRebound<T>(names: ReadonlySet<string>, fn: () => T): T {
+  const outer = activeRebound;
+  activeRebound = names;
+  try {
+    return fn();
+  } finally {
+    activeRebound = outer;
+  }
+}
+
 /** User-defined function names for the parse in progress (set by parseExpr). */
 let activeUserFns: ReadonlySet<string> = new Set();
 
@@ -1325,6 +1356,7 @@ function createLeaf(token: Token): PNode {
   if (token.type === 'parenopen') return { kind: 'popen', bracket: token.str, call: !!token.call };
   if (token.type === 'symbol') {
     if (token.str === EMPTY_LIST) return { kind: 'list', items: [] };
+    if (activeRebound.has(token.str)) return { kind: 'var', name: reboundName(token.str) };
     if (Object.hasOwn(CONSTANTS, token.str)) return num(CONSTANTS[token.str]);
     return { kind: 'var', name: token.str };
   }

@@ -21,6 +21,8 @@ import {
   type ResolveOpts,
   surfaceOperand,
   shadowedFnNames,
+  explicitDefinitionError,
+  redefinedBuiltins,
   scanDefinition,
   takenBinder,
   takenDefinitionName,
@@ -51,7 +53,7 @@ import {
   toProbability,
   variableRow,
 } from './dist.ts';
-import { type Expr, MAP, childrenOf, freeVars, parseExpr, substVars } from './expr.ts';
+import { type Expr, MAP, childrenOf, freeVars, parseExpr, substVars, unaliased, withRebound } from './expr.ts';
 import { usesComplex } from './complex.ts';
 import { intervalsIn, lengthOf, replaceIntervals } from './interval.ts';
 import { PAINT_CALL, lowerGeom } from './geom.ts';
@@ -150,6 +152,8 @@ export interface PreparedDocument {
   structuralConsts: Set<string>;
   ropts: import('./defs.ts').ResolveOpts;
   gridFields: LevelSetSpec[];
+  /** Built-ins the document redefines with `:=`; every parse reads them as aliases. */
+  rebound: ReadonlySet<string>;
 }
 
 export interface AnalysisContext {
@@ -181,8 +185,16 @@ export const isViewportText = (text: string): boolean =>
 /** No source splitting here: one input row remains one result, including blanks. */
 export function prepareDocument(
   sources: readonly (string | RowSource)[],
-  { tables }: PrepareOptions = {},
+  options: PrepareOptions = {},
 ): PreparedDocument {
+  const rebound = redefinedBuiltins(sources.map(s => stripNote(typeof s === 'string' ? s : s.text).trim()));
+  return withRebound(rebound, () => ({ ...prepareRows(sources, options), rebound }));
+}
+
+function prepareRows(
+  sources: readonly (string | RowSource)[],
+  { tables }: PrepareOptions,
+): Omit<PreparedDocument, 'rebound'> {
   // A trailing `# note` is prose for the reader; the math is what precedes it.
   const rows: RowInfo[] = sources.map(source =>
     typeof source === 'string'
@@ -751,7 +763,22 @@ function curvaturePaint(e: Expr, fnNames: ReadonlySet<string>, isPoint: (arg: Ex
 }
 
 export function analyzePrepared(document: PreparedDocument, context: AnalysisContext = {}): Analysis {
+  const analysis = withRebound(document.rebound, () => analyzeInScope(document, context));
+  if (document.rebound.size) {
+    // Messages name a redefined built-in as its row wrote it, not by alias.
+    for (const row of analysis.rows) {
+      if (row.error) row.error = unaliased(row.error);
+      if (row.info) row.info = unaliased(row.info);
+    }
+  }
+  return analysis;
+}
+
+function analyzeInScope(document: PreparedDocument, context: AnalysisContext): Analysis {
   const { defs, constNames, fieldEnv, fnNames, listNames, valueNames, getFn, getList, ropts, gridFields } = document;
+  // `e = 2` after `e := 1` is a claim about the document's e, which needs no
+  // advice about Euler's.
+  const unredefined = <T extends string>(n: T | null): T | null => (n && document.rebound.has(n) ? null : n);
   // A map's Σ bounds are told the document's functions and lists, to refuse them.
   const viewDoc = { ...ropts, fnNames };
   const rows = document.rows.map(row => ({ ...row }));
@@ -1040,6 +1067,9 @@ export function analyzePrepared(document: PreparedDocument, context: AnalysisCon
         );
         continue;
       }
+      // `x := 3` claims what := cannot have; the parser only sees a stray `:`.
+      const unclaimable = explicitDefinitionError(row.text);
+      if (unclaimable) throw new Error(unclaimable);
       // `d = 1` is no definition (d starts d/dx), and would otherwise fail
       // with advice about derivatives that the author never wrote.
       if (takenDefinitionName(row.text) === 'd') {
@@ -1231,7 +1261,7 @@ export function analyzePrepared(document: PreparedDocument, context: AnalysisCon
       if (hint) row.info = hint;
       // `e = 0.6` parsed with e already a number; only the text still says e.
       // `i = [0..9]` is a family of such claims, one per member.
-      const taken = takenDefinitionName(row.text);
+      const taken = unredefined(takenDefinitionName(row.text));
       const object = row.cls.object;
       if (taken && object.kind === 'note') row.cls = { ...row.cls, object: { ...object, constant: taken } };
       else if (taken && object.kind === 'family' && object.members.every(m => m.object.kind === 'note')) {
@@ -1249,7 +1279,7 @@ export function analyzePrepared(document: PreparedDocument, context: AnalysisCon
         row.error = reservedFnHint(row.text) ?? (e instanceof Error ? e.message : String(e));
         // `i = [0..239]` fails as a claim about i (too many members); the
         // author meant a definition, so say why it is not one.
-        const taken = takenDefinitionName(row.text);
+        const taken = unredefined(takenDefinitionName(row.text));
         if (taken && taken !== 'd') row.error = `${row.error.replace(/\.$/, '')} — ${takenNameHint(taken)}.`;
       }
     }
