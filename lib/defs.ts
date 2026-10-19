@@ -794,13 +794,14 @@ export const nameable = (n: string): boolean =>
 
 /**
  * Reserved names an explicit definition may still claim: `e := 0.6` is a
- * slider, `i := 3` an index, `w := x - iy` a field, each shadowing the
- * built-in for the whole graph. `e = 0.6` stays a claim about Euler's number,
- * as old links mean it. The rest stay the language's: x, y, z, t, u and v are
- * what every other row plots against (a function's own parameters may still
- * be called that, scoped to it), and d starts d/dx.
+ * slider, `i := 3` an index, `w := x - iy` a field, `t := 2` holds time
+ * still, each shadowing the built-in for the whole graph. `e = 0.6` stays a
+ * claim about Euler's number, as old links mean it. The rest stay the
+ * language's: x, y and z are what every other row plots against (a
+ * function's own parameters may still be called that, scoped to it), u and v
+ * take only an interval, and d starts d/dx.
  */
-export const REDEFINABLE: ReadonlySet<string> = new Set(['e', 'i', 'w', 'pi']);
+export const REDEFINABLE: ReadonlySet<string> = new Set(['e', 'i', 'w', 'pi', 't']);
 
 /** `:=` as the first assignment of a definition row (not `::` or `:==`). */
 const DEFINE_RE = /^([^=:]*):=(?!=)/;

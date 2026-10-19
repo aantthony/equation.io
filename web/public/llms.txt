@@ -1093,14 +1093,15 @@ or link-only requests. Clients without MCP Apps support can open share_url.
 ## Definitions (extra rows that set up the others)
 
 - Reserved names — never define these, use them as a constant, or put a
-  slider on them: `t` is animation time in seconds (it plays on its own; any
-  row using t animates), `x`, `y`, `z` are the plot axes, and `d` is the
-  derivative operator. `e` is Euler's number, `pi` is π, `i` is the
-  imaginary unit and `w` is the complex variable x + iy: `e = 0.6` is a
+  slider on them: `x`, `y`, `z` are the plot axes, and `d` is the
+  derivative operator. `t` is animation time in seconds (it plays on its
+  own; any row using t animates), `e` is Euler's number, `pi` is π, `i` is
+  the imaginary unit and `w` is the complex variable x + iy: `e = 0.6` is a
   (false) claim about Euler's number, but an explicit definition with `:=`
   takes the name over for the whole graph — `e := 0.6` is a slider,
-  `i := 3` a number, `w := x - y` a field — and the built-in meaning is
-  gone from that graph. `:=` cannot take x, y, z, t or d. `u` and `v` are
+  `i := 3` a number, `w := x - y` a field, `t := 0.5` holds time still at a
+  slider you scrub by hand — and the built-in meaning is gone from that
+  graph. `:=` cannot take x, y, z or d. `u` and `v` are
   the curve/surface parameters: they can't be numbers, but they can be
   redefined as another interval (`u = interval(0, 2pi)` or
   `u := interval(0, 2pi)`; the default is `interval(0, 1)`). None of these can name a function either: a reserved

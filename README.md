@@ -114,9 +114,9 @@ Account Analytics: Read, for the script to include them.
   it compiles to a uniform so dragging never rebuilds a shader. `b = a^2 + t`
   defines a computed/animated constant
 - `a := 2`, `f(x) := x^2` — the same definitions written explicitly. `:=` can
-  also take over `e`, `pi`, `i` or `w` for the whole graph (`e := 0.6` is a
-  slider); `u` and `v` take an interval (`u := interval(0, 2pi)`); `x`, `y`,
-  `z`, `t` and `d` stay the language's
+  also take over `e`, `pi`, `i`, `w` or `t` for the whole graph (`e := 0.6` is
+  a slider; `t := 0.5` holds time still); `u` and `v` take an interval
+  (`u := interval(0, 2pi)`); `x`, `y`, `z` and `d` stay the language's
 - `(2, 3)` / `(3, 12, 0)` — points. In 2D, coordinates that are plain numbers
   or slider names can be dragged on the canvas, and the drag rewrites them:
   `a = 1; b = 2; (a, b)` moves both sliders, `(2sin(t), 3)` only its literal

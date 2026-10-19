@@ -25,6 +25,7 @@ describe('explicit definitions (:=)', () => {
     expect(infos(['i := 3', 'i x'])[1]).toBe('scalar field — for the curve write y = i x');
     expect(infos(['i := 3', 'i + 1'])[1]).toBe('= 4');
     expect(infos(['w := 2', 'w^2'])[1]).toBe('= 4');
+    expect(infos(['t := 2', 't^2', 'b := t + 1', 'b'])).toEqual([undefined, '= 4', undefined, '= 3']);
     // Rows before the definition see it too, and so do other definitions.
     expect(infos(['b := e^2', 'b', 'e := 2'])[1]).toBe('= 4');
   });
@@ -34,6 +35,7 @@ describe('explicit definitions (:=)', () => {
       ['e := 0.6', 'y = e x'],
       ['i := 2', 'y = i x'],
       ['w := x - y', 'w = 0'],
+      ['t := 0.5', 'y = sin(x + t)'],
     ]) {
       const plot = analyzeRows(rows).rows[1];
       expect(plot.error, rows.join('; ')).toBeUndefined();
@@ -50,15 +52,22 @@ describe('explicit definitions (:=)', () => {
     expect(infos(['e := 1', 'e = 2'])[1]).toBe('False now (1 ≠ 2)');
   });
 
-  it('keeps x, y, z, t and d, and says why', () => {
+  it('keeps x, y, z and d, and says why', () => {
     const error = (row: string) => analyzeRows([row]).rows[0].error;
     expect(error('x := 3')).toBe(
       "x cannot be redefined: x is a plot axis. A function's parameters may still be called x, like f(x) := x^2.",
     );
-    expect(error('t := 1')).toBe('t cannot be redefined: t is animation time.');
     expect(error('d := 3')).toBe('d cannot be redefined: d starts derivatives (d/dx).');
     expect(error('sin := 3')).toBe('sin cannot be redefined: sin is a built-in function.');
     expect(error('2 := 3')).toBe('The left side of := names what it defines, like a := 2 or f(x) := x^2.');
+  });
+
+  it('holds time still when t is redefined', () => {
+    // t is the graph's slider, not the clock: nothing reads time any more.
+    const a = analyzeRows(['t := 0.5', 'y = sin(x + t)', "a' := -a", 'a(0) := 1']);
+    expect(a.rows.map(r => r.error)).toEqual([undefined, undefined, undefined, undefined]);
+    expect(a.defs.consts.has('#t')).toBe(true);
+    expect(analyzeRows(['t = 3']).rows[0].error).toMatch(/t := 3 to hold time still/);
   });
 
   it('redefines u and v as intervals', () => {
