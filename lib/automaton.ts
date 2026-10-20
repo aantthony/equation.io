@@ -33,7 +33,16 @@
  */
 import { usesComplex } from './complex.ts';
 import { type GetFn, type ResolveOpts, resolveExpr } from './defs.ts';
-import { type Expr, evaluate, exactCase, freeVars, mapChildren, parseExpr, substVars } from './expr.ts';
+import {
+  type Expr,
+  evaluate,
+  exactCase,
+  freeVars,
+  mapChildren,
+  parseExpr,
+  substVars,
+  unknownVariable,
+} from './expr.ts';
 import type { Classified, MathObject } from './math-object.ts';
 import type { SeqScan } from './seq.ts';
 import { compileProg, run } from './vm.ts';
@@ -150,7 +159,7 @@ function checkFree(e: Expr, own: ReadonlySet<string>, constNames: ReadonlySet<st
     if (own.has(v)) continue;
     if (v === 't') animated = true;
     else if (constNames.has(v)) params.push(v);
-    else throw new Error(`Unknown variable in the ${what}: ${v}. Define "${v} = 1" to make a slider.`);
+    else throw new Error(unknownVariable(v, ` in the ${what}`));
   }
   return { params, animated };
 }
@@ -234,7 +243,7 @@ function classifyRule(
   const row = `${name}_${index}`;
   const at = cell2 ? `${cell}, ${cell2}` : cell;
   const example = cell2 ? `${row}[${cell}+1, ${cell2}]` : `${row}[${cell}-1] or ${row}[${cell}+2]`;
-  const parsed = parseExpr(scan.rhs, fnNames, new Set([row]));
+  const parsed = parseExpr(scan.rhs, fnNames, new Set([row]), ropts.valueNames);
   let radius = 0;
   const reads = (e: Expr): Expr => {
     const unrolled = unrollSum(e);
@@ -275,10 +284,10 @@ function classifyRule(
 
 /** `L_0 = [(0, 0), (1, 0)]` as an expression in the cells: each listed cell
  *  adds 1 where it is, so a cell listed twice is worth 2. */
-function seedFromCells(rhs: string, dims: 1 | 2, fnNames: ReadonlySet<string>): Expr {
+function seedFromCells(rhs: string, dims: 1 | 2, fnNames: ReadonlySet<string>, valueNames?: ReadonlySet<string>): Expr {
   const usage =
     dims === 2 ? 'List live cells as points: [(0, 0), (1, 0), (2, 1)].' : 'List live cells by index: [0, 3, 4].';
-  const list = parseExpr(rhs, fnNames);
+  const list = parseExpr(rhs, fnNames, undefined, valueNames);
   // A bracket around one item is that item: [(0, 0)] parses as the point.
   const items = list.kind === 'list' ? list.items : [list];
   const terms = items.map(item => {
@@ -312,7 +321,7 @@ function classifySeed(
 ) {
   const dims = rule.cell2 ? 2 : 1;
   let parsed: Expr;
-  if (scan.seedList) parsed = seedFromCells(scan.rhs, dims, fnNames);
+  if (scan.seedList) parsed = seedFromCells(scan.rhs, dims, fnNames, ropts.valueNames);
   else {
     if (!!scan.cell2 !== !!rule.cell2)
       throw new Error(
@@ -322,7 +331,7 @@ function classifySeed(
       );
     // A 2D seed's first index is its row: down, CELL_VAR2.
     parsed = substVars(
-      parseExpr(scan.rhs, fnNames),
+      parseExpr(scan.rhs, fnNames, undefined, ropts.valueNames),
       scan.cell2
         ? { [scan.cell!]: { kind: 'var', name: CELL_VAR2 }, [scan.cell2]: { kind: 'var', name: CELL_VAR } }
         : { [scan.cell!]: { kind: 'var', name: CELL_VAR } },
@@ -342,7 +351,7 @@ function classifyTable(
 ): Classified {
   const { name, cell, cell2 } = scan as SeqScan & { cell: string; cell2: string };
   if (cell === cell2) throw new Error(`Name the two indices differently, like ${name}[i, j].`);
-  const parsed = substVars(parseExpr(scan.rhs, fnNames), {
+  const parsed = substVars(parseExpr(scan.rhs, fnNames, undefined, ropts.valueNames), {
     [cell]: { kind: 'var', name: CELL_VAR2 },
     [cell2]: { kind: 'var', name: CELL_VAR },
   });

@@ -20,7 +20,10 @@ import {
   type GetFn,
   type ResolveOpts,
   surfaceOperand,
-  shadowedFnNames,
+  shadowedNames,
+  asAssignment,
+  explicitDefinitionError,
+  isExplicitDefinition,
   scanDefinition,
   takenBinder,
   takenDefinitionName,
@@ -51,7 +54,7 @@ import {
   toProbability,
   variableRow,
 } from './dist.ts';
-import { type Expr, MAP, childrenOf, freeVars, parseExpr, substVars } from './expr.ts';
+import { type Expr, MAP, childrenOf, freeVars, parseExpr, substVars, unaliased } from './expr.ts';
 import { usesComplex } from './complex.ts';
 import { intervalsIn, lengthOf, replaceIntervals } from './interval.ts';
 import { PAINT_CALL, lowerGeom } from './geom.ts';
@@ -142,7 +145,7 @@ export interface PreparedDocument {
   fieldEnv: Record<string, Expr>;
   fnNames: Set<string>;
   listNames: ReturnType<typeof listNamesOf>;
-  valueNames: ReturnType<typeof shadowedFnNames>;
+  valueNames: ReturnType<typeof shadowedNames>;
   getFn: (name: string) => ReturnType<Env['fns']['get']>;
   getList: ReturnType<typeof listGetter>;
   boundVals: Record<string, number>;
@@ -189,7 +192,9 @@ export function prepareDocument(
       ? { text: stripNote(source).trim() }
       : { ...source, text: stripNote(source.text).trim() },
   );
-  const texts = rows.map(row => row.text);
+  // The row-shape scanners read `a_n := …` and `Y := 2X` as they read `=`;
+  // only scanDefinition asks which a row wrote (`e := …` may claim e).
+  const texts = rows.map(row => asAssignment(row.text));
   const seqScans = scanSequences(texts);
   const statements: StatementScan[] = rows.map((source, i) => ({
     source,
@@ -212,7 +217,7 @@ export function prepareDocument(
   // outside the definition system — mirror of web/main.ts recompileAll.
   const regressions = scanRegressions(texts);
   const rvScan = scanRandomRows(
-    rows.map((r, i) => (regressions.has(i) || !r.text || r.text.startsWith('#') || seqScans[i] ? null : r.text)),
+    texts.map((text, i) => (regressions.has(i) || !text || text.startsWith('#') || seqScans[i] ? null : text)),
   );
   const rvRowIdx = new Set([...rvScan.base.keys(), ...rvScan.derived.keys()]);
 
@@ -284,7 +289,8 @@ export function prepareDocument(
     // `r = sqrt(x^2 + y^2); r = 2` is a level set of r. A field over u, v has
     // no level sets in the plane, so a second `k = …` is a redefinition.
     const field = defs.fields.get(name);
-    if ((field && !overParams(field)) || levelSet) row.def = undefined;
+    // `f(x) := x^3` says outright it is a definition, never a level set.
+    if (!isExplicitDefinition(row.text) && ((field && !overParams(field)) || levelSet)) row.def = undefined;
     else row.error = `${defKey(row.def!)} is already defined.`;
   }
 
@@ -313,7 +319,7 @@ export function prepareDocument(
   const listNames = listNamesOf(defs);
   // Names this document binds that a late-addition builtin would otherwise
   // claim (`total = 3` followed by `total(x + 1)`), as in web/main.ts.
-  const valueNames = shadowedFnNames([
+  const valueNames = shadowedNames([
     ...raw.filter(d => d.kind !== 'fn').map(d => d.name),
     ...[...rvScan.base.values()].map(s => s.name),
     ...[...rvScan.derived.values()].map(s => s.name),
@@ -332,6 +338,7 @@ export function prepareDocument(
   for (const name of defs.states.keys()) delete boundVals[name];
   const structuralConsts = new Set<string>();
   const ropts: import('./defs.ts').ResolveOpts = {
+    valueNames,
     consts: new Proxy(boundVals, {
       get(target, name, receiver) {
         if (typeof name === 'string' && Object.hasOwn(target, name)) structuralConsts.add(name);
@@ -367,6 +374,7 @@ export function prepareDocument(
     getFn,
     ropts,
     constNames,
+    valueNames,
     taken: n => nameTaken(defs, n),
   });
   for (const [name, declaration] of declarations) defs.bind(name, { tag: 'rv', declaration });
@@ -751,7 +759,20 @@ function curvaturePaint(e: Expr, fnNames: ReadonlySet<string>, isPoint: (arg: Ex
 }
 
 export function analyzePrepared(document: PreparedDocument, context: AnalysisContext = {}): Analysis {
+  const analysis = analyzeDocument(document, context);
+  // Messages name a redefined built-in (`#e`, internally) as its row wrote it.
+  for (const row of analysis.rows) {
+    if (row.error) row.error = unaliased(row.error);
+    if (row.info) row.info = unaliased(row.info);
+  }
+  return analysis;
+}
+
+function analyzeDocument(document: PreparedDocument, context: AnalysisContext): Analysis {
   const { defs, constNames, fieldEnv, fnNames, listNames, valueNames, getFn, getList, ropts, gridFields } = document;
+  // `e = 2` after `e := 1` is a claim about the document's e, which needs no
+  // advice about Euler's.
+  const unredefined = <T extends string>(n: T | null): T | null => (n && valueNames.has(n) ? null : n);
   // A map's Σ bounds are told the document's functions and lists, to refuse them.
   const viewDoc = { ...ropts, fnNames };
   const rows = document.rows.map(row => ({ ...row }));
@@ -1040,6 +1061,9 @@ export function analyzePrepared(document: PreparedDocument, context: AnalysisCon
         );
         continue;
       }
+      // `x := 3` claims what := cannot have; the parser only sees a stray `:`.
+      const unclaimable = explicitDefinitionError(row.text);
+      if (unclaimable) throw new Error(unclaimable);
       // `d = 1` is no definition (d starts d/dx), and would otherwise fail
       // with advice about derivatives that the author never wrote.
       if (takenDefinitionName(row.text) === 'd') {
@@ -1054,7 +1078,7 @@ export function analyzePrepared(document: PreparedDocument, context: AnalysisCon
       // mark(v) is v, highlighted in the panel's graphs.
       const markArg = fnNames.has('mark') ? null : wholeCall('mark', row.text);
       const source = graphArgs !== null ? `(${graphArgs})` : markArg !== null ? `(${markArg})` : row.text;
-      const takenName = takenBinder(row.text);
+      const takenName = takenBinder(row.text, valueNames);
       if (takenName) throw new Error(takenName);
       const rawParsed = parseExpr(source, fnNames, listNames, valueNames);
       // `p(50..400)`: where p goes over that time — a range in call position,
@@ -1231,7 +1255,7 @@ export function analyzePrepared(document: PreparedDocument, context: AnalysisCon
       if (hint) row.info = hint;
       // `e = 0.6` parsed with e already a number; only the text still says e.
       // `i = [0..9]` is a family of such claims, one per member.
-      const taken = takenDefinitionName(row.text);
+      const taken = unredefined(takenDefinitionName(row.text));
       const object = row.cls.object;
       if (taken && object.kind === 'note') row.cls = { ...row.cls, object: { ...object, constant: taken } };
       else if (taken && object.kind === 'family' && object.members.every(m => m.object.kind === 'note')) {
@@ -1249,7 +1273,7 @@ export function analyzePrepared(document: PreparedDocument, context: AnalysisCon
         row.error = reservedFnHint(row.text) ?? (e instanceof Error ? e.message : String(e));
         // `i = [0..239]` fails as a claim about i (too many members); the
         // author meant a definition, so say why it is not one.
-        const taken = takenDefinitionName(row.text);
+        const taken = unredefined(takenDefinitionName(row.text));
         if (taken && taken !== 'd') row.error = `${row.error.replace(/\.$/, '')} — ${takenNameHint(taken)}.`;
       }
     }

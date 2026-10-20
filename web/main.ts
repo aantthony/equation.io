@@ -1,4 +1,4 @@
-import { type Env, emptyEnv, evaluateFrame } from '../lib/env.ts';
+import { type Env, boundIn, emptyEnv, evaluateFrame } from '../lib/env.ts';
 import {
   BOARD_STEPS,
   type Board,
@@ -35,6 +35,7 @@ import { PointTrail } from '../lib/point-trail.ts';
 import {
   constsAnimated,
   definitionDependencies,
+  definitionHead,
   formatTableRow,
   freeTableName,
   scanDefinition,
@@ -66,7 +67,7 @@ import { compileSampler } from '../lib/vm.ts';
 import { fieldScale } from '../lib/volume.ts';
 import { coordinateDragWriter, dragAxes } from '../lib/drag.ts';
 import { type SliderForm, sliderBounds, sliderForm, sliderValue, withBounds, writeSlider } from '../lib/slider.ts';
-import { type Expr, canonicalName, evaluate, freeVars, parseExpr, substVars } from '../lib/expr.ts';
+import { type Expr, canonicalName, evaluate, freeVars, parseExpr, substVars, writtenName } from '../lib/expr.ts';
 import { gpuFor, shaderBindings } from './render-plan.ts';
 import { typedEscape } from '../lib/escapes.ts';
 import { fieldEvaluator, streamline, traceField } from '../lib/flow.ts';
@@ -463,6 +464,9 @@ let defsAnimated = false;
 let constEnv: Record<string, number> = {};
 /** Constants used as Σ/Π bounds; their sliders snap to integer steps. */
 let sumBoundNames = new Set<string>();
+/** The document's shadowed names (shadowedNames), for the app's own parses
+ *  of its rows: a slider's bounds, a surface's reads. */
+let valueNames: ReadonlySet<string> = new Set();
 let runtimeSliders = new Set<string>();
 /** Constants that are a whole-number distribution parameter (the n of
  *  Binomial(n, p)); their sliders snap to integer steps too. */
@@ -2491,7 +2495,13 @@ function render() {
           }
           case 'point': {
             const p = samplePoint(eq);
-            if (p) scene.points.push({ pos: [p[0], p[1], p[2] ?? 0], color, label: eq.def?.name, group: eq });
+            if (p)
+              scene.points.push({
+                pos: [p[0], p[1], p[2] ?? 0],
+                color,
+                label: eq.def && writtenName(eq.def.name),
+                group: eq,
+              });
             break;
           }
           case 'system':
@@ -2519,7 +2529,7 @@ function render() {
           const [px, py] = [constEnv[cx], constEnv[cy]];
           if (!isFinite(px) || !isFinite(py)) continue;
           const mark = markScene(scene);
-          scene.points.push({ pos: [px, py, 0], color: baseColor(eq), label: eq.def.name, group: eq });
+          scene.points.push({ pos: [px, py, 0], color: baseColor(eq), label: writtenName(eq.def.name), group: eq });
           carry(mark);
           // Dragged along the surface, in x and y (see surfaceAt); not by a
           // slider the surface itself reads, which would move it under the drag.
@@ -3120,7 +3130,7 @@ function render() {
           y: py,
           color: cssColor(baseColor(eq)),
           hot: hotPoint === key,
-          label: eq.def.name,
+          label: writtenName(eq.def.name),
         });
         const set = defPointWriter(eq);
         if (set) grabs.push({ key, x: px, y: py, edits: true, set });
@@ -3264,6 +3274,7 @@ function recompileAll() {
   repaintHighlights();
   ensureTables(prepared.raw);
   sumBoundNames = prepared.sumBoundConsts;
+  valueNames = prepared.valueNames;
   const wasKey = stateSys?.key;
   stateSys = prepared.stateSystem;
   if (stateSys?.key !== wasKey) resetState();
@@ -3754,10 +3765,9 @@ function moveSlider(eq: Equation, v: number): { text: string; rhs: string; value
   const slider = sliderOf(eq);
   if (!slider) return null;
   const { def, form } = slider;
-  const value = sliderValue(form, v, sliderBounds(form, sliderEnv(), new Set(defs.fns.keys())));
+  const value = sliderValue(form, v, sliderBounds(form, sliderEnv(), new Set(defs.fns.keys()), valueNames));
   const rhs = writeSlider(slider.rhs, form, fmtNum(value));
-  const lhs = def.kind === 'init' ? `${def.name}(0)` : def.name;
-  return { text: `${lhs} = ${rhs}`, rhs, value: Number(fmtNum(value)) };
+  return { text: `${definitionHead(def, stripNote(eq.text))} ${rhs}`, rhs, value: Number(fmtNum(value)) };
 }
 
 const lineEls = (): HTMLElement[] =>
@@ -3996,8 +4006,7 @@ function makeSlider(eq: Equation): SliderUI {
     if (slider && min.value.trim() && max.value.trim() && isFinite(lo) && isFinite(hi) && hi > lo) {
       pushUndo(`bounds:${eq.id}`);
       const { def, rhs, form } = slider;
-      const lhs = def.kind === 'init' ? `${def.name}(0)` : def.name;
-      eq.text = `${lhs} = ${withBounds(rhs, form, fmtNum(lo), fmtNum(hi))}`;
+      eq.text = `${definitionHead(def, stripNote(eq.text))} ${withBounds(rhs, form, fmtNum(lo), fmtNum(hi))}`;
       const line = lineEls()[equations.indexOf(eq)];
       if (line) line.textContent = eq.text;
       recompileAll();
@@ -4279,7 +4288,7 @@ function reconcile() {
       const { form } = slider;
       eq.sliderUI ??= makeSlider(eq);
       const { min, range, max } = eq.sliderUI;
-      const bounds = sliderBounds(form, sliderEnv(), new Set(defs.fns.keys()));
+      const bounds = sliderBounds(form, sliderEnv(), new Set(defs.fns.keys()), valueNames);
       let v = form.literal;
       let lo: number, hi: number;
       if (bounds) {
@@ -5189,6 +5198,7 @@ function makePairWriter(
     pairText,
     p => equations.find(r => r.def?.kind === 'const' && r.def.name === p && sliderOf(r)),
     pinned,
+    name => boundIn(defs, name),
   );
   if (!drag) return null;
   const { parts, axes } = drag;
@@ -5255,7 +5265,7 @@ const defPointWriter = (eq: Equation, pinned?: ReadonlySet<string>) => {
   return makePairWriter(
     def.rhs,
     p => {
-      eq.text = keepNote(eq.text, `${def.name} = ${p}`);
+      eq.text = keepNote(eq.text, `${definitionHead(def, stripNote(eq.text))} ${p}`);
     },
     undefined,
     pinned,
@@ -5267,7 +5277,7 @@ const surfaceReadsOf = new WeakMap<SurfaceMap, Set<string>>();
 function surfaceReads(surface: SurfaceMap): Set<string> {
   let reads = surfaceReadsOf.get(surface);
   if (!reads) {
-    reads = definitionDependencies(freeVars(parseExpr(surface.text)), defs);
+    reads = definitionDependencies(freeVars(parseExpr(surface.text, undefined, undefined, valueNames)), defs);
     surfaceReadsOf.set(surface, reads);
   }
   return reads;
@@ -6266,7 +6276,7 @@ function definitionRow(name: string): number {
   const byDef = equations.findIndex(eq => eq.def && eq.def.kind !== 'init' && eq.def.name === name);
   if (byDef >= 0) return byDef;
   const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  const head = new RegExp(`^\\s*${escaped}\\s*(?:'|\\([^)]*\\)|_\\{[^}]*\\})?\\s*(?:=|~|∈|\\\\in\\b)`);
+  const head = new RegExp(`^\\s*${escaped}\\s*(?:'|\\([^)]*\\)|_\\{[^}]*\\})?\\s*(?::?=|~|∈|\\\\in\\b)`);
   return equations.findIndex(eq => !eq.comment && head.test(canonicalName(stripNote(eq.text))));
 }
 

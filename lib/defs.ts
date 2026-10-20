@@ -43,7 +43,11 @@ import {
   SUM_MAX_TERMS,
   type Expr,
   builtinFn,
+  REDEFINABLE,
   canonicalName,
+  explicitAssignment,
+  reboundName,
+  writtenName,
   compDims,
   evaluate,
   markOrigins,
@@ -484,17 +488,21 @@ export const isListName = (names: ReadonlySet<string>, n: string): boolean => {
 };
 
 /**
- * Of the names a document binds as values, the ones a late-addition builtin
- * would otherwise claim — what parseExpr needs to keep `total = 3` followed by
- * `total(x + 1)` the product it was before `total` became a reduction.
+ * Of the names a document binds as values, the ones the language would
+ * otherwise claim — what parseExpr needs to keep `total = 3` followed by
+ * `total(x + 1)` the product it was before `total` became a reduction, and to
+ * read `e` after `e := 0.6` (or in the body of `f(e) := …`) as that e.
  *
  * Folded through `builtinFn`, because that is how a call is read: `Total = 3`
  * is a legal definition and `Total(x + 1)` folds to the `total` builtin, so
  * only the folded name says which builtin this document has taken.
  */
-export const shadowedFnNames = (names: Iterable<string>): Set<string> => {
+export const shadowedNames = (names: Iterable<string>): Set<string> => {
   const out = new Set<string>();
   for (const n of names) {
+    // A redefined built-in (`e := 0.6`, or a parameter named e) is bound by
+    // its alias; every row of its scope reads the written name as that alias.
+    if (n !== writtenName(n)) out.add(writtenName(n));
     const b = builtinFn(n);
     if (b && SHADOWABLE_FNS.has(b)) out.add(b);
   }
@@ -763,6 +771,7 @@ export const formatTableRow = (name: string, file: string, hash: string): string
  * knows that quotes are not arithmetic.
  */
 export function badTableRow(text: string): string | null {
+  text = asAssignment(text);
   const m = OPEN_HEAD_RE.exec(text);
   if (!m) return null;
   if (!nameable(m[1])) {
@@ -789,6 +798,20 @@ export function badTableRow(text: string): string | null {
  *  ones old graphs may define themselves), not reserved, not a uniform. */
 export const nameable = (n: string): boolean =>
   (!FUNCTIONS.has(n) || SHADOWABLE_FNS.has(n)) && !RESERVED.has(n) && !n.startsWith('u_');
+
+/** A row written `name := …` (or `f(x) := …`, `a' := …`): explicitly a definition. */
+export const isExplicitDefinition = (text: string): boolean => explicitAssignment(text) !== null;
+
+/** The row with its `:=` read as `=`, for the scanners that match a row's
+ *  shape (definitions, data files, random variables) — the same row either way. */
+export function asAssignment(text: string): string {
+  const at = explicitAssignment(text);
+  return at ? `${text.slice(0, at[0])}=${text.slice(at[1])}` : text;
+}
+
+/** A written name as a definition binds it: a redefined built-in (or
+ *  parameter) by its alias, so it reads as what parses there (REDEFINABLE). */
+const bindable = (name: string): string => (REDEFINABLE.has(name) ? reboundName(name) : name);
 
 /**
  * A definable name for a dropped file, starting from the one its file name
@@ -819,22 +842,28 @@ const BRACED_TERM_RE = new RegExp(
 );
 
 export function scanDefinition(text: string): Definition | null {
+  // `a := …` says outright what `a = …` leaves to the name: this is a
+  // definition, so it may claim e, i, w, pi or t too.
+  const explicit = isExplicitDefinition(text);
+  text = asAssignment(text);
+  const claimable = (n: string): boolean => nameable(n) || (explicit && REDEFINABLE.has(n));
   text = text.replace(
     BRACED_TERM_RE,
     (_, head: string, braced?: string, paren?: string) => `${head}_${braced ?? paren}`,
   );
   // Captured names canonicalize (T₀ → T_0) so a definition binds the same
-  // name the tokenizer reads in expressions.
-  const name = (m: RegExpExecArray): string => canonicalName(m[1]);
+  // name the tokenizer reads in expressions — a redefined built-in's alias.
+  const written = (m: RegExpExecArray): string => canonicalName(m[1]);
+  const name = (m: RegExpExecArray): string => bindable(written(m));
   // Primes first: `a' = …` is a state, but the reserved coordinate names keep
   // their ODE meaning, so `y' = x - y` stays a slope field (see plot.ts).
   let m = STATE_RE.exec(text);
-  if (m && nameable(name(m))) return { kind: 'state', name: name(m), rhs: m[2] };
+  if (m && claimable(written(m))) return { kind: 'state', name: name(m), rhs: m[2] };
   m = INIT_RE.exec(text);
-  if (m && nameable(name(m))) return { kind: 'init', name: name(m), rhs: m[2] };
+  if (m && claimable(written(m))) return { kind: 'init', name: name(m), rhs: m[2] };
   // Before the function form: `open(…)` takes a file name, not parameters.
   m = TABLE_RE.exec(text);
-  if (m && nameable(name(m))) {
+  if (m && claimable(written(m))) {
     return { kind: 'table', name: name(m), file: m[2] ?? m[3], hash: (m[4] ?? '').toLowerCase() };
   }
   // A row that plainly means to open a file but does not parse as one is NOT
@@ -843,24 +872,39 @@ export function scanDefinition(text: string): Definition | null {
   // short hash — never runs on definition rows. Leave it to badTableRow.
   if (OPEN_HEAD_RE.test(text)) return null;
   m = FN_RE.exec(text);
-  if (m && nameable(name(m))) {
-    return { kind: 'fn', name: name(m), params: m[2].split(/\s*,\s*/).map(canonicalName), rhs: m[3] };
+  // Only as a value: the parser reads `e(2)` as e · 2 wherever e is not the
+  // document's value, so `e(x) := …` would define a function no row calls.
+  if (m && nameable(written(m))) {
+    return {
+      kind: 'fn',
+      name: name(m),
+      params: m[2].split(/\s*,\s*/).map(p => bindable(canonicalName(p))),
+      rhs: m[3],
+    };
   }
   m = CONST_RE.exec(text);
-  if (m && nameable(name(m))) return { kind: 'const', name: name(m), rhs: m[2] };
+  if (m && claimable(written(m))) return { kind: 'const', name: name(m), rhs: m[2] };
   // `u = interval(0, 2pi)` sets the range u runs over, (0, 1) by default.
-  if (m && PARAMS.has(name(m)) && INTERVAL_RHS_RE.test(m[2])) return { kind: 'const', name: name(m), rhs: m[2] };
+  if (m && PARAMS.has(written(m)) && INTERVAL_RHS_RE.test(m[2])) return { kind: 'const', name: name(m), rhs: m[2] };
   m = DRAW_RE.exec(text);
-  if (m && nameable(name(m))) return { kind: 'const', name: name(m), rhs: m[2], draw: true };
+  if (m && claimable(written(m))) return { kind: 'const', name: name(m), rhs: m[2], draw: true };
   return null;
 }
 
+/** A definition row's left side and assignment as the row wrote them, for
+ *  writing it back (`e :=`, `a(0) =`): a slider or drag keeps `:=` and the
+ *  written name, never the alias. */
+export const definitionHead = (def: Definition, text: string): string =>
+  `${writtenName(def.name)}${def.kind === 'init' ? '(0)' : ''} ${isExplicitDefinition(text) ? ':=' : '='}`;
+
 /** Why a row that reads as a binder, `p ∈ A` (or `\\in`), binds no
  *  name: the name is the language's. Null when it is not such a row. */
-export function takenBinder(text: string): string | null {
+export function takenBinder(text: string, valueNames: ReadonlySet<string> = new Set()): string | null {
   const m = DRAW_RE.exec(text);
   const n = canonicalName(m?.[1] ?? '');
   if (!m || nameable(n)) return null;
+  // After `i := 3`, i is the document's, defined once already.
+  if (REDEFINABLE.has(n) && valueNames.has(n)) return `${n} is already defined.`;
   const why = n.startsWith('u_')
     ? 'names starting u_ are'
     : FUNCTIONS.has(n)
@@ -913,8 +957,36 @@ export function reservedFnHint(text: string): string | null {
 /** Why a name from takenDefinitionName (other than `d`) names no value. */
 export function takenNameHint(name: string): string {
   return name === 'i'
-    ? 'i is the imaginary unit; name it something else, like k'
-    : `${name} is a constant; name a slider something else`;
+    ? 'i is the imaginary unit; name it something else, like k (i := … replaces it across the whole graph)'
+    : `${name} is a constant; name a slider something else, like k (${name} := … replaces ${name} across the whole graph)`;
+}
+
+/**
+ * Why a `:=` row defines nothing: it claims a name the language keeps even
+ * from an explicit definition (REDEFINABLE says which it gives up), or its
+ * left side names nothing. Null for a row that is no `:=`, or defines.
+ */
+export function explicitDefinitionError(text: string): string | null {
+  if (!isExplicitDefinition(text) || scanDefinition(text)) return null;
+  if (badTableRow(text)) return null;
+  const row = asAssignment(text);
+  const fn = FN_RE.exec(row);
+  const m = fn ?? CONST_RE.exec(row) ?? STATE_RE.exec(row);
+  const n = m && canonicalName(m[1]);
+  if (!n) return 'The left side of := names what it defines, like a := 2 or f(x) := x^2.';
+  if (fn && REDEFINABLE.has(n)) return `${n} can be redefined as a value, not a function.`;
+  const why =
+    n === 'd'
+      ? 'd starts derivatives (d/dx)'
+      : n in RESERVED_FN_MEANING
+        ? `${n} is ${RESERVED_FN_MEANING[n]}`
+        : n.startsWith('u_')
+          ? 'names starting u_ are kept for sliders'
+          : `${n} is a built-in function`;
+  if (PARAMS.has(n))
+    return `${n} is ${RESERVED_FN_MEANING[n]}, so it is redefined as the interval it runs over, like ${n} := interval(0, 2pi).`;
+  const params = SPACE.has(n) ? ` A function's parameters may still be called ${n}, like f(${n}) := ${n}^2.` : '';
+  return `${n} cannot be redefined: ${why}.${params}`;
 }
 
 export type GetFn = (name: string) => FnDef | undefined;
@@ -1077,6 +1149,9 @@ function throughFields(e: Expr, opts?: ResolveOpts, over: ReadonlySet<string> = 
 }
 
 export interface ResolveOpts {
+  /** The document's shadowed names (shadowedNames), for every parse of its
+   *  rows' parts: `e` after `e := 2` reads as that e in a sequence too. */
+  valueNames?: ReadonlySet<string>;
   /** A sequence term by name (a_3, a_k) or index (a_[…]). `open` are the
    *  names still unbound here — a sequence row's own index. */
   sequenceTerm?: (name: string, index: Expr | undefined, open: ReadonlySet<string> | undefined) => Expr | null;
@@ -2542,7 +2617,7 @@ export function resolveExpr(e: Expr, getFn: GetFn, opts: ResolveOpts = {}): Expr
  *  whole numbers). `budget` counts
  *  the terms written out so far, shared by a row's maps and components
  *  under one limit as a row's tuple is. */
-export type MapDoc = Pick<ResolveOpts, 'documentNames' | 'boundConsts' | 'isList' | 'getList'> & {
+export type MapDoc = Pick<ResolveOpts, 'documentNames' | 'boundConsts' | 'isList' | 'getList' | 'valueNames'> & {
   fnNames?: ReadonlySet<string>;
   budget?: { terms: number };
 };
@@ -3095,13 +3170,14 @@ export function buildDefs(raw: Definition[], tables?: TableSource, sequences: Se
   const stateNames = new Set(raw.filter(d => d.kind === 'state').map(d => d.name));
   // Names this document binds as values shadow a late-addition builtin of the
   // same name, so `total = 3` still reads `total(x + 1)` as a product.
-  const valueNames = shadowedFnNames(raw.filter(d => d.kind !== 'fn').map(d => d.name));
+  const valueNames = shadowedNames(raw.filter(d => d.kind !== 'fn').map(d => d.name));
   const msg = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
   // Numeric values of constants resolved so far: Σ/Π bounds in later
   // definitions may use them (bounds need a value at expansion time).
   const numEnv: Record<string, number> = {};
   const ropts: ResolveOpts = {
+    valueNames,
     inDefinition: true,
     consts: numEnv,
     boundConsts: new Set(),
@@ -3131,7 +3207,7 @@ export function buildDefs(raw: Definition[], tables?: TableSource, sequences: Se
     // and index too, p[2], since an argument may be a tuple or a multiset of
     // them (docs/multisets.md §3).
     if (!p) {
-      const values = d.kind === 'fn' ? new Set([...valueNames, ...shadowedFnNames(d.params)]) : valueNames;
+      const values = d.kind === 'fn' ? new Set([...valueNames, ...shadowedNames(d.params)]) : valueNames;
       const names = d.kind === 'fn' ? new Set([...indexNamesOf(defs), ...d.params]) : indexNamesOf(defs);
       parsed.set(key, (p = parseExpr(d.rhs, fnNames, names, values)));
     }

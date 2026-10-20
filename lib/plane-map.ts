@@ -41,7 +41,7 @@ const CONSTANTS = new Set(['pi', 'e']);
 export function parsePlaneMap(src: string, env: Record<string, number> = {}, doc: MapDoc = {}): PlaneMap {
   let parsed: Expr;
   try {
-    parsed = parseExpr(src);
+    parsed = parseExpr(src, undefined, undefined, doc.valueNames);
   } catch {
     throw new Error(USAGE);
   }
