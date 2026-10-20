@@ -52,7 +52,9 @@ describe('explicit definitions (:=)', () => {
   it('leaves = rows meaning what they meant', () => {
     const [e] = analyzeRows(['e = 0.6']).rows;
     expect(e.def).toBeUndefined();
-    expect(e.info).toBe('Never true (2.71828 ≠ 0.6) — e is a constant; to redefine it, write e := …');
+    expect(e.info).toBe(
+      'Never true (2.71828 ≠ 0.6) — e is a constant; name a slider something else, like k (e := … replaces e across the whole graph)',
+    );
     // Once e is the graph's own, `e = …` is a claim about it, with no advice.
     expect(infos(['e := 1', 'e = 2'])[1]).toBe('False now (1 ≠ 2)');
   });
@@ -67,12 +69,32 @@ describe('explicit definitions (:=)', () => {
     expect(error('2 := 3')).toBe('The left side of := names what it defines, like a := 2 or f(x) := x^2.');
   });
 
+  it('redefines e, pi, i, w and t only as values', () => {
+    // `e(2)` multiplies wherever e is not the document's value, so a function
+    // named e would never be called.
+    for (const n of ['e', 'pi', 'i', 'w', 't']) {
+      expect(analyzeRows([`${n}(x) := x^2`]).rows[0].error, n).toBe(
+        `${n} can be redefined as a value, not a function.`,
+      );
+    }
+    // Parameters may still take the names.
+    expect(infos(['f(e) := e^2', 'f(3)'])[1]).toBe('= 9');
+  });
+
+  it('says a function defined twice with := is already defined', () => {
+    // Not a level set of f, as a second `f(x) = …` row would be.
+    for (const first of ['f(x) := x^2', 'f(x) = x^2']) {
+      expect(analyzeRows([first, 'f(x) := x^3']).rows[1].error, first).toBe('f is already defined.');
+    }
+  });
+
   it('holds time still when t is redefined', () => {
     // t is the graph's slider, not the clock: nothing reads time any more.
     const a = analyzeRows(['t := 0.5', 'y = sin(x + t)', "a' := -a", 'a(0) := 1']);
     expect(a.rows.map(r => r.error)).toEqual([undefined, undefined, undefined, undefined]);
     expect(a.defs.consts.has('#t')).toBe(true);
-    expect(analyzeRows(['t = 3']).rows[0].error).toMatch(/t := 3 to hold time still/);
+    // `t = 3` almost always meant a constant: the advice is k, not freezing time.
+    expect(analyzeRows(['t = 3']).rows[0].error).not.toMatch(/:=/);
   });
 
   it('redefines u and v as intervals', () => {

@@ -49,7 +49,7 @@ import { type Prog, compileProg, run } from './vm.ts';
 
 /** The message for a row that tries to define t, which is animation time. */
 export const T_RESERVED =
-  't is reserved for time (it animates, counting seconds); use another name for a constant, like k = 3, and write k where you meant t — or t := 3 to hold time still.';
+  't is reserved for time (it animates, counting seconds); use another name for a constant, like k = 3, and write k where you meant t.';
 
 export { publicKind } from './math-object.ts';
 export type { Classified, MathObject } from './math-object.ts';

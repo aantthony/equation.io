@@ -305,12 +305,14 @@ describe('solver extensions and comparison notes', () => {
   it('explains a slider named after a constant or d', () => {
     // Still a claim about e, but one that says why no slider appeared.
     const [e, pi] = runRows(['e = 0.6', 'pi = pi']).rows;
-    expect(e.info).toBe('Never true (2.71828 ≠ 0.6) — e is a constant; to redefine it, write e := …');
+    expect(e.info).toBe(
+      'Never true (2.71828 ≠ 0.6) — e is a constant; name a slider something else, like k (e := … replaces e across the whole graph)',
+    );
     expect(pi.info).toBe('Always true (3.14159 = 3.14159)');
     // `i` is the imaginary unit: an index named i is a claim about it, as a
     // number, as a family of claims (once, not per member), or as a family
     // too large to draw.
-    const hint = 'i is the imaginary unit; to use it as a name, write i := …';
+    const hint = 'i is the imaginary unit; name it something else, like k (i := … replaces it across the whole graph)';
     expect(runRows(['i = 2']).rows[0].info).toBe(`Never true (0+1i ≠ 2) — ${hint}`);
     expect(runRows(['i = [0..1]']).rows[0].info).toBe(`[Never true (0+1i ≠ 0); Never true (0+1i ≠ 1)] — ${hint}`);
     expect(analyze(['i = [0..239]']).rows[0].error).toBe(`An object family needs 1–32 members (got 240) — ${hint}.`);

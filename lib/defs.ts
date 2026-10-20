@@ -872,7 +872,9 @@ export function scanDefinition(text: string): Definition | null {
   // short hash — never runs on definition rows. Leave it to badTableRow.
   if (OPEN_HEAD_RE.test(text)) return null;
   m = FN_RE.exec(text);
-  if (m && claimable(written(m))) {
+  // Only as a value: the parser reads `e(2)` as e · 2 wherever e is not the
+  // document's value, so `e(x) := …` would define a function no row calls.
+  if (m && nameable(written(m))) {
     return {
       kind: 'fn',
       name: name(m),
@@ -955,8 +957,8 @@ export function reservedFnHint(text: string): string | null {
 /** Why a name from takenDefinitionName (other than `d`) names no value. */
 export function takenNameHint(name: string): string {
   return name === 'i'
-    ? 'i is the imaginary unit; to use it as a name, write i := …'
-    : `${name} is a constant; to redefine it, write ${name} := …`;
+    ? 'i is the imaginary unit; name it something else, like k (i := … replaces it across the whole graph)'
+    : `${name} is a constant; name a slider something else, like k (${name} := … replaces ${name} across the whole graph)`;
 }
 
 /**
@@ -968,9 +970,11 @@ export function explicitDefinitionError(text: string): string | null {
   if (!isExplicitDefinition(text) || scanDefinition(text)) return null;
   if (badTableRow(text)) return null;
   const row = asAssignment(text);
-  const m = FN_RE.exec(row) ?? CONST_RE.exec(row) ?? STATE_RE.exec(row);
+  const fn = FN_RE.exec(row);
+  const m = fn ?? CONST_RE.exec(row) ?? STATE_RE.exec(row);
   const n = m && canonicalName(m[1]);
   if (!n) return 'The left side of := names what it defines, like a := 2 or f(x) := x^2.';
+  if (fn && REDEFINABLE.has(n)) return `${n} can be redefined as a value, not a function.`;
   const why =
     n === 'd'
       ? 'd starts derivatives (d/dx)'
@@ -981,8 +985,8 @@ export function explicitDefinitionError(text: string): string | null {
           : `${n} is a built-in function`;
   if (PARAMS.has(n))
     return `${n} is ${RESERVED_FN_MEANING[n]}, so it is redefined as the interval it runs over, like ${n} := interval(0, 2pi).`;
-  const fn = SPACE.has(n) ? ` A function's parameters may still be called ${n}, like f(${n}) := ${n}^2.` : '';
-  return `${n} cannot be redefined: ${why}.${fn}`;
+  const params = SPACE.has(n) ? ` A function's parameters may still be called ${n}, like f(${n}) := ${n}^2.` : '';
+  return `${n} cannot be redefined: ${why}.${params}`;
 }
 
 export type GetFn = (name: string) => FnDef | undefined;

@@ -23,6 +23,7 @@ import {
   shadowedNames,
   asAssignment,
   explicitDefinitionError,
+  isExplicitDefinition,
   scanDefinition,
   takenBinder,
   takenDefinitionName,
@@ -288,7 +289,8 @@ export function prepareDocument(
     // `r = sqrt(x^2 + y^2); r = 2` is a level set of r. A field over u, v has
     // no level sets in the plane, so a second `k = …` is a redefinition.
     const field = defs.fields.get(name);
-    if ((field && !overParams(field)) || levelSet) row.def = undefined;
+    // `f(x) := x^3` says outright it is a definition, never a level set.
+    if (!isExplicitDefinition(row.text) && ((field && !overParams(field)) || levelSet)) row.def = undefined;
     else row.error = `${defKey(row.def!)} is already defined.`;
   }
 
