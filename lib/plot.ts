@@ -1,5 +1,5 @@
 import { childrenOf } from './expr.ts';
-import { exprKey } from './expr.ts';
+import { exprKey, unknownVariable } from './expr.ts';
 /**
  * Classify a parsed expression into a plot type, mirroring the old
  * equation.io renderable dispatcher:
@@ -770,7 +770,7 @@ function classifyLowered(
       if (v === 'd' || /^d[A-Za-z]$/.test(v)) throw new Error('Write derivatives as d/dx (…).');
       const fn = builtinFn(v);
       if (fn) throw new Error(`${v} is a function — write it with parentheses, e.g. ${fn}(x).`);
-      throw new Error(`Unknown variable: ${v}. Define "${v} = 1" to make a slider.`);
+      throw new Error(unknownVariable(v));
     }
   }
   // Continuous intervals (lib/interval.ts). Beside x and y an interval makes

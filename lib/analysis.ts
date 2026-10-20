@@ -20,9 +20,9 @@ import {
   type GetFn,
   type ResolveOpts,
   surfaceOperand,
-  shadowedFnNames,
+  shadowedNames,
+  asAssignment,
   explicitDefinitionError,
-  redefinedBuiltins,
   scanDefinition,
   takenBinder,
   takenDefinitionName,
@@ -53,7 +53,7 @@ import {
   toProbability,
   variableRow,
 } from './dist.ts';
-import { type Expr, MAP, childrenOf, freeVars, parseExpr, substVars, unaliased, withRebound } from './expr.ts';
+import { type Expr, MAP, childrenOf, freeVars, parseExpr, substVars, unaliased } from './expr.ts';
 import { usesComplex } from './complex.ts';
 import { intervalsIn, lengthOf, replaceIntervals } from './interval.ts';
 import { PAINT_CALL, lowerGeom } from './geom.ts';
@@ -144,7 +144,7 @@ export interface PreparedDocument {
   fieldEnv: Record<string, Expr>;
   fnNames: Set<string>;
   listNames: ReturnType<typeof listNamesOf>;
-  valueNames: ReturnType<typeof shadowedFnNames>;
+  valueNames: ReturnType<typeof shadowedNames>;
   getFn: (name: string) => ReturnType<Env['fns']['get']>;
   getList: ReturnType<typeof listGetter>;
   boundVals: Record<string, number>;
@@ -152,8 +152,6 @@ export interface PreparedDocument {
   structuralConsts: Set<string>;
   ropts: import('./defs.ts').ResolveOpts;
   gridFields: LevelSetSpec[];
-  /** Built-ins the document redefines with `:=`; every parse reads them as aliases. */
-  rebound: ReadonlySet<string>;
 }
 
 export interface AnalysisContext {
@@ -185,23 +183,17 @@ export const isViewportText = (text: string): boolean =>
 /** No source splitting here: one input row remains one result, including blanks. */
 export function prepareDocument(
   sources: readonly (string | RowSource)[],
-  options: PrepareOptions = {},
+  { tables }: PrepareOptions = {},
 ): PreparedDocument {
-  const rebound = redefinedBuiltins(sources.map(s => stripNote(typeof s === 'string' ? s : s.text).trim()));
-  return withRebound(rebound, () => ({ ...prepareRows(sources, options), rebound }));
-}
-
-function prepareRows(
-  sources: readonly (string | RowSource)[],
-  { tables }: PrepareOptions,
-): Omit<PreparedDocument, 'rebound'> {
   // A trailing `# note` is prose for the reader; the math is what precedes it.
   const rows: RowInfo[] = sources.map(source =>
     typeof source === 'string'
       ? { text: stripNote(source).trim() }
       : { ...source, text: stripNote(source.text).trim() },
   );
-  const texts = rows.map(row => row.text);
+  // The row-shape scanners read `a_n := …` and `Y := 2X` as they read `=`;
+  // only scanDefinition asks which a row wrote (`e := …` may claim e).
+  const texts = rows.map(row => asAssignment(row.text));
   const seqScans = scanSequences(texts);
   const statements: StatementScan[] = rows.map((source, i) => ({
     source,
@@ -224,7 +216,7 @@ function prepareRows(
   // outside the definition system — mirror of web/main.ts recompileAll.
   const regressions = scanRegressions(texts);
   const rvScan = scanRandomRows(
-    rows.map((r, i) => (regressions.has(i) || !r.text || r.text.startsWith('#') || seqScans[i] ? null : r.text)),
+    texts.map((text, i) => (regressions.has(i) || !text || text.startsWith('#') || seqScans[i] ? null : text)),
   );
   const rvRowIdx = new Set([...rvScan.base.keys(), ...rvScan.derived.keys()]);
 
@@ -325,7 +317,7 @@ function prepareRows(
   const listNames = listNamesOf(defs);
   // Names this document binds that a late-addition builtin would otherwise
   // claim (`total = 3` followed by `total(x + 1)`), as in web/main.ts.
-  const valueNames = shadowedFnNames([
+  const valueNames = shadowedNames([
     ...raw.filter(d => d.kind !== 'fn').map(d => d.name),
     ...[...rvScan.base.values()].map(s => s.name),
     ...[...rvScan.derived.values()].map(s => s.name),
@@ -344,6 +336,7 @@ function prepareRows(
   for (const name of defs.states.keys()) delete boundVals[name];
   const structuralConsts = new Set<string>();
   const ropts: import('./defs.ts').ResolveOpts = {
+    valueNames,
     consts: new Proxy(boundVals, {
       get(target, name, receiver) {
         if (typeof name === 'string' && Object.hasOwn(target, name)) structuralConsts.add(name);
@@ -379,6 +372,7 @@ function prepareRows(
     getFn,
     ropts,
     constNames,
+    valueNames,
     taken: n => nameTaken(defs, n),
   });
   for (const [name, declaration] of declarations) defs.bind(name, { tag: 'rv', declaration });
@@ -763,22 +757,20 @@ function curvaturePaint(e: Expr, fnNames: ReadonlySet<string>, isPoint: (arg: Ex
 }
 
 export function analyzePrepared(document: PreparedDocument, context: AnalysisContext = {}): Analysis {
-  const analysis = withRebound(document.rebound, () => analyzeInScope(document, context));
-  if (document.rebound.size) {
-    // Messages name a redefined built-in as its row wrote it, not by alias.
-    for (const row of analysis.rows) {
-      if (row.error) row.error = unaliased(row.error);
-      if (row.info) row.info = unaliased(row.info);
-    }
+  const analysis = analyzeDocument(document, context);
+  // Messages name a redefined built-in (`#e`, internally) as its row wrote it.
+  for (const row of analysis.rows) {
+    if (row.error) row.error = unaliased(row.error);
+    if (row.info) row.info = unaliased(row.info);
   }
   return analysis;
 }
 
-function analyzeInScope(document: PreparedDocument, context: AnalysisContext): Analysis {
+function analyzeDocument(document: PreparedDocument, context: AnalysisContext): Analysis {
   const { defs, constNames, fieldEnv, fnNames, listNames, valueNames, getFn, getList, ropts, gridFields } = document;
   // `e = 2` after `e := 1` is a claim about the document's e, which needs no
   // advice about Euler's.
-  const unredefined = <T extends string>(n: T | null): T | null => (n && document.rebound.has(n) ? null : n);
+  const unredefined = <T extends string>(n: T | null): T | null => (n && valueNames.has(n) ? null : n);
   // A map's Σ bounds are told the document's functions and lists, to refuse them.
   const viewDoc = { ...ropts, fnNames };
   const rows = document.rows.map(row => ({ ...row }));
@@ -1084,7 +1076,7 @@ function analyzeInScope(document: PreparedDocument, context: AnalysisContext): A
       // mark(v) is v, highlighted in the panel's graphs.
       const markArg = fnNames.has('mark') ? null : wholeCall('mark', row.text);
       const source = graphArgs !== null ? `(${graphArgs})` : markArg !== null ? `(${markArg})` : row.text;
-      const takenName = takenBinder(row.text);
+      const takenName = takenBinder(row.text, valueNames);
       if (takenName) throw new Error(takenName);
       const rawParsed = parseExpr(source, fnNames, listNames, valueNames);
       // `p(50..400)`: where p goes over that time — a range in call position,

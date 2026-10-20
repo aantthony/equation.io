@@ -55,7 +55,7 @@ export function parseSurfaceMap(
 ): SurfaceMap {
   let parsed: Expr;
   try {
-    parsed = parseExpr(src);
+    parsed = parseExpr(src, undefined, undefined, doc.valueNames);
   } catch {
     throw new Error(USAGE);
   }

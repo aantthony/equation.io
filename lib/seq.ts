@@ -37,6 +37,7 @@ import {
   parseExpr,
   sameNumber,
   substVars,
+  unknownVariable,
 } from './expr.ts';
 import { type Classified } from './math-object.ts';
 
@@ -348,7 +349,12 @@ export function classifySeqRec(
   // the index (a_n = Σ(s=1..n, s)) stays a sum; evaluate() runs it at each n.
   const openVars = new Set(ropts.openVars);
   openVars.add(index);
-  const source = parseExpr(rhs, fnNames, new Set([...indexNames, ...[...sequences].map(s => s + '_')]));
+  const source = parseExpr(
+    rhs,
+    fnNames,
+    new Set([...indexNames, ...[...sequences].map(s => s + '_')]),
+    ropts.valueNames,
+  );
   // A recurrence's own a_n (a_{n}, a_(n)) is its previous term, the variable
   // the map steps — not a lookup into the terms it is defining.
   const recVar = `${name}_${index}`;
@@ -408,7 +414,7 @@ export function classifySeqRec(
     if (bifurcation)
       throw new Error(`A recurrence that reads ${index} or a tuple draws its terms; it cannot also take x.`);
     for (const v of vars) {
-      throw new Error(`Unknown variable: ${v}. Define "${v} = 1" to make a slider.`);
+      throw new Error(unknownVariable(v));
     }
     const term = lookup?.(`${name}_`, { kind: 'var', name: index }, openVars);
     if (!term) throw new Error(`Recurrence ${name} needs the rest of the document to compute its terms.`);
@@ -417,7 +423,7 @@ export function classifySeqRec(
     return { object: { kind: 'sequence', form: 'explicit', term, index }, animated, needs3D: false, params };
   }
   for (const v of vars) {
-    throw new Error(`Unknown variable: ${v}. Define "${v} = 1" to make a slider.`);
+    throw new Error(unknownVariable(v));
   }
   if (a0Name) params.push(a0Name);
   params.sort();
@@ -538,7 +544,7 @@ export function sequenceResolver(
       tuple = !!scan.emptySeed;
       if (!tuple)
         try {
-          const step = parseExpr(scan.rhs, new Set(defs.fns.keys()), indexNames());
+          const step = parseExpr(scan.rhs, new Set(defs.fns.keys()), indexNames(), opts.valueNames);
           tuple = usesStack(step, new Set()) || makesTuple(step, new Set());
         } catch {
           /* its row reports the parse error */
@@ -601,7 +607,7 @@ export function sequenceResolver(
       const scan = defs.sequences.get(name)!;
       const leaf = tupleLeaf(name, run.reads);
       // Parsed once: only n changes from step to step.
-      const step = parseExpr(scan.rhs, new Set(defs.fns.keys()), indexNames());
+      const step = parseExpr(scan.rhs, new Set(defs.fns.keys()), indexNames(), opts.valueNames);
       while (run.terms.length <= k) {
         const i = run.terms.length;
         let next: number[];
@@ -661,7 +667,7 @@ export function sequenceResolver(
     if (resolving.has(name)) throw new Error(`Sequence ${name} depends on itself outside its recurrence.`);
     resolving.add(name);
     try {
-      const parsed = parseExpr(scan.rhs, new Set(defs.fns.keys()), indexNames());
+      const parsed = parseExpr(scan.rhs, new Set(defs.fns.keys()), indexNames(), opts.valueNames);
       if (!scan.rec) {
         // Pin the index in the source (a Σ/∫ that rebinds it keeps its own),
         // then resolve ONCE — so a_5 of a_n = Σ(s=1..n, s) is the number 15,
@@ -810,7 +816,7 @@ export function sequenceResolver(
       // from another recurrence's step, it is read term by term instead, as
       // that chain grows — so two recurrences may read each other.
       if (!resolving.size) term(name, SEQ_MAX, true);
-      const body = resolveSeq(parseExpr(scan.rhs, new Set(defs.fns.keys()), indexNames()));
+      const body = resolveSeq(parseExpr(scan.rhs, new Set(defs.fns.keys()), indexNames(), opts.valueNames));
       // The trailing inputs are names the row depends on: the step's
       // constants, not its index, its own term, lists or other sequences'.
       const stepped = steps(name, body);
@@ -841,7 +847,7 @@ export function sequenceResolver(
     }
     resolving.add(name);
     try {
-      const parsed = parseExpr(scan.rhs, new Set(defs.fns.keys()), indexNames());
+      const parsed = parseExpr(scan.rhs, new Set(defs.fns.keys()), indexNames(), opts.valueNames);
       return resolveSeq(substIdx(parsed, scan.index, at), { openVars: open });
     } finally {
       resolving.delete(name);

@@ -110,10 +110,10 @@ function numExpr(e: ReturnType<typeof parseExpr>, env: Record<string, number>, w
   return v;
 }
 
-function num(src: string, env: Record<string, number>, what: string): number {
+function num(src: string, env: Record<string, number>, what: string, doc: MapDoc): number {
   let parsed;
   try {
-    parsed = parseExpr(src);
+    parsed = parseExpr(src, undefined, undefined, doc.valueNames);
   } catch (err) {
     throw new Error(`${what}: ${err instanceof Error ? err.message : String(err)}`);
   }
@@ -139,8 +139,8 @@ function parseSurfaceRow(args: string[], env: Record<string, number>, doc: MapDo
     if (!named || !range) throw new Error(usage);
     const axis = named[1] as 'x' | 'y';
     if (ranges[axis]) throw new Error(`on(…) sets ${axis} twice.`);
-    const lo = num(range[0], env, `${axis} lower bound`);
-    const hi = num(range[1], env, `${axis} upper bound`);
+    const lo = num(range[0], env, `${axis} lower bound`, doc);
+    const hi = num(range[1], env, `${axis} upper bound`, doc);
     if (lo >= hi) throw new Error(`The ${axis} range needs lo < hi (got ${lo}..${hi}).`);
     ranges[axis] = [lo, hi];
   }
@@ -214,7 +214,7 @@ export function parseViewRow(text: string, env: Record<string, number>, doc: Map
       const axis = named[1];
       if (axis === 'ratio') {
         if (spec.ratio !== undefined) throw new Error('view(...) sets ratio twice.');
-        spec.ratio = num(named[2], env, 'view ratio');
+        spec.ratio = num(named[2], env, 'view ratio', doc);
         if (spec.ratio <= 0) throw new Error('The view ratio must be positive.');
         continue;
       }
@@ -227,8 +227,8 @@ export function parseViewRow(text: string, env: Record<string, number>, doc: Map
       }
       if (spec[axis as 'x'] || lattice.some(([a]) => a === axis)) throw new Error(`view(...) sets ${axis} twice.`);
       if (!range) throw new Error(usage);
-      const lo = num(range[0], env, `view ${axis} lower bound`);
-      const hi = num(range[1], env, `view ${axis} upper bound`);
+      const lo = num(range[0], env, `view ${axis} lower bound`, doc);
+      const hi = num(range[1], env, `view ${axis} upper bound`, doc);
       if (lo >= hi) throw new Error(`view ${axis} range needs lo < hi (got ${lo}..${hi}).`);
       // Any other letter names an index axis: the view is a lattice.
       if (axis === 'x' || axis === 'y') spec[axis] = [lo, hi];
@@ -282,14 +282,14 @@ export function parseViewRow(text: string, env: Record<string, number>, doc: Map
   if (args.length < 2 || args.length > 4) throw new Error(usage);
   const spec: Camera3DSpec = {
     kind: 'camera',
-    theta: num(args[0], env, 'camera theta'),
-    phi: num(args[1], env, 'camera phi'),
+    theta: num(args[0], env, 'camera theta', doc),
+    phi: num(args[1], env, 'camera phi', doc),
   };
   if (locked) spec.locked = true;
   for (const arg of args.slice(2)) {
     let parsed;
     try {
-      parsed = parseExpr(arg);
+      parsed = parseExpr(arg, undefined, undefined, doc.valueNames);
     } catch {
       throw new Error(usage);
     }
@@ -299,14 +299,14 @@ export function parseViewRow(text: string, env: Record<string, number>, doc: Map
       spec.target = parsed.items.map(c => numExpr(c, env, 'camera target')) as [number, number, number];
     } else {
       if (spec.radius !== undefined) throw new Error('camera(...) sets the radius twice.');
-      const r = num(arg, env, 'camera radius');
+      const r = num(arg, env, 'camera radius', doc);
       if (r <= 0) throw new Error('The camera radius must be positive.');
       spec.radius = r;
     }
   }
   if (spinArg) {
     if (!spinArg[1].trim()) throw new Error(usage);
-    const spin = num(spinArg[1], env, 'camera spin');
+    const spin = num(spinArg[1], env, 'camera spin', doc);
     if (spin) spec.spin = spin;
   }
   return spec;

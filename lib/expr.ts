@@ -512,18 +512,18 @@ export const CONSTANTS: Record<string, number> = {
 };
 
 /**
- * Built-in names the document in analysis redefined (`e := 0.6`, `i := 3`;
- * see REDEFINABLE in defs.ts). Each parses to its alias, a name no row can
- * write, so the code that knows `i` as the imaginary unit or `w` as x + iy
- * never mistakes the document's own value for the built-in.
+ * Built-in names a definition may still claim with `:=` (or a function its
+ * parameter): `e := 0.6` is a slider, `i := 3` an index, `w := x - iy` a
+ * field, `t := 2` holds time still. A name bound so parses to its alias, a
+ * name no row can write, so the code that knows `i` as the imaginary unit or
+ * `w` as x + iy never mistakes the document's value for the built-in. The
+ * rest stay the language's: x, y and z are what every other row plots
+ * against, u and v take only an interval, and d starts d/dx.
  */
-let activeRebound: ReadonlySet<string> = new Set();
+export const REDEFINABLE: ReadonlySet<string> = new Set(['e', 'i', 'w', 'pi', 't']);
 
 /** The internal name of a redefined built-in: `#` starts no written name. */
 export const reboundName = (name: string): string => `#${name}`;
-
-/** A written name as the document in analysis binds it: its alias if redefined. */
-export const boundName = (name: string): string => (activeRebound.has(name) ? reboundName(name) : name);
 
 /** A name as its row wrote it, undoing reboundName. */
 export const writtenName = (name: string): string => name.replace(/^#/, '');
@@ -531,16 +531,17 @@ export const writtenName = (name: string): string => name.replace(/^#/, '');
 /** Every `#name` alias in a message, as written. */
 export const unaliased = (text: string): string => text.replace(/#(?=[A-Za-z])/g, '');
 
-/** Run fn with the given built-ins redefined for every parse inside it. */
-export function withRebound<T>(names: ReadonlySet<string>, fn: () => T): T {
-  const outer = activeRebound;
-  activeRebound = names;
-  try {
-    return fn();
-  } finally {
-    activeRebound = outer;
-  }
-}
+/** Why a free name has no value. An alias only parses where a row defines
+ *  it, so an unbound one is a definition that failed. */
+export const unknownVariable = (name: string, where = ''): string =>
+  name === writtenName(name)
+    ? `Unknown variable${where}: ${name}. Define "${name} = 1" to make a slider.`
+    : `${writtenName(name)} has an error in its definition.`;
+
+/** A written name as a document binding `valueNames` reads it: a redefined
+ *  built-in's alias, any other name itself. */
+export const boundName = (name: string, valueNames: ReadonlySet<string>): string =>
+  REDEFINABLE.has(name) && valueNames.has(name) ? reboundName(name) : name;
 
 /** User-defined function names for the parse in progress (set by parseExpr). */
 let activeUserFns: ReadonlySet<string> = new Set();
@@ -766,6 +767,12 @@ const ops = operators<PNode>({
       return { kind: 'list', items: [content] };
     }
     return content;
+  }),
+
+  // `a := 2` is a definition, which the definition scanner reads before any
+  // expression parse (explicitAssignment); one met here is somewhere else.
+  ':=': BinaryInfix<PNode>(() => {
+    throw new Error(':= defines a name, at the start of a row of its own, like a := 2.');
   }),
 
   // Either side of '=' may be a tuple, so (x', y') = (y, -sin(x)) parses.
@@ -1044,6 +1051,30 @@ const syntax: PatternDict = {
 };
 
 const tokenize = Tokenizer(syntax);
+
+/**
+ * Where a row's `:=` is, when the row is an explicit definition: the first
+ * assignment, outside text and brackets. Read from tokens, so `:=` inside a
+ * quoted label is text, and `a == b := …` is no definition.
+ */
+export function explicitAssignment(text: string): [number, number] | null {
+  // Most rows have no `:=` at all; the scanners ask of every row, often.
+  if (!text.includes(':=')) return null;
+  let depth = 0;
+  try {
+    for (const token of tokenize(text)) {
+      if (token.type === 'parenopen') depth++;
+      else if (token.type === 'parenclose') depth--;
+      else if (token.type === 'operator' && depth === 0) {
+        if (token.str === ':=') return token.loc;
+        if (token.str === '=' || token.str === '==') return null;
+      }
+    }
+  } catch {
+    // Not tokenizable: no definition, explicit or otherwise.
+  }
+  return null;
+}
 
 /**
  * Lower unicode sugar to plain tokens: glyphs to the names they stand for
@@ -1356,7 +1387,9 @@ function createLeaf(token: Token): PNode {
   if (token.type === 'parenopen') return { kind: 'popen', bracket: token.str, call: !!token.call };
   if (token.type === 'symbol') {
     if (token.str === EMPTY_LIST) return { kind: 'list', items: [] };
-    if (activeRebound.has(token.str)) return { kind: 'var', name: reboundName(token.str) };
+    if (REDEFINABLE.has(token.str) && activeValueNames.has(token.str)) {
+      return { kind: 'var', name: reboundName(token.str) };
+    }
     if (Object.hasOwn(CONSTANTS, token.str)) return num(CONSTANTS[token.str]);
     return { kind: 'var', name: token.str };
   }

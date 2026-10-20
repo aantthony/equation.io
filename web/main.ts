@@ -1,4 +1,4 @@
-import { type Env, emptyEnv, evaluateFrame } from '../lib/env.ts';
+import { type Env, boundIn, emptyEnv, evaluateFrame } from '../lib/env.ts';
 import {
   BOARD_STEPS,
   type Board,
@@ -464,6 +464,9 @@ let defsAnimated = false;
 let constEnv: Record<string, number> = {};
 /** Constants used as Σ/Π bounds; their sliders snap to integer steps. */
 let sumBoundNames = new Set<string>();
+/** The document's shadowed names (shadowedNames), for the app's own parses
+ *  of its rows: a slider's bounds, a surface's reads. */
+let valueNames: ReadonlySet<string> = new Set();
 let runtimeSliders = new Set<string>();
 /** Constants that are a whole-number distribution parameter (the n of
  *  Binomial(n, p)); their sliders snap to integer steps too. */
@@ -3271,6 +3274,7 @@ function recompileAll() {
   repaintHighlights();
   ensureTables(prepared.raw);
   sumBoundNames = prepared.sumBoundConsts;
+  valueNames = prepared.valueNames;
   const wasKey = stateSys?.key;
   stateSys = prepared.stateSystem;
   if (stateSys?.key !== wasKey) resetState();
@@ -3761,7 +3765,7 @@ function moveSlider(eq: Equation, v: number): { text: string; rhs: string; value
   const slider = sliderOf(eq);
   if (!slider) return null;
   const { def, form } = slider;
-  const value = sliderValue(form, v, sliderBounds(form, sliderEnv(), new Set(defs.fns.keys())));
+  const value = sliderValue(form, v, sliderBounds(form, sliderEnv(), new Set(defs.fns.keys()), valueNames));
   const rhs = writeSlider(slider.rhs, form, fmtNum(value));
   return { text: `${definitionHead(def, stripNote(eq.text))} ${rhs}`, rhs, value: Number(fmtNum(value)) };
 }
@@ -4284,7 +4288,7 @@ function reconcile() {
       const { form } = slider;
       eq.sliderUI ??= makeSlider(eq);
       const { min, range, max } = eq.sliderUI;
-      const bounds = sliderBounds(form, sliderEnv(), new Set(defs.fns.keys()));
+      const bounds = sliderBounds(form, sliderEnv(), new Set(defs.fns.keys()), valueNames);
       let v = form.literal;
       let lo: number, hi: number;
       if (bounds) {
@@ -5194,6 +5198,7 @@ function makePairWriter(
     pairText,
     p => equations.find(r => r.def?.kind === 'const' && r.def.name === p && sliderOf(r)),
     pinned,
+    name => boundIn(defs, name),
   );
   if (!drag) return null;
   const { parts, axes } = drag;
@@ -5272,7 +5277,7 @@ const surfaceReadsOf = new WeakMap<SurfaceMap, Set<string>>();
 function surfaceReads(surface: SurfaceMap): Set<string> {
   let reads = surfaceReadsOf.get(surface);
   if (!reads) {
-    reads = definitionDependencies(freeVars(parseExpr(surface.text)), defs);
+    reads = definitionDependencies(freeVars(parseExpr(surface.text, undefined, undefined, valueNames)), defs);
     surfaceReadsOf.set(surface, reads);
   }
   return reads;
@@ -6271,7 +6276,7 @@ function definitionRow(name: string): number {
   const byDef = equations.findIndex(eq => eq.def && eq.def.kind !== 'init' && eq.def.name === name);
   if (byDef >= 0) return byDef;
   const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  const head = new RegExp(`^\\s*${escaped}\\s*(?:'|\\([^)]*\\)|_\\{[^}]*\\})?\\s*(?:=|~|∈|\\\\in\\b)`);
+  const head = new RegExp(`^\\s*${escaped}\\s*(?:'|\\([^)]*\\)|_\\{[^}]*\\})?\\s*(?::?=|~|∈|\\\\in\\b)`);
   return equations.findIndex(eq => !eq.comment && head.test(canonicalName(stripNote(eq.text))));
 }
 

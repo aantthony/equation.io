@@ -179,7 +179,11 @@ export function scanDistribution(text: string): { name: string; rhs: string } | 
 const DIST_HINT = `Try ${DIST_FAMILIES.map((f, k, all) => (k === all.length - 1 ? 'or ' : '') + distUsage(f)).join(', ')}.`;
 
 /** Parse the right side of `name ~ …`. Throws with a row-friendly message. */
-export function parseDistribution(rhs: string, fnNames: ReadonlySet<string>): BaseDist {
+export function parseDistribution(
+  rhs: string,
+  fnNames: ReadonlySet<string>,
+  valueNames: ReadonlySet<string> = new Set(),
+): BaseDist {
   const m = DIST_RE.exec(rhs);
   const spec = m && distFamily(m[1]);
   if (!m || !spec) {
@@ -198,7 +202,7 @@ export function parseDistribution(rhs: string, fnNames: ReadonlySet<string>): Ba
   }
   let args: Expr;
   try {
-    args = parseExpr(`(${m[2]})`, fnNames);
+    args = parseExpr(`(${m[2]})`, fnNames, undefined, valueNames);
   } catch (e) {
     if (e instanceof Error && /vector components/.test(e.message)) throw new Error(arityError);
     throw e;
@@ -5018,6 +5022,8 @@ export interface BuildRVOpts {
   getFn: GetFn;
   ropts?: ResolveOpts;
   constNames: ReadonlySet<string>;
+  /** The document's shadowed names (shadowedNames): `e` after `e := 2`. */
+  valueNames?: ReadonlySet<string>;
   /** Name already claimed by a definition row (constant, function, field, …). */
   taken: (name: string) => boolean;
 }
@@ -5065,7 +5071,7 @@ export function buildRVDeclarations(scan: ReturnType<typeof scanRandomRows>, opt
   for (const [i, { name, rhs }] of scan.base) {
     if (!claim(i, name)) continue;
     try {
-      const d = parseDistribution(rhs, opts.fnNames);
+      const d = parseDistribution(rhs, opts.fnNames, opts.valueNames);
       d.args = d.args.map(a => resolveExpr(a, opts.getFn, opts.ropts));
       for (const a of d.args) {
         for (const f of freeVars(a)) {
@@ -5081,7 +5087,7 @@ export function buildRVDeclarations(scan: ReturnType<typeof scanRandomRows>, opt
   for (const [i, { name, rhs }] of scan.derived) {
     if (!claim(i, name)) continue;
     try {
-      const expr = resolveExpr(parseExpr(rhs, opts.fnNames), opts.getFn, opts.ropts);
+      const expr = resolveExpr(parseExpr(rhs, opts.fnNames, undefined, opts.valueNames), opts.getFn, opts.ropts);
       checkDerived(expr, names, opts.constNames);
       declarations.set(name, { name, kind: 'derived', expr });
     } catch (e) {

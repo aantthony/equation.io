@@ -99,7 +99,7 @@ export function parseAxisMap(axis: Axis, src: string, env: Record<string, number
   const usage = `An axis map writes ${axis} in terms of the screen's ${screen}, like ${axis} = 10^${screen}.`;
   let forward: Expr;
   try {
-    forward = parseExpr(src);
+    forward = parseExpr(src, undefined, undefined, doc.valueNames);
   } catch {
     throw new Error(usage);
   }

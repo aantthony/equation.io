@@ -2,7 +2,7 @@ import { type Env } from './env.ts';
 /** Pure, tolerant editor assistance. Suggestions write ordinary equation
  * text; an incomplete expression never needs to pass through the parser.
  */
-import { pointComponentNames, shadowedFnNames } from './defs.ts';
+import { pointComponentNames, shadowedNames } from './defs.ts';
 import { DIST_FAMILIES, distFamily, distUsage, isModelName } from './dist-families.ts';
 import { tildeRow } from './regression.ts';
 import {
@@ -367,7 +367,7 @@ export function syntaxHelp(text: string, offset: number, defs: Env, declared?: R
     return { start, end, suggestions, hint };
   }
   const call = [...stack].reverse().find(s => s.name)?.name;
-  const shadowed = shadowedFnNames([...candidates.values()].filter(s => !s.call).map(s => s.name));
+  const shadowed = shadowedNames([...candidates.values()].filter(s => !s.call).map(s => s.name));
   const blocked = call && !defs.fns.has(call) && shadowed.has(builtinFn(call) ?? '');
   // The HEAD of a ~ row — the first token right of the ~, its paren the
   // outermost one open — is a distribution name in any spelling, aliases
