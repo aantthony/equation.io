@@ -26,7 +26,9 @@ import { exprKey } from './expr.ts';
  * same way Σ expands — so shaders, the worker VM and every other consumer
  * evaluate it with no new machinery.
  */
-import { type Expr, evaluate, freeVars, sameList } from './expr.ts';
+import { childrenOf, type Expr, evaluate, freeVars, sameList, substVars } from './expr.ts';
+import { isReductionCall } from './measure.ts';
+import { type Ctx, dVarName, foldNums, SUM_MAX_TOTAL } from './defs.ts';
 import { add, diff, div, mul, neg, pow, sub } from './diff.ts';
 import {
   type FPoly,
@@ -1271,4 +1273,266 @@ function divideOut(eFactors: Factor[], du: Expr, v: string): Expr | null {
   if (r.length) return null;
   const out = mul(fpToExpr(q, v), rebuild(nonPoly, false));
   return div(duNeg ? neg(out) : out, num(coefNum));
+}
+
+export interface StripDx {
+  v: string;
+  integrand: Expr;
+  /** Factors after this integral's measure that carry ANOTHER d-var: they
+   *  belong to an enclosing ∫ (`int[0..1] int[0..y] x dx dy` pairs inside
+   *  out), so the expansion multiplies them back on for the outer level. */
+  residual: Expr | null;
+}
+
+/**
+ * Split the integration variable off a body: the first d<letter> factor in
+ * its multiplicative structure (`x^2 dx` → v = x, integrand x^2). Written
+ * touching, `1/(1+x^2)dx`, the dx binds tighter than '/' and sits inside the
+ * denominator product — the measure is recognized on either side and the
+ * rest of that denominator stays a true denominator. A tail after
+ * the measure folds into the integrand (`∫ dx/(1+x^2)`) unless it carries
+ * its own d-var, in which case it is the enclosing integral's (residual).
+ * Sums integrate termwise, so every term must end in the same dx.
+ */
+export function stripDx(body: Expr): StripDx | null {
+  if (body.kind === 'neg') {
+    const m = stripDx(body.a);
+    return m && { ...m, integrand: neg(m.integrand) };
+  }
+  if (body.kind === 'bin' && (body.op === '+' || body.op === '-')) {
+    const a = stripDx(body.a);
+    const b = stripDx(body.b);
+    if (!a && !b) return null;
+    if (!a || !b || a.v !== b.v || a.residual || b.residual) {
+      throw new Error(`Every term under one ∫ must end in the same d${a?.v ?? b?.v ?? 'x'}.`);
+    }
+    return { v: a.v, integrand: { kind: 'bin', op: body.op, a: a.integrand, b: b.integrand }, residual: null };
+  }
+  const factors: Array<{ e: Expr; inv: boolean }> = [];
+  const walk = (e: Expr, inv: boolean): void => {
+    if (e.kind === 'bin' && (e.op === '*' || e.op === '/')) {
+      walk(e.a, inv);
+      walk(e.b, e.op === '/' ? !inv : inv);
+      return;
+    }
+    factors.push({ e, inv });
+  };
+  walk(body, false);
+  const at = factors.findIndex(f => dVarName(f.e) !== null);
+  if (at < 0) return null;
+  const v = dVarName(factors[at].e)!;
+  const tail = factors.slice(at + 1);
+  const tailHasDx = tail.some(f => dVarName(f.e) !== null);
+  const inside = tailHasDx ? factors.slice(0, at) : factors.filter((_, i) => i !== at);
+  const product = (fs: Array<{ e: Expr; inv: boolean }>): Expr => {
+    let numr: Expr | null = null;
+    let den: Expr | null = null;
+    for (const f of fs) {
+      if (f.inv) den = den === null ? f.e : { kind: 'bin', op: '*', a: den, b: f.e };
+      else numr = numr === null ? f.e : { kind: 'bin', op: '*', a: numr, b: f.e };
+    }
+    let out: Expr = numr ?? num(1);
+    if (den) out = { kind: 'bin', op: '/', a: out, b: den };
+    return out;
+  };
+  return { v, integrand: product(inside), residual: tailHasDx ? product(tail) : null };
+}
+
+/**
+ * Cache of expanded integrals. The expansion is a pure function of the
+ * resolved integrand and bounds — slider VALUES stay symbolic inside it — so
+ * a slider drag's per-keystroke recompiles hit this instead of re-running
+ * the symbolic engine and its verification quadratures.
+ */
+const intMemo = new Map<string, Expr>();
+
+/**
+ * Expand an ∫: a verified antiderivative when one is found
+ * (definite values additionally checked against adaptive quadrature — the
+ * fundamental theorem lies across a non-integrable singularity), otherwise
+ * a fixed Gauss–Legendre sum in ordinary Expr form.
+ */
+/** ±1 for a bound written as ±inf/±∞, 0 for a finite (or absent) bound. */
+const infOf = (e: Expr | null): 1 | -1 | 0 => {
+  if (!e) return 0;
+  if (e.kind === 'var' && e.name === 'inf') return 1;
+  if (e.kind === 'neg' && e.a.kind === 'var' && e.a.name === 'inf') return -1;
+  return 0;
+};
+
+/**
+ * Stand-in argument for an antiderivative's limit at ±∞. Far beyond any plot
+ * range, so F(±BIG) matches the true limit wherever F converges by then —
+ * and verifyDefinite runs the REAL improper quadrature, so a
+ * not-yet-converged (or divergent) limit is rejected, never reported.
+ */
+const INT_BIG = 1e8;
+
+export function expandInt(bounds: [Expr, Expr] | null, rawBody: Expr, ctx: Ctx): Expr {
+  // Resolve the body FIRST: a d/dt inside consumes its own dt, user
+  // functions inline, and nested (parenthesized) integrals expand — only
+  // then is the surviving d<letter> factor unambiguous.
+  const m = stripDx(resolveIntegrand(rawBody, ctx));
+  if (!m) throw new Error('∫ needs its variable as a dx factor: int(x^2 dx) or int[0..2] x^2 dx.');
+  const v = m.v;
+  const integrand = m.integrand;
+  const lo = bounds && ctx.rx(bounds[0], ctx);
+  const hi = bounds && ctx.rx(bounds[1], ctx);
+  ctx.ints?.push(lo && hi && !m.residual ? { body: integrand, v, lo, hi } : null);
+  const out = integral(integrand, v, lo, hi, ctx);
+  // An enclosing integral's measure rides along: (∫ inner) · residual.
+  return m.residual ? { kind: 'bin', op: '*', a: out, b: m.residual } : out;
+}
+
+const containsReduction = (e: Expr): boolean => isReductionCall(e) || childrenOf(e).some(containsReduction);
+
+/**
+ * An ∫ body, resolved with its variable bound: a reduction inside runs over
+ * its own continuous sets for each value of it, so ∫₀¹ total({0 < u < 1:
+ * x u}) dx is ∫₀¹ x/2 dx, not a total over every x as well. The variable is
+ * certain only once the body has resolved (see expandInt), so a body with a
+ * reduction is resolved again when the dx read off it first was not it.
+ */
+function resolveIntegrand(rawBody: Expr, ctx: Ctx): Expr {
+  if (!containsReduction(rawBody)) return ctx.rx(rawBody, ctx);
+  const bound = (v: string | undefined): Expr => {
+    if (!v) return ctx.rx(rawBody, ctx);
+    const saved = ctx.opts;
+    ctx.opts = { ...saved, params: new Set([...(saved.params ?? []), v]) };
+    try {
+      return ctx.rx(rawBody, ctx);
+    } finally {
+      ctx.opts = saved;
+    }
+  };
+  let guess: string | undefined;
+  try {
+    guess = stripDx(rawBody)?.v;
+  } catch {
+    guess = undefined;
+  }
+  const body = bound(guess);
+  const v = stripDx(body)?.v;
+  return v === guess ? body : bound(v);
+}
+
+/**
+ * ∫ integrand dv from lo to hi (resolved; null bounds for the indefinite
+ * integral anchored at 0). Shared by ∫ rows and the reductions over
+ * continuous sets that become integrals (lib/measure.ts).
+ */
+export function integral(integrand: Expr, v: string, lo: Expr | null, hi: Expr | null, ctx: Ctx): Expr;
+export function integral(
+  integrand: Expr,
+  v: string,
+  lo: Expr | null,
+  hi: Expr | null,
+  ctx: Ctx,
+  exactOnly: boolean,
+): Expr | null;
+/** With `exactOnly`, a verified closed form or null — never the fixed-order
+ *  numeric fallback (the caller integrates adaptively instead). */
+export function integral(
+  integrand: Expr,
+  v: string,
+  lo: Expr | null,
+  hi: Expr | null,
+  ctx: Ctx,
+  exactOnly = false,
+): Expr | null {
+  const bounds = lo && hi;
+  let loI = infOf(lo);
+  let hiI = infOf(hi);
+  // Normalize a downhill infinite range (int[inf..0]) to the negated uphill one.
+  let flip = false;
+  if (loI === 1 || hiI === -1) {
+    [lo, hi] = [hi, lo];
+    [loI, hiI] = [hiI, loI];
+    flip = true;
+    if (loI === 1 || hiI === -1) return num(0); // int[inf..inf]: equal bounds
+  }
+  const memoKey = exprKey([v, integrand, lo, hi, exactOnly]);
+  const done = (out: Expr): Expr => (flip ? neg(out) : out);
+  const hit = intMemo.get(memoKey);
+  if (hit) return done(hit);
+
+  const F = antiderivative(integrand, v);
+  let out: Expr | null = null;
+  if (!bounds) {
+    out = F;
+  } else if (F) {
+    const loSub = loI ? num(loI * INT_BIG) : lo!;
+    const hiSub = hiI ? num(hiI * INT_BIG) : hi!;
+    const val = foldNums(sub(substVars(F, { [v]: hiSub }), substVars(F, { [v]: loSub })));
+    const loChk = loI ? num(loI * Infinity) : lo!;
+    const hiChk = hiI ? num(hiI * Infinity) : hi!;
+    if (verifyDefinite(val, integrand, v, loChk, hiChk)) out = val;
+  }
+  if (!out && exactOnly) return null;
+  if (!out) {
+    // Numeric fallback. An indefinite ∫ anchors at 0: F(x) = ∫₀ˣ; infinite
+    // ranges transform onto a finite interval first (improperSum).
+    ctx.terms += QUAD_TERMS;
+    if (ctx.terms > SUM_MAX_TOTAL) {
+      throw new Error(`Nested Σ/∫ expand to too many terms (limit ${SUM_MAX_TOTAL} total).`);
+    }
+    out = foldNums(
+      loI || hiI
+        ? improperSum(integrand, v, loI ? null : lo, hiI ? null : hi)
+        : quadratureSum(integrand, v, lo ?? num(0), hi ?? { kind: 'var', name: v }),
+    );
+    if (exprKey(out).length > 400_000) {
+      throw new Error('∫ has no closed form here and its numeric expansion is too large.');
+    }
+  }
+  if (intMemo.size > 500) intMemo.clear();
+  intMemo.set(memoKey, out);
+  return done(out);
+}
+
+/** Whether a parsed (unresolved) expression uses ∫ anywhere — after
+ *  resolution the integral is gone, so row readouts test the parse. */
+export function usesIntegral(e: Expr): boolean {
+  switch (e.kind) {
+    case 'index':
+    case 'range':
+    case 'eqtest':
+    case 'comp':
+    case 'figure':
+    case 'lazy':
+    case 'trail':
+    case 'label':
+    case 'hist':
+    case 'family':
+      return childrenOf(e).some(usesIntegral);
+    case 'num':
+      return false;
+    case 'var':
+      return e.name === 'int';
+    case 'neg':
+      return usesIntegral(e.a);
+    case 'bin':
+      return usesIntegral(e.a) || usesIntegral(e.b);
+    case 'call':
+      return e.name === 'int' || e.args.some(usesIntegral);
+    case 'eq':
+      return usesIntegral(e.l) || usesIntegral(e.r);
+    case 'ineq':
+      return usesIntegral(e.l) || usesIntegral(e.r);
+    case 'vec':
+      return e.items.some(usesIntegral);
+    case 'list':
+      return e.items.some(usesIntegral);
+    case 'data':
+    case 'str':
+    case 'text':
+      return false;
+    case 'piecewise':
+      return (
+        e.cases.some(c => usesIntegral(c.cond) || usesIntegral(c.value)) ||
+        (e.otherwise ? usesIntegral(e.otherwise) : false)
+      );
+    case 'loop':
+      return childrenOf(e).some(usesIntegral);
+  }
 }
