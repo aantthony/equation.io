@@ -23,12 +23,26 @@ The old UI remains usable at [graph.equation.io](https://graph.equation.io).
 
 ## Architecture
 
-Deployed as a Cloudflare Worker.
+Deployed as a Cloudflare Worker. The page is `web/`; the mathematics is `lib/`.
 
-- `lib/` — tokenizer, shunting-yard parser, symbolic expression core (`expr.ts`),
-  and a GLSL compiler (`glsl.ts`) used for plotting.
-- `web/` — the grapher. Every equation is compiled to a GLSL scalar field F whose
-  zero set is the graph:
+- `lib/expr.ts` is the tokenizer, the shunting-yard parser, and the expression
+  tree. `lib/defs.ts` resolves names and definitions. Resolve-time expansions
+  live with the mathematics they implement: `vector-calculus.ts` (gradient,
+  divergence, curl), `sums.ts` (Σ and Π), and the integral, curve, and surface
+  passes in `integrate.ts`, `curves.ts`, and `surface-geometry.ts`.
+- Distributions are `lib/dist.ts`. It re-exports base laws (`dist-base.ts`),
+  continuous sampling (`dist-sample.ts`), discrete laws (`dist-discrete.ts`),
+  and the random-variable system (`dist-system.ts`). The family table is
+  `dist-families.ts`.
+- Geometry, tensors, measures, lists, and automata make up the rest of `lib/`:
+  `geom.ts`, `pga.ts`, `clifford.ts`, `tensor.ts`, `measure.ts`, `list.ts`,
+  `automaton.ts`, and the modules beside them. `compiler.ts` turns a classified
+  row into a CPU plan and a GLSL plan (`glsl.ts`).
+- `web/main.ts` is the equation editor and the boot. `web/session.ts` owns the
+  document, the panels, and the shared WebGL renderers. `web/scene.ts` builds
+  one frame and hands it to the 2D and 3D renderers. Mutable state those three
+  share lives on `web/app-state.ts`.
+- Every equation is compiled to a GLSL scalar field F whose zero set is the graph:
   - **2D**: fullscreen-quad fragment shader; the curve is drawn where the
     distance estimate |F|/|∇F| is under a pixel, with a two-scale consistency
     test rejecting fake lines at poles/asymptotes (e.g. `y=tan(x)`).

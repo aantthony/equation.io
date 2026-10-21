@@ -11,8 +11,7 @@ what interval arithmetic can settle in the finite search box: arithmetic and
 integer powers are supported; unsupported functions, singular roots and
 budget exhaustion remain explicitly unresolved. Exact root labeling also has
 a bounded factoring path and retains a defining-polynomial fallback.
-See [objects-finish-plan.md](objects-finish-plan.md) for implementation status
-and limits. §3, §5 and §6 preserve historical design discussion; §2, §4 and §7 describe
+§3, §5 and §6 preserve historical design discussion; §2, §4 and §7 describe
 the current implementation.
 
 A design survey and plan. It fixes the principle that decides how a row of
@@ -118,7 +117,7 @@ New rows and extensions (2026-09-19):
 | `y=[1,2,3]x`; `circle((0,0),[1,2,3])` | family (same list zips, independent lists cross); shared shader source and per-draw uniforms |
 | `hull(A,B,C,…)`; `hull(P)`; `hull(([0,1],[0,1],[0,1]))` | convex hull evaluated per frame (lib/hull.ts): filled polygon in 2D, merged flat faces, flat-shaded through the lit-mesh pipeline (and lit front faces in the static preview) in 3D |
 | `R hull(P)`; `rotate(polygon(A,B,C), th)`; `2 segment(A,B) + v` | affine transforms of a point figure push down onto its points (object-lists.ts); a list in the transform is a family of figures |
-| `f(A)`, `f(R A)`, `f(f(A))`; `f(P)`, `vector(P, f(P))`, `hull(f(Q))` for `f(x,y)` | a point (or point list) as the one argument of an n-parameter function: the resolver emits `[comp](value, k, n, "f")`, settled by geom (a point) or list lowering (a point list, keeping its axes so components zip) — docs/point-arguments-plan.md |
+| `f(A)`, `f(R A)`, `f(f(A))`; `f(P)`, `vector(P, f(P))`, `hull(f(Q))` for `f(x,y)` | a point (or point list) as the one argument of an n-parameter function: the resolver emits `[comp](value, k, n, "f")`, settled by geom (a point) or list lowering (a point list, keeping its axes so components zip) |
 | `Q=P+(1,0)`; `polyline(P)` | point-list arithmetic; a connected path through the whole list |
 | `a_3`; `a_[1..10]` | sequence scalar/list values; recurrence terms compute as a bounded constant chain |
 | `(x^2+y^2+z^2,z)=(9,1)` | numerical space intersection curve |
@@ -193,8 +192,7 @@ and coordinates always come from the text, so the hash stays the document.
 ## 4. What Desmos and Wolfram|Alpha render that we don't
 
 Feature classes, not product snapshots. ✓ = has it, ~ = partial/indirect.
-"Here" reflects the implementation as of 2026-09-19; "plan #n" is the PR number in
-[objects-finish-plan.md](objects-finish-plan.md).
+"Here" reflects the implementation as of 2026-09-19.
 
 | Object / capability | Desmos | W\|A | Here | Disposition |
 |---|---|---|---|---|
@@ -372,9 +370,7 @@ interface.
 
 ## 7. Roadmap
 
-Status as of 2026-09-19. Earlier struck-through items are already on main;
-the remaining implementation and its limits are recorded in
-[objects-finish-plan.md](objects-finish-plan.md) ("plan #n" below).
+Status as of 2026-09-19. Earlier struck-through items are already on main.
 
 | Phase | Contents | Size |
 |---|---|---|

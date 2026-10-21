@@ -669,8 +669,7 @@ None open. Settled 2026-09-26:
 
 The decisions above are agreed. The points below are **not**: they are
 choices made during implementation (2026-09-26) where the design is silent,
-recorded so they can be reviewed and reversed. Progress notes live in
-[multisets-progress.md](multisets-progress.md).
+recorded so they can be reviewed and reversed.
 
 - **Empty multiset reductions.** `count([])` and `total([])` are 0 (a sum over
   nothing); `mean`, `min`, `max`, `median`, `stdev` of `[]` are errors, since
