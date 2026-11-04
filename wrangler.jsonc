@@ -13,22 +13,16 @@
     // listed is served by the asset server alone, so a missing entry 404s.
     // lib/deploy-config.test.ts keeps this list in sync with the handler.
     //
-    // /llms.txt and /robots.txt are here for a different reason: deployed
-    // static assets lose the charset on their Content-Type
-    // (cloudflare/workers-sdk#9599), which mangles the em dashes in llms.txt,
-    // so the Worker puts it back.
-    //
     // /.well-known is deliberately absent: everything there is a static file
     // (worker/catalog.ts), and scanners probe it constantly, so a miss is a
-    // free asset-server 404 rather than a Worker invocation.
+    // free asset-server 404 rather than a Worker invocation. /llms.txt and
+    // /robots.txt are absent too: _headers gives them their UTF-8 charset.
     "run_worker_first": [
       "/api",
       "/api/*",
       "/mcp",
       "/mcp/server-card",
-      "/g/*",
-      "/llms.txt",
-      "/robots.txt"
+      "/g/*"
     ]
   },
   "observability": {

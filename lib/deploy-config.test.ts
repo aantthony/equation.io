@@ -35,19 +35,16 @@ describe('wrangler run_worker_first covers the worker routes', () => {
     expect(patterns.filter(p => p.startsWith('/.well-known'))).toEqual([]);
   });
 
-  // One representative path per branch of the handler's dispatch, plus the
-  // two text assets the Worker re-tags with a charset.
-  it.each([['/mcp'], ['/mcp/server-card'], ['/api/health'], ['/g/y%20%3D%20x'], ['/llms.txt'], ['/robots.txt']])(
-    '%s reaches the worker',
-    path => {
-      expect(covered(path), `${path} would be served by the asset server, not the worker`).toBe(true);
-    },
-  );
+  // One representative path per branch of the handler's dispatch.
+  it.each([['/mcp'], ['/mcp/server-card'], ['/api/health'], ['/g/y%20%3D%20x']])('%s reaches the worker', path => {
+    expect(covered(path), `${path} would be served by the asset server, not the worker`).toBe(true);
+  });
 
-  it('leaves the app shell, its assets and /.well-known to the asset server', () => {
+  it('leaves the app shell, its assets, the text files and /.well-known to the asset server', () => {
     // Marking these worker-first would make every page load pay for the worker,
     // and every scanner probing /.well-known with it.
-    for (const path of ['/', '/index.html', '/style.css', '/about/', '/mcp-app/app.js', '/.well-known/ard.json']) {
+    const paths = ['/', '/index.html', '/style.css', '/about/', '/mcp-app/app.js', '/llms.txt', '/robots.txt'];
+    for (const path of [...paths, '/.well-known/ard.json']) {
       expect(covered(path), `${path} should be served directly by the asset server`).toBe(false);
     }
   });
@@ -63,8 +60,8 @@ describe('a path with no file', () => {
   });
 });
 
-describe('/.well-known static files', () => {
-  // The asset server applies these from _headers; the Worker never runs there.
+describe('static file headers', () => {
+  // The asset server applies these from _headers; the Worker never runs for them.
   const headers = readFileSync(new URL('../web/public/_headers', import.meta.url), 'utf8');
   const rule = (path: string) => headers.split(`\n${path}\n`)[1]?.split(/\n\S/)[0] ?? '';
 
@@ -72,5 +69,11 @@ describe('/.well-known static files', () => {
     expect(rule('/.well-known/ard.json')).toContain('Access-Control-Allow-Origin: *');
     expect(rule('/.well-known/ai-catalog.json')).toContain('Access-Control-Allow-Origin: *');
     expect(rule('/.well-known/ai-catalog.json')).toContain('Content-Type: application/ai-catalog+json');
+  });
+
+  // Deployed assets otherwise arrive without a charset (cloudflare/workers-sdk#9599),
+  // and browsers decode text/plain as windows-1252, mangling llms.txt's em dashes.
+  it.each(['/llms.txt', '/robots.txt'])('labels %s as UTF-8', path => {
+    expect(rule(path)).toContain('Content-Type: text/plain; charset=utf-8');
   });
 });

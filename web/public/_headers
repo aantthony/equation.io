@@ -27,6 +27,15 @@
 /.well-known/openai-apps-challenge
   Content-Type: text/plain; charset=utf-8
 
+# Deployed assets otherwise lose the charset (cloudflare/workers-sdk#9599),
+# and browsers decode text/plain as windows-1252: llms.txt's em dashes
+# would render as "â€”".
+/llms.txt
+  Content-Type: text/plain; charset=utf-8
+
+/robots.txt
+  Content-Type: text/plain; charset=utf-8
+
 # The AI Catalog (worker/catalog.ts): public metadata read by browser-based
 # clients, so CORS; the predecessor name keeps its own media type.
 /.well-known/ard.json
