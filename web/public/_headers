@@ -26,3 +26,12 @@
 
 /.well-known/openai-apps-challenge
   Content-Type: text/plain; charset=utf-8
+
+# The AI Catalog (worker/catalog.ts): public metadata read by browser-based
+# clients, so CORS; the predecessor name keeps its own media type.
+/.well-known/ard.json
+  Access-Control-Allow-Origin: *
+
+/.well-known/ai-catalog.json
+  Access-Control-Allow-Origin: *
+  Content-Type: application/ai-catalog+json
