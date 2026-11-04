@@ -85,8 +85,8 @@ function handleApi(url: URL): Response {
   return Response.json({ error: 'not_found' }, { status: 404 });
 }
 
-// Static assets are served without a charset, so browsers decode text/* as
-// windows-1252 and mangle the em dashes in llms.txt. Tag them as UTF-8.
+// Static assets are served without a charset (cloudflare/workers-sdk#9599),
+// so browsers decode text/* as windows-1252. Tag them as UTF-8.
 function withCharset(response: Response): Response {
   const type = response.headers.get('content-type');
   if (!type || !type.startsWith('text/') || type.includes('charset=')) {
@@ -118,6 +118,6 @@ export default {
     if (url.pathname.startsWith('/g/')) {
       return handleShare(request, url, env);
     }
-    return withCharset(await env.ASSETS.fetch(request));
+    return env.ASSETS.fetch(request);
   },
 } satisfies ExportedHandler<Env>;
