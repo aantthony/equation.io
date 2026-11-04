@@ -109,14 +109,6 @@ export default {
     const url = new URL(request.url);
     const discovery = handleDiscovery(request, url);
     if (discovery) return discovery;
-    if (url.pathname === '/.well-known' || url.pathname.startsWith('/.well-known/')) {
-      const response = await env.ASSETS.fetch(request);
-      // This namespace serves machine-readable files, never the HTML 404 page.
-      if (response.headers.get('content-type')?.split(';')[0].trim().toLowerCase() === 'text/html') {
-        return new Response('Not found', { status: 404, headers: { 'Content-Type': 'text/plain; charset=utf-8' } });
-      }
-      return withCharset(response);
-    }
     if (url.pathname === '/mcp') {
       return handleMcp(request, url, env);
     }

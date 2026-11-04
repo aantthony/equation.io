@@ -1,6 +1,7 @@
 import { fileURLToPath } from 'node:url';
 import { cloudflare } from '@cloudflare/vite-plugin';
 import { defineConfig, type Plugin } from 'vite';
+import { CATALOG_FILES } from './worker/catalog.ts';
 
 /**
  * Hosts keep the MCP App page they were served: ChatGPT stores a copy with
@@ -48,6 +49,32 @@ function mcpAppLoader(): Plugin {
   };
 }
 
+/**
+ * The AI Catalog as static files under /.well-known (worker/catalog.ts), so
+ * the asset server answers for them and the Worker never runs there. Served
+ * by the dev server too, which has no build output to read them from.
+ */
+function aiCatalog(): Plugin {
+  return {
+    name: 'ai-catalog',
+    configureServer(server) {
+      server.middlewares.use((req, res, next) => {
+        const body = CATALOG_FILES[(req.url ?? '').split('?')[0].slice(1)];
+        if (body === undefined) return next();
+        res.setHeader('Content-Type', 'application/json');
+        res.setHeader('Access-Control-Allow-Origin', '*');
+        res.end(body);
+      });
+    },
+    generateBundle() {
+      if (this.environment.name !== 'client') return;
+      for (const [fileName, source] of Object.entries(CATALOG_FILES)) {
+        this.emitFile({ type: 'asset', fileName, source });
+      }
+    },
+  };
+}
+
 export default defineConfig({
   root: 'web',
   html: {
@@ -87,6 +114,7 @@ export default defineConfig({
   },
   plugins: [
     mcpAppLoader(),
+    aiCatalog(),
     cloudflare({
       configPath: '../wrangler.jsonc',
     }),

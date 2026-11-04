@@ -31,23 +31,23 @@ describe('wrangler run_worker_first covers the worker routes', () => {
   const covered = (path: string) =>
     patterns.some(p => (p.endsWith('/*') ? path.startsWith(p.slice(0, -1)) : path === p));
 
-  // One representative path per branch of the handler's dispatch, plus the
-  // two text assets the Worker re-tags with a charset.
-  it.each([
-    ['/mcp'],
-    ['/mcp/server-card'],
-    ['/.well-known/ard.json'],
-    ['/api/health'],
-    ['/g/y%20%3D%20x'],
-    ['/llms.txt'],
-    ['/robots.txt'],
-  ])('%s reaches the worker', path => {
-    expect(covered(path), `${path} would be served by the asset server, not the worker`).toBe(true);
+  it('does not route /.well-known through the worker at all', () => {
+    expect(patterns.filter(p => p.startsWith('/.well-known'))).toEqual([]);
   });
 
-  it('leaves the app shell and its assets to the asset server', () => {
-    // Marking these worker-first would make every page load pay for the worker.
-    for (const path of ['/', '/index.html', '/style.css', '/about/', '/mcp-app/app.js']) {
+  // One representative path per branch of the handler's dispatch, plus the
+  // two text assets the Worker re-tags with a charset.
+  it.each([['/mcp'], ['/mcp/server-card'], ['/api/health'], ['/g/y%20%3D%20x'], ['/llms.txt'], ['/robots.txt']])(
+    '%s reaches the worker',
+    path => {
+      expect(covered(path), `${path} would be served by the asset server, not the worker`).toBe(true);
+    },
+  );
+
+  it('leaves the app shell, its assets and /.well-known to the asset server', () => {
+    // Marking these worker-first would make every page load pay for the worker,
+    // and every scanner probing /.well-known with it.
+    for (const path of ['/', '/index.html', '/style.css', '/about/', '/mcp-app/app.js', '/.well-known/ard.json']) {
       expect(covered(path), `${path} should be served directly by the asset server`).toBe(false);
     }
   });
@@ -60,5 +60,17 @@ describe('a path with no file', () => {
   it('gets the 404 page, not the app', () => {
     expect(assets.not_found_handling).toBe('404-page');
     expect(existsSync(new URL('../web/404.html', import.meta.url))).toBe(true);
+  });
+});
+
+describe('/.well-known static files', () => {
+  // The asset server applies these from _headers; the Worker never runs there.
+  const headers = readFileSync(new URL('../web/public/_headers', import.meta.url), 'utf8');
+  const rule = (path: string) => headers.split(`\n${path}\n`)[1]?.split(/\n\S/)[0] ?? '';
+
+  it('serves the AI Catalog with CORS, and its predecessor name with its media type', () => {
+    expect(rule('/.well-known/ard.json')).toContain('Access-Control-Allow-Origin: *');
+    expect(rule('/.well-known/ai-catalog.json')).toContain('Access-Control-Allow-Origin: *');
+    expect(rule('/.well-known/ai-catalog.json')).toContain('Content-Type: application/ai-catalog+json');
   });
 });
