@@ -32,26 +32,26 @@
   "engines": {
     "node": ">=24"
   },
-  "packageManager": "pnpm@12.14.0",
+  "packageManager": "pnpm@12.18.0",
   "devDependencies": {
-    "@cloudflare/vite-plugin": "^1.54.8",
+    "@cloudflare/vite-plugin": "^1.69.0",
     "@fontsource-variable/archivo": "^5.3.0",
     "@fontsource-variable/jetbrains-mono": "^5.3.0",
     "@fontsource/instrument-serif": "^5.3.0",
-    "@types/node": "^26.5.1",
-    "@vitest/coverage-v8": "^5.0.5",
+    "@types/node": "^26.6.6",
+    "@vitest/coverage-v8": "^5.1.0",
     "ajv": "^8.20.0",
-    "oxfmt": "^0.70.0",
-    "oxlint": "^1.85.0",
-    "oxlint-tsgolint": "^7.0.2002",
-    "playwright": "^1.63.0",
+    "oxfmt": "^0.78.0",
+    "oxlint": "^1.93.0",
+    "oxlint-tsgolint": "^7.0.2006",
+    "playwright": "^1.65.0",
     "typescript": "^7.0.2",
-    "vite": "^8.3.4",
-    "vitest": "^5.0.5",
-    "wrangler": "^4.131.1"
+    "vite": "^8.3.8",
+    "vitest": "^5.1.0",
+    "wrangler": "^4.160.1"
   },
   "dependencies": {
-    "@modelcontextprotocol/client": "^2.3.1",
-    "@modelcontextprotocol/ext-apps": "^2.0.0"
+    "@modelcontextprotocol/client": "^2.4.0",
+    "@modelcontextprotocol/ext-apps": "^2.0.4"
   }
 }

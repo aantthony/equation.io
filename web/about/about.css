@@ -118,13 +118,7 @@ body {
   margin: 0;
   background: var(--bg);
   color: var(--ink);
-  font-family:
-    'Eq Math Glyphs',
-    ui-sans-serif,
-    system-ui,
-    -apple-system,
-    'Segoe UI',
-    sans-serif;
+  font-family: 'Eq Math Glyphs', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
   line-height: 1.55;
   overflow-x: hidden;
   -webkit-font-smoothing: antialiased;
