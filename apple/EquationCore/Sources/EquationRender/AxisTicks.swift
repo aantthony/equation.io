@@ -1,29 +1,6 @@
 import Foundation
 
-/// Grid lines and labels for a mapped axis (lib/axis-ticks.ts).
-///
-/// An unmapped axis has a line every 1, 2 or 5 × 10^k units, evenly spaced on
-/// screen. A mapped one is not even: on `x = 10^X` the decades are, and the
-/// numbers between them crowd toward each one's top. So ticks are chosen
-/// where they land on screen: from a tick, the next is the nicest number
-/// (0, then the fewest significant digits, then a leading 1, 5 or 2) that
-/// lands between `gap` and 2.5 `gap` pixels further on.
-///
-/// The walk starts from the nicest number in view and goes both ways, so
-/// while panning (same zoom) the ticks stay put until that number leaves.
-public struct AxisTicks: Equatable, Sendable {
-  /// Screen coordinates of the labelled lines, with their world values.
-  public var major: [Major]
-  /// Screen coordinates of the faint lines between them.
-  public var minor: [Double]
-  /// Screen coordinate where the world value is 0, when the map reaches it.
-  public var zero: Double?
-
-  public struct Major: Equatable, Sendable {
-    public var at: Double
-    public var value: Double
-  }
-}
+// `AxisTicks` itself is beside the shader that draws its lines (Frag2D+Ticks.swift).
 
 /// Pixels between labelled lines, at least: niceSpacing's 90 in render2d.
 private let majorGapPx = 90.0
