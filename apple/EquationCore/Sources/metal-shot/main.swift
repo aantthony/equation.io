@@ -166,7 +166,9 @@ if let path = options["--scene"] {
           + "color \(colors[k].map { "\($0)" } ?? "-")\(row.info.map { ", reads \($0)" } ?? "")")
     }
   }
-  scene = Graph2D(analysis, colors: colors).scene(
+  let graph = Graph2D(analysis, colors: colors)
+  if flags.contains("--explain") { print(graph.animated ? "moves with t" : "still") }
+  scene = graph.scene(
     at: options["--time"].flatMap(Double.init) ?? 0, width: size[0] * scale, height: size[1] * scale)
 }
 if let text = options["--view"] {

@@ -61,6 +61,8 @@ public struct Graph2D: Equatable, Sendable {
         vfields.append(VField2D(fx: fx, fy: fy, color: color, params: gpu.params))
       }
     }
+    // A vector field's streamlines flow whether or not it reads t.
+    if !vfields.isEmpty { animated = true }
     layers = Layers2D(vfields: vfields, ineqs: ineqs, scalars: scalars, curves: curves)
   }
 

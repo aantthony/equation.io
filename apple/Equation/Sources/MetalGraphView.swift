@@ -3,15 +3,18 @@ import EquationRender
 import MetalKit
 import SwiftUI
 
-/// The window onto the plane, shared by the Metal view and the labels over it.
+/// The window onto the plane and the graph's clock, shared by the Metal view
+/// and the overlay drawn over it.
 @MainActor @Observable
 final class GraphViewport {
   var view = View2D()
+  /// When the graph opened, which is when t was 0.
+  var opened = Date.now
 }
 
-/// The graph's Metal view, with the overlay's labels over it.
+/// The graph's Metal view, with the overlay over it.
 struct MetalGraphView: View {
-  var analysis: GraphAnalysis
+  var graph: Graph2D
   var theme: GraphTheme
   var generation: Int
   var model: GraphModel
@@ -19,16 +22,24 @@ struct MetalGraphView: View {
   @Environment(\.displayScale) private var displayScale
 
   var body: some View {
-    MetalCanvasView(analysis: analysis, theme: theme, generation: generation, viewport: viewport, model: model)
+    MetalCanvasView(graph: graph, theme: theme, generation: generation, viewport: viewport, model: model)
       .overlay {
-        AxisLabels(view: viewport.view, scale: displayScale, theme: theme)
-          .allowsHitTesting(false)
+        // A graph that moves redraws its overlay with every frame.
+        TimelineView(.animation(paused: !graph.animated)) { timeline in
+          Overlay(
+            graph: graph, time: timeline.date.timeIntervalSince(viewport.opened), view: viewport.view,
+            scale: displayScale, theme: theme)
+        }
+        .allowsHitTesting(false)
       }
   }
 }
 
-/// The overlay: the numbers along the axes (EquationRender `drawLabels2D`).
-private struct AxisLabels: View {
+/// What is drawn over the shader passes: the numbers along the axes, and the
+/// rows the CPU evaluates (EquationRender `drawLabels2D`).
+private struct Overlay: View {
+  var graph: Graph2D
+  var time: Double
   var view: View2D
   /// Device pixels per point.
   var scale: Double
@@ -37,7 +48,9 @@ private struct AxisLabels: View {
   var body: some View {
     Canvas { context, size in
       context.withCGContext { ctx in
-        drawLabels2D(ctx, size: size, view: view, dpr: scale, theme: theme)
+        drawLabels2D(
+          ctx, size: size, view: view, dpr: scale, theme: theme, extras: graph.overlay(at: time),
+          numbers: graph.grid != .off)
       }
     }
   }
@@ -46,7 +59,7 @@ private struct AxisLabels: View {
 // MARK: - The Metal view
 
 private struct MetalCanvasView {
-  var analysis: GraphAnalysis
+  var graph: Graph2D
   var theme: GraphTheme
   var generation: Int
   var viewport: GraphViewport
@@ -66,9 +79,9 @@ private struct MetalCanvasView {
   }
 
   @MainActor private func update(_ canvas: MetalCanvas, _ coordinator: Coordinator) {
-    canvas.layers = analysis.layers
+    canvas.graph = graph
     canvas.theme = theme
-    canvas.animated = analysis.animated
+    canvas.animated = graph.animated
     // A replaced document opens as a new graph: reframed, its clock at zero.
     if let shown = coordinator.generation, shown != generation { canvas.open() }
     coordinator.generation = generation
@@ -101,8 +114,14 @@ final class MetalCanvas: MTKView, MTKViewDelegate {
   let viewport: GraphViewport
   private let renderer: Renderer2D?
 
-  var layers = Layers2D() {
-    didSet { if layers != oldValue { redraw() } }
+  var graph: Graph2D? {
+    didSet {
+      guard graph != oldValue else { return }
+      // A view(…) row that changed moves the window to what it now asks for.
+      if graph?.window != oldValue?.window, oldValue != nil { framed = false }
+      frame(in: drawableSize)
+      redraw()
+    }
   }
   var theme = GraphTheme.light {
     didSet { if theme != oldValue { redraw() } }
@@ -119,8 +138,6 @@ final class MetalCanvas: MTKView, MTKViewDelegate {
 
   /// Whether the view has been given its opening window.
   private var framed = false
-  /// When the graph opened, which is when t was 0.
-  private var opened = CACurrentMediaTime()
   private var glide: Task<Void, Never>?
 
   init(viewport: GraphViewport) {
@@ -154,7 +171,7 @@ final class MetalCanvas: MTKView, MTKViewDelegate {
   func open() {
     glide?.cancel()
     framed = false
-    opened = CACurrentMediaTime()
+    viewport.opened = .now
     frame(in: drawableSize)
     redraw()
   }
@@ -171,7 +188,8 @@ final class MetalCanvas: MTKView, MTKViewDelegate {
   private func frame(in size: CGSize) {
     guard !framed, size.width > 0, size.height > 0 else { return }
     framed = true
-    viewport.view = .opening(width: size.width, height: size.height)
+    viewport.view =
+      graph?.opening(width: size.width, height: size.height) ?? .opening(width: size.width, height: size.height)
   }
 
   // MARK: Drawing
@@ -188,10 +206,10 @@ final class MetalCanvas: MTKView, MTKViewDelegate {
       let drawable = currentDrawable, let buffer = renderer.metal.queue.makeCommandBuffer(),
       let encoder = buffer.makeRenderCommandEncoder(descriptor: pass)
     else { return }
+    let time = Date.now.timeIntervalSince(viewport.opened)
     renderer.render(
-      encoder, target: (Int(size.width), Int(size.height)), view: viewport.view, layers: layers,
-      time: CACurrentMediaTime() - opened, theme: theme)
-    renderer.endFrame()
+      encoder, target: (Int(size.width), Int(size.height)), view: viewport.view, layers: graph?.layers ?? Layers2D(),
+      time: time, env: graph?.environment(at: time) ?? [:], frame: Frame2D(grid: graph?.grid ?? .on), theme: theme)
     encoder.endEncoding()
     buffer.present(drawable)
     buffer.commit()

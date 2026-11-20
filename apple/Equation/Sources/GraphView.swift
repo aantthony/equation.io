@@ -13,8 +13,15 @@ final class GraphModel {
   /// The theme the graph is drawn in, which picks the rows' colors.
   @ObservationIgnored var theme = GraphTheme.light
 
-  /// Sliders arrive with the language's definitions.
-  func setSlider(row index: Int, to value: Double) {}
+  /// Each row's palette slot, by the editor's id for it, so a row keeps its
+  /// color as others come and go.
+  @ObservationIgnored var slots: [Int: Int] = [:]
+  /// Writes a slider's new value into its row (GraphView sets this).
+  @ObservationIgnored var slide: (Int, Double) -> Void = { _, _ in }
+
+  func setSlider(row index: Int, to value: Double) {
+    slide(index, value)
+  }
 
   /// Glide the zoom about the graph's center: below 1 zooms in, above 1 out.
   func zoom(by factor: Double) {
@@ -24,50 +31,49 @@ final class GraphModel {
   /// The status of `rows`: they are analyzed as they are asked about, so
   /// there is nothing to wait for.
   func status(after rows: [String]) async -> [RowStatus] {
-    GraphAnalysis(rows: rows, theme: theme).status
+    GraphAnalysis(rows: rows.enumerated().map { GraphRow(id: -1 - $0.offset, text: $0.element) }, theme: theme).status
   }
 }
 
-/// What the app makes of a document's rows: each row's status, and what to draw.
-///
-/// For now a row is drawn when it is an equation in x and y (EquationCore
-/// `plotRow`); the language's own pipeline replaces this as it is ported.
+/// What the app makes of a document's rows: each row's status for the
+/// editor, and what to draw (EquationCore `analyze`, EquationRender `Graph2D`).
 struct GraphAnalysis: Equatable {
   var status: [RowStatus] = []
-  var layers = Layers2D()
-  /// A row reads t, so the graph redraws every frame.
-  var animated = false
+  var graph: Graph2D
+  /// Each row's palette slot, by its id.
+  var slots: [Int: Int]
 
-  static let notDrawnYet = "The app doesn't draw this kind of row yet."
+  /// What a row the language's port can't read yet says, with the port's reason.
+  static func notDrawnYet(_ reason: String) -> String {
+    "The app doesn't draw this yet (\(reason))."
+  }
 
-  init(rows: [String], theme: GraphTheme) {
-    var curves: [Curve2D] = []
-    var slot = 0
+  init(rows: [GraphRow], theme: GraphTheme, previous: [Int: Int] = [:]) {
+    let texts = rows.map(\.text)
+    let analysis = analyze(texts)
+    let colored = Graph2D.colors(analysis, ids: rows.map(\.id), previous: previous, theme: theme)
+    graph = Graph2D(analysis, colors: colored.colors)
+    slots = colored.slots
     // Syntax colors, as the site computes them (EquationCore `highlightRows`, lib/highlight.ts).
-    for (text, spans) in zip(rows, highlightRows(rows)) {
-      var row = RowStatus(
-        color: nil, error: nil, info: nil, comment: false, view: false, divider: false, note: nil,
-        spans: spans.map { RowStatus.Span(start: $0.start, end: $0.end, cls: $0.cls.rawValue) },
-        slider: nil)
-      switch plotRow(text) {
-      case .nothing?:
-        row.comment = text.contains("#")
-      case .curve(let field, let animated)?:
-        let color = theme.palette[slot % theme.palette.count]
-        slot += 1
-        row.color = [Double(color.x), Double(color.y), Double(color.z)]
-        curves.append(Curve2D(field: field, color: color))
-        if animated { self.animated = true }
-      case nil:
-        // A row with an error takes a color: it is usually a curve being typed.
-        let color = theme.palette[slot % theme.palette.count]
-        slot += 1
-        row.color = [Double(color.x), Double(color.y), Double(color.z)]
-        row.error = Self.notDrawnYet
+    let spans = highlightRows(texts)
+    for (k, row) in analysis.rows.enumerated() {
+      var error = row.error ?? row.unsupported.map(Self.notDrawnYet)
+      if error == nil {
+        // Rows the language reads and the app has nowhere to show yet.
+        switch row.view {
+        case .split?: error = Self.notDrawnYet("split views")
+        case .camera?: error = Self.notDrawnYet("3D")
+        default: break
+        }
       }
-      status.append(row)
+      status.append(
+        RowStatus(
+          color: colored.colors[k].map { [Double($0.x), Double($0.y), Double($0.z)] },
+          error: error, info: row.info, comment: row.comment, view: row.view != nil && !row.divider,
+          divider: row.divider, note: row.noteStart,
+          spans: spans[k].map { RowStatus.Span(start: $0.start, end: $0.end, cls: $0.cls.rawValue) },
+          slider: row.slider.map { RowStatus.Slider(min: $0.min, max: $0.max, step: $0.step, value: $0.value) }))
     }
-    layers.curves = curves
   }
 }
 
@@ -79,11 +85,25 @@ struct GraphView: View {
 
   var body: some View {
     let theme = colorScheme == .dark ? GraphTheme.dark : .light
-    let analysis = GraphAnalysis(rows: document.rows.map(\.text), theme: theme)
-    MetalGraphView(analysis: analysis, theme: theme, generation: document.generation, model: model)
-      .onChange(of: analysis.status, initial: true) { _, status in
-        model.theme = theme
-        model.status = status
-      }
+    let analysis = GraphAnalysis(rows: document.rows, theme: theme, previous: model.slots)
+    let _ = connect(analysis, theme)
+    MetalGraphView(graph: analysis.graph, theme: theme, generation: document.generation, model: model)
+      .onChange(of: analysis.status, initial: true) { _, status in model.status = status }
+  }
+
+  /// Keep the model's side of the graph in step: the colors rows hold, and
+  /// the way a slider's value is written back into its row.
+  private func connect(_ analysis: GraphAnalysis, _ theme: GraphTheme) {
+    model.theme = theme
+    model.slots = analysis.slots
+    let document = $document
+    model.slide = { index, value in
+      var lines = document.wrappedValue.rows.map(\.text)
+      guard lines.indices.contains(index),
+        let moved = analyze(lines).settingSlider(row: index, to: value, in: lines[index]), moved != lines[index]
+      else { return }
+      lines[index] = moved
+      document.wrappedValue.setLines(lines)
+    }
   }
 }
