@@ -146,7 +146,13 @@ document as its panels, split by `---` rows (the core's `Panels.swift`), each
 with its box, its window and the axes it shares. A document with states
 (`a' = …`) has a run, the core's `StateStepper`, which whoever draws frames
 owns, advances to each frame's time and hands to `scene(at:…run:)`; it holds
-the states' values and what `trail(…)` rows have seen.
+the states' values and what `trail(…)` rows have seen (a trail of a point in
+space too, which `Document3D` draws from the same run). What a viewer adds to
+a panel is the drawer's as well, kept on the panel's graph as the display
+toggles are: the seeds a tap drops on its vector fields (`Graph2D.seeds`,
+`dropSeed`; each field traces its integral curve through each), a matrix
+field's streamlines (`tensorStreamlines`), and a space curve's curvature and
+torsion combs (`Document3D.combK`, `combT`).
 
 To see what the renderer draws without the app, and set it beside the site:
 
