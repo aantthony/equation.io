@@ -43,9 +43,11 @@ struct GraphAnalysis: Equatable {
   init(rows: [String], theme: GraphTheme) {
     var curves: [Curve2D] = []
     var slot = 0
-    for text in rows {
+    // Syntax colors, as the site computes them (EquationCore `highlightRows`, lib/highlight.ts).
+    for (text, spans) in zip(rows, highlightRows(rows)) {
       var row = RowStatus(
-        color: nil, error: nil, info: nil, comment: false, view: false, divider: false, note: nil, spans: [],
+        color: nil, error: nil, info: nil, comment: false, view: false, divider: false, note: nil,
+        spans: spans.map { RowStatus.Span(start: $0.start, end: $0.end, cls: $0.cls.rawValue) },
         slider: nil)
       switch plotRow(text) {
       case .nothing?:
