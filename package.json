@@ -29,7 +29,7 @@
     "swift:highlight": "node --experimental-transform-types --no-warnings apple/corpus/highlight.ts",
     "swift:diff-corpus": "node apple/corpus/diff.ts",
     "swift:solve-corpus": "node apple/corpus/solve.ts",
-    "swift:test": "pnpm swift:corpus && swift test --package-path apple/EquationCore",
+    "swift:test": "pnpm swift:corpus && pnpm swift:highlight && pnpm swift:diff-corpus && pnpm swift:solve-corpus && swift test --package-path apple/EquationCore",
     "app:web": "vite build -c apple/vite.config.ts",
     "reference": "node --experimental-transform-types --no-warnings scripts/reference.ts",
     "app:eval": "mkdir -p apple/evals/.build && swiftc -swift-version 6 -O -parse-as-library apple/Equation/Sources/Assistant.swift apple/Equation/Sources/Instructions.swift apple/evals/Runner.swift -o apple/evals/.build/runner && apple/evals/.build/runner"
