@@ -25,7 +25,7 @@ func objectNeeds3D(_ object: MathObject) -> Bool {
   case .surfaceImplicit, .surfaceParametric, .intersection, .scalarField3D, .curveTube: true
   case .point(let coordinates), .curveParametric(let coordinates): coordinates.count == 3
   case .vectorField(let components): components.count == 3
-  case .system(let residuals, _, _): residuals.count == 3
+  case .system(let residuals, _, _, _): residuals.count == 3
   // (A list of points in space; ListPlans.swift.)
   case .list(.points(3, _)), .list(.scatter(3, _)): true
   default: false
@@ -131,7 +131,8 @@ private func isAngle(_ e: Expr) -> Bool {
 /// Square systems (as many equations as unknowns) cut out isolated points;
 /// the solver finds them numerically.
 func classifySystem(
-  _ left: [Expr], _ right: [Expr], vars: NameSet, hasParam: Bool, parametric: Bool
+  _ left: [Expr], _ right: [Expr], vars: NameSet, hasParam: Bool, parametric: Bool,
+  coordinate: CoordinateRow? = nil, fields: [String: Expr] = [:]
 ) throws -> MathObject {
   let dim = vars.contains("z") ? 3 : 2
   if left.count == 2 && dim == 3 && !hasParam {
@@ -145,6 +146,17 @@ func classifySystem(
     let eqs = "\(left.count) equation\(left.count == 1 ? "" : "s")"
     throw LanguageError("\(eqs) in \(dim) unknowns — a system needs one equation per unknown.")
   }
+  // (Dragging writes the pointer's chart coordinates back, and a pointer
+  // ray does not determine a point in space: planar rows only.)
+  var coordinates: [Expr]?
+  if let coordinate, dim == 2, !hasParam,
+    !coordinate.rhs.contains(where: { e in
+      freeVars(e).contains { ["x", "y", "z"].contains($0) || fields[$0] != nil }
+    })
+  {
+    coordinates = coordinate.coords
+  }
   return .system(
-    residuals: zip(left, right).map { .bin(.sub, $0, $1) }, parametric: parametric, angular: left.map(isAngle))
+    residuals: zip(left, right).map { .bin(.sub, $0, $1) }, parametric: parametric, angular: left.map(isAngle),
+    coordinates: coordinates)
 }

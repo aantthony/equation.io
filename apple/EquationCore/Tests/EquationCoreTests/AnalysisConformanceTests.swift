@@ -110,7 +110,7 @@ import Testing
   }
 
   @Test func whatIsNotPortedSaysSo() {
-    let rows = ["p = open(\"a.csv\")", "(x, y) = (1, 2)", "s_{n+1} = push(s_n, n)", "(u, v)"]
+    let rows = ["p = open(\"a.csv\")", "s_{n+1} = push(s_n, n)", "(u, v)"]
     for text in rows {
       let row = analyze([text]).rows[0]
       #expect(row.unsupported != nil, "\(text)")
@@ -425,13 +425,13 @@ import Testing
     case "scalar3d": return .scalar3d(expr: try expr("expr"))
     case "spacecurve": return .spacecurve(residuals: try exprs("residuals"))
     case "system":
-      if o["coordinates"] != nil { throw FixtureError(description: "a positional system") }
       if let equation = o["complexEquation"] {
         return .complexSystem(residuals: try exprs("residuals"), equation: try decode(equation))
       }
       return .system(
         dim: (o["dim"] as! NSNumber).intValue, residuals: try exprs("residuals"),
-        parametric: o["parametric"] as? Bool ?? false, angular: o["angular"] as? [Bool] ?? [])
+        parametric: o["parametric"] as? Bool ?? false, angular: o["angular"] as? [Bool] ?? [],
+        coordinates: o["coordinates"] == nil ? nil : try exprs("coordinates"))
     case "vfield3d": return .vfield3d(comps: try exprs("comps"))
     case "psurface": return .psurface(comps: try exprs("comps"), paint: try o["paint"].map { try decode($0) })
     case "density", "pmf":

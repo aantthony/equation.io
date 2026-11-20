@@ -31,9 +31,10 @@ func compileCpu3D(_ object: MathObject) throws -> CpuPlan {
     return .spacecurve(residuals: try residuals.map(real))
   case .scalarField3D(let expr):
     return .scalar3d(expr: try real(expr))
-  case .system(let residuals, let parametric, let angular):
+  case .system(let residuals, let parametric, let angular, let coordinates):
     return .system(
-      dim: residuals.count, residuals: try residuals.map(real), parametric: parametric, angular: angular)
+      dim: residuals.count, residuals: try residuals.map(real), parametric: parametric, angular: angular,
+      coordinates: coordinates)
   default:
     preconditionFailure("not an object in space")
   }

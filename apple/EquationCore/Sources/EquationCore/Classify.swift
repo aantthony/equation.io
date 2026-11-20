@@ -79,7 +79,9 @@ public indirect enum MathObject: Equatable, Sendable {
   case scalarField3D(expr: Expr)
   /// A square system, one residual per unknown: its isolated solutions, or
   /// with u (`parametric`) the curve they trace.
-  case system(residuals: [Expr], parametric: Bool, angular: [Bool])
+  /// `coordinates` are the coordinates a position names, `(r, theta) = (2, 0.8)`,
+  /// as functions of x and y: a drag of its point writes them back.
+  case system(residuals: [Expr], parametric: Bool, angular: [Bool], coordinates: [Expr]? = nil)
   /// A complex equation in w, `w^3 = 1`: its roots, the solutions of the
   /// system its real and imaginary parts make in x and y (ComplexRoots.swift).
   case complexSystem(equation: Expr)
@@ -334,7 +336,6 @@ func classify(_ lowered: Expr, defined: Set<String>, fields: [String: Expr]) thr
   // `(r, theta) = (2, pi/4)`, or a flow `(r', theta') = (F, G)`, which
   // lowers to the Cartesian one (Coordinate.swift).
   let coordinate = try coordinateRow(expr, fields)
-  _ = coordinate
   expr = try lowerCoordinateFlow(expr, fields)
   let ode = try matchODE(expr)
   if let ode { expr = .vec(ode) }
@@ -499,7 +500,9 @@ func classify(_ lowered: Expr, defined: Set<String>, fields: [String: Expr]) thr
       throw LanguageError("Mismatched components: \(left.count) on the left, \(right.count) on the right.")
     }
     if complexRow { throw LanguageError("Complex values are not supported in systems.") }
-    return done(try classifySystem(left, right, vars: vars, hasParam: hasParam, parametric: paramSystem))
+    return done(
+      try classifySystem(
+        left, right, vars: vars, hasParam: hasParam, parametric: paramSystem, coordinate: coordinate, fields: fields))
   }
 
   if case .ineq = expr {

@@ -63,7 +63,7 @@ extension Graph2D {
     var parametric = false
     var angular: [Bool] = []
     switch cpu {
-    case .system(2, let r, let p, let a): (residuals, parametric, angular) = (r, p, a)
+    case .system(2, let r, let p, let a, _): (residuals, parametric, angular) = (r, p, a)
     case .complexSystem(let r, _): residuals = r
     default: return
     }

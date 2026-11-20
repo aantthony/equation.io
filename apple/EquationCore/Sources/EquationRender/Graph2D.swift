@@ -197,7 +197,7 @@ public struct Graph2D: Equatable, Sendable {
       case .density, .pmf, .prob, .expect:
         drawDistribution(
           cpu, row: index, color: color, env: env, window: window, pointsPerUnit: pointsPerUnit, into: &overlay)
-      case .system(2, _, _, _), .complexSystem:
+      case .system(2, _, _, _, _), .complexSystem:
         drawSystem(cpu, row: index, color: css, env: env, window: window, into: &overlay)
       case .value(_, let shade?):
         // A definite integral's row: the area it measures (Graph2D+Integrals.swift).

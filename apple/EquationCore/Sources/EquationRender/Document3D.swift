@@ -262,7 +262,7 @@ public struct Document3D: Equatable, Sendable {
     case .spacecurve(let residuals):
       let paths = traced(key("curve")) { traceIntersection(residuals, lo, hi, env) }
       scene.curves.append(Scene3D.Curve(pts: lifted(paths), color: color))
-    case .system(let dim, let residuals, let parametric, let angular):
+    case .system(let dim, let residuals, let parametric, let angular, _):
       let vars = Array(["x", "y", "z"][..<dim])
       let (l, h) = (Array(lo[..<dim]), Array(hi[..<dim]))
       if parametric {

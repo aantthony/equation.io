@@ -43,4 +43,8 @@ export const SURFACE_CASES: string[] = [
   "a = 2; r = sqrt(x^2 + y^2); theta = atan2(y, x); (r', theta') = (a - r, sin(t)); u2 = x t; v2 = y - t; (u2', v2') = (1, 0); (r', theta') = (abs(r), 1)",
   "r = sqrt(x^2 + y^2); theta = atan2(y, x); (r, theta) = (2, 0.8); (r, theta) = (3u, 6pi u); (x, y) = (1, 2); (r, r) = (1, 2); (r, theta) = 2",
   "p = x^2 - y^2; q = 2 x y; (p, q) = (1, 0); (p, q, x) = (1, 0, 1); (p, q) = (1, 2, 3); (p, k) = (1, 0); (x, y, z) = (1, 2, 3); (p, x, y, z) = (1, 2, 3, 4)",
+  // Systems in the plane: isolated solutions, an angle that wraps, a parametric one.
+  'a = 1; (x^2 + y^2 - 4, x y - 1) = (0, 0); (x^2 + y^2, y) = (4, a x); (sin(x), cos(y)) = (0, 0); (atan2(y, x), x^2 + y^2) = (a, 4)',
+  '(x + y, x - y) = (cos(u), sin(u)); (x, y) = (cos(t), 1); (x^2, y) = 1; (x, y) = (1, 2, 3); (x y, x + z) = (1, 2); (x, y, x) = (1, 2, 3)',
+  'view(x = 10^X); (x, y) = (100, 2); (x^2 + y^2, x y) = (4, 1)',
 ];

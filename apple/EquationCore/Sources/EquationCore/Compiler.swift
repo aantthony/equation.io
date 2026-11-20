@@ -63,7 +63,7 @@ public enum CpuPlan: Equatable, Sendable {
   case implicit3d(residual: Expr, equation: Expr, heightmap: Expr?)
   case scalar3d(expr: Expr)
   case spacecurve(residuals: [Expr])
-  case system(dim: Int, residuals: [Expr], parametric: Bool, angular: [Bool])
+  case system(dim: Int, residuals: [Expr], parametric: Bool, angular: [Bool], coordinates: [Expr]? = nil)
   /// A complex equation's system in x and y, with the equation its roots are
   /// named from (the TypeScript's `system` plan with a `complexEquation`).
   case complexSystem(residuals: [Expr], equation: Expr)
