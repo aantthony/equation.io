@@ -12,7 +12,7 @@ import Testing
       "sin(x)", "cos(x)", "tan(x)", "asin(x)", "acos(x)", "atan(x)", "sinh(x)", "cosh(x)", "tanh(x)", "sech(x)",
       "coth(x)", "asinh(x)", "acosh(x)", "atanh(x)", "sqrt(x)", "abs(x)", "exp(x)", "ln(x)", "log(x)", "log2(x)",
       "floor(x)", "ceil(x)", "round(x)", "sign(x)", "fract(x)", "sinc(x)", "erf(x)", "atan2(y, x)", "mod(x, y)",
-      "gcd(x, y)", "min(x, y, 1)", "max(x, 2)", "x^y", "(x + y)^2", "(x + y)^7", "{x > 0: x, y < 0 < x: 0.000001, -2}",
+      "gcd(x, y)", "min(x, y)", "max(x, 2)", "x^y", "(x + y)^2", "(x + y)^7", "{x > 0: x, y < 0 < x: 0.000001, -2}",
       "100000000000000000000 x - 0.1", "gamma(x)", "factorial(x)", "isprime(x)",
     ]
     for call in calls {

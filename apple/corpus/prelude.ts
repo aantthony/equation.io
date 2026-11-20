@@ -10,6 +10,9 @@ import { writeFileSync } from 'node:fs';
 import { GLSL_PRELUDE } from '../../lib/glsl.ts';
 
 if (GLSL_PRELUDE.includes('"""#')) throw new Error('The prelude would end its own Swift string.');
+// A multi-line Swift string leaves out the line break before its closing
+// quotes, so the prelude's own last one is written ahead of it: withHelpers
+// finds the prelude in a shader by its exact text.
 const out = new URL('../EquationCore/Sources/EquationCore/Prelude.swift', import.meta.url);
 writeFileSync(
   out,
@@ -18,7 +21,8 @@ writeFileSync(
 /// Helper functions some expressions need; the shaders include it once
 /// (lib/glsl.ts \`GLSL_PRELUDE\`).
 public let glslPrelude = #"""
-${GLSL_PRELUDE}"""#
+${GLSL_PRELUDE}
+"""#
 `,
 );
 console.log(`wrote ${out.pathname}`);
