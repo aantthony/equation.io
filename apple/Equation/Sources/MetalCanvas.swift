@@ -149,7 +149,7 @@ final class MetalCanvas: MTKView, MTKViewDelegate {
         states[k].spin = panel.spin
         states[k].spinScale = 1
       } else {
-        states[k].view = panel.plane.opening(width: boxes[k].w, height: boxes[k].h)
+        states[k].view = panel.plane.opening(width: boxes[k].w, height: boxes[k].h, dpr: scale)
       }
     }
     var views = states.map(\.view)
