@@ -60,6 +60,9 @@ public struct DocumentAnalysis: Equatable, Sendable {
   /// Constants that move with t: their values need evaluating each frame
   /// (`environment(at:)`).
   public var animated: Set<String>
+  /// The names the document binds, which the highlighter colors rows by
+  /// (`highlightRows(_:names:)`).
+  public var names: BoundNames
   /// The document's own functions (a slider's `clamp` is not one of these).
   var userFns: Set<String>
   /// Each constant's expression, in the order the rows define them.
@@ -247,14 +250,37 @@ private func notSupported(_ what: String) -> String {
   "Not supported in the app yet: \(what)."
 }
 
-// MARK: - analyze
+// MARK: - Definitions
 
-/// Analyze a document: one result per row, and the constants' values.
-public func analyze(_ sources: [String]) -> DocumentAnalysis {
+/// A document's rows as far as its definitions (lib/analysis.ts
+/// `prepareDocument`): what each row is by its text, and what the names it
+/// defines come to. The highlighter colors names by this; `analyze` goes on
+/// from it to what each row draws.
+struct PreparedDocument {
+  /// Each row's math: its text without a trailing `# note`, trimmed.
+  var texts: [String]
+  /// The `# heading` rows.
+  var comments: Set<Int> = []
+  /// The definition each row scans as, whether or not it is the one that owns the name.
+  var scanned: [Definition?]
+  /// The rows the port leaves alone, with what stopped it: such a row's
+  /// definition is not in `built`.
+  var blocked: [Int: String] = [:]
+  /// Every name a `~` row writes: a random variable, or a fit and its coefficients.
+  var tildeNames: Set<String> = []
+  /// The definitions in row order, one per key, and the row that owns each.
+  var raw: [Definition] = []
+  var owner: [String: Int] = [:]
+  /// Rows that define a name a row above already has.
+  var duplicates: [Int] = []
+  var built = BuiltDefs()
+}
+
+func prepareDocument(_ sources: [String]) -> PreparedDocument {
   // A trailing `# note` is prose for the reader; the math is what precedes it.
   let texts = sources.map { jsTrimmed(stripNote($0)) }
-  var rows = zip(sources, texts).map { RowAnalysis(text: $1, noteStart: noteStart($0)) }
-  let count = rows.count
+  let count = texts.count
+  var document = PreparedDocument(texts: texts, scanned: Array(repeating: nil, count: count))
 
   // What each row is by its text alone, and the rows the port leaves alone:
   // random variables and regressions (`~`), sequences and lattices.
@@ -264,7 +290,7 @@ public func analyze(_ sources: [String]) -> DocumentAnalysis {
   var scanned: [Definition?] = Array(repeating: nil, count: count)
   for (i, text) in texts.enumerated() where !text.isEmpty {
     if text.hasPrefix("#") {
-      rows[i].comment = true
+      document.comments.insert(i)
     } else if text.contains("~") {
       blocked[i] = "random variables and regressions (~)"
       // A fit defines its coefficients too: every name in the row is its.
@@ -284,7 +310,6 @@ public func analyze(_ sources: [String]) -> DocumentAnalysis {
   var duplicates: [Int] = []
   for i in 0..<count {
     guard let d = scanned[i] else { continue }
-    rows[i].definition = d
     if owner[d.key] != nil {
       duplicates.append(i)
     } else {
@@ -300,7 +325,7 @@ public func analyze(_ sources: [String]) -> DocumentAnalysis {
     var grew = true
     while grew {
       grew = false
-      for i in 0..<count where blocked[i] == nil && !rows[i].comment {
+      for i in 0..<count where blocked[i] == nil && !document.comments.contains(i) {
         guard let name = writtenNames(texts[i]).first(where: { touches($0, poison) }) else { continue }
         blocked[i] = "it uses \(name), which is not supported yet"
         if let d = scanned[i], poison.insert(d.name).inserted { grew = true }
@@ -316,6 +341,29 @@ public func analyze(_ sources: [String]) -> DocumentAnalysis {
       found = true
     }
     if !found { break }
+  }
+  document.scanned = scanned
+  document.blocked = blocked
+  document.tildeNames = tildeNames
+  document.raw = raw
+  document.owner = owner
+  document.duplicates = duplicates
+  document.built = built
+  return document
+}
+
+// MARK: - analyze
+
+/// Analyze a document: one result per row, and the constants' values.
+public func analyze(_ sources: [String]) -> DocumentAnalysis {
+  let document = prepareDocument(sources)
+  let (texts, blocked, tildeNames) = (document.texts, document.blocked, document.tildeNames)
+  let (raw, owner, duplicates, built) = (document.raw, document.owner, document.duplicates, document.built)
+  var rows = zip(sources, texts).map { RowAnalysis(text: $1, noteStart: noteStart($0)) }
+  let count = rows.count
+  for i in 0..<count {
+    rows[i].comment = document.comments.contains(i)
+    rows[i].definition = document.scanned[i]
   }
 
   for (key, text) in built.errors.entries {
@@ -606,7 +654,8 @@ public func analyze(_ sources: [String]) -> DocumentAnalysis {
     }
   }
   return DocumentAnalysis(
-    rows: rows, env: constEnv, animated: animated, userFns: userFns, constNames: built.consts.keys,
+    rows: rows, env: constEnv, animated: animated, names: boundNames(document), userFns: userFns,
+    constNames: built.consts.keys,
     constExprs: built.consts.entries.map(\.value))
 }
 

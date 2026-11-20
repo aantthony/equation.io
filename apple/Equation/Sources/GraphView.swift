@@ -55,7 +55,7 @@ struct GraphAnalysis: Equatable {
     graph = Graph2D(analysis, colors: colored.colors)
     slots = colored.slots
     // Syntax colors, as the site computes them (EquationCore `highlightRows`, lib/highlight.ts).
-    let spans = highlightRows(texts)
+    let spans = highlightRows(texts, names: analysis.names)
     for (k, row) in analysis.rows.enumerated() {
       var error = row.error ?? row.unsupported.map(Self.notDrawnYet)
       if error == nil {

@@ -59,9 +59,10 @@ public struct BoundNames: Equatable, Sendable {
     self.sequences = sequences
   }
 
-  /// The names `rows` bind, by `collectBoundNames`.
+  /// The names `rows` bind, by their definitions (`boundNames`). A caller
+  /// that analyzes the rows too has them already: `DocumentAnalysis.names`.
   public init(rows: [String]) {
-    self = collectBoundNames(rows)
+    self = boundNames(prepareDocument(rows))
   }
 }
 
@@ -71,7 +72,7 @@ public func highlightRows(_ rows: [String], names: BoundNames) -> [[HighlightSpa
   rows.map { highlightSpans($0, names) }
 }
 
-/// Each row's colored spans, with the bound names read off the rows themselves.
+/// Each row's colored spans, with the names the rows' definitions bind.
 public func highlightRows(_ rows: [String]) -> [[HighlightSpan]] {
   highlightRows(rows, names: BoundNames(rows: rows))
 }
@@ -396,25 +397,43 @@ private func scanSeqRec(_ u: [UInt16]) -> SequenceRow? {
 
 // MARK: - Bound names
 
-/// The names a document's rows bind, read off the rows' shapes alone.
+/// The names a document's rows bind, as the site's highlighter reads them
+/// off the `Env` that lib/defs.ts `buildDefs` builds (lib/analysis.ts
+/// `prepareDocument`; web/main.ts `rowSpans`): every constant, field and
+/// condition, a point and its components, and the functions. A definition
+/// that fails binds nothing, so its name stays unbound wherever it is written.
 ///
-/// A stand-in for the definitions port: the site colors names by the `Env`
-/// that lib/defs.ts `buildDefs` builds (lib/analysis.ts `prepareDocument`),
-/// and this should be replaced by that port's Env when the app has it. Until
-/// then it collects what the row scanners that run ahead of buildDefs find
-/// (`scanSequences`, `scanDefinition`, a `~` row's name), and guesses a
-/// tuple's components from its text. It cannot know what buildDefs learns by
-/// resolving a definition, so it differs from the site where
-///
-/// - a definition fails (`a = b` with no `b`, `p = "text"`, a cycle, a fit
-///   with no data): the site leaves its name unbound, this binds it;
-/// - a value is a vector without being written as a tuple (`C = A + B`, a
-///   call returning a point): the site binds its components `C_x`, `C_y`,
-///   this does not.
-func collectBoundNames(_ rows: [String]) -> BoundNames {
+/// The definitions port does not read every row yet. A row it leaves alone
+/// (a sequence, a `~` row, a state, a list, a data file, and whatever names
+/// one) binds what `scanBoundNames` reads off its shape instead.
+func boundNames(_ document: PreparedDocument) -> BoundNames {
+  let built = document.built
   var names = BoundNames()
-  // lib/analysis.ts prepareDocument: a row is its math, without the note.
-  let texts: [[UInt16]] = rows.map { Array(jsTrimmed(stripNote($0)).utf16) }
+  names.values.formUnion(built.consts.keys)
+  names.values.formUnion(built.fields.keys)
+  names.values.formUnion(built.conditions.keys)
+  // (A vector owns its aliases: its components are among the constants or the fields.)
+  names.values.formUnion(built.points)
+  names.functions.formUnion(built.fns.keys)
+  scanBoundNames(document.texts.map { Array($0.utf16) }, rows: Set(document.blocked.keys), into: &names)
+  return names
+}
+
+/// The names `rows` of a document's rows bind, read off the rows' shapes
+/// alone: what the row scanners that run ahead of buildDefs find
+/// (`scanSequences`, `scanDefinition`, a `~` row's name), with a tuple's
+/// components guessed from its text. `texts` is every row's math, without
+/// its note: a sequence's letter and a fit's data are the document's.
+///
+/// It cannot know what buildDefs learns by resolving a definition, so for
+/// these rows it differs from the site where
+///
+/// - a definition fails (a cycle, a fit with no data): the site leaves its
+///   name unbound, this binds it;
+/// - a value is a vector without being written as a tuple (`om' = solve(M,
+///   f)`, a call returning a point): the site binds its components, this
+///   does not.
+private func scanBoundNames(_ texts: [[UInt16]], rows: Set<Int>, into names: inout BoundNames) {
   let live = texts.map { !$0.isEmpty && $0[0] != 0x23 && !isViewportText(String($0)) }
   // lib/seq.ts scanSequences: a letter can be a sequence once. Beside
   // `a_n = 1/n`, a row like `a_k = 7` that never uses its k is the constant a_k.
@@ -447,7 +466,7 @@ func collectBoundNames(_ rows: [String]) -> BoundNames {
   }
   var models: [[UInt16]] = []
   var vectorStates: [String: Int] = [:]
-  for (k, text) in texts.enumerated() where live[k] {
+  for (k, text) in texts.enumerated() where live[k] && rows.contains(k) {
     switch scans[k] {
     case .terms(let name, let index, let rec, let rhs)?:
       if rec || !owners.contains(name) || usesIndex(rhs, index) {
@@ -519,7 +538,6 @@ func collectBoundNames(_ rows: [String]) -> BoundNames {
   }
   names.values.formUnion(coefficients)
   names.values.subtract(names.functions)
-  return names
 }
 
 /// The model of a row that fits one, `Y ~ m X + b`: one `~` outside brackets

@@ -120,7 +120,7 @@ private func describe(_ spans: [HighlightSpan], _ row: String) -> String {
   /// The rows of `documents` whose spans are not the site's, and how many rows were looked at.
   private func differing(
     _ documents: [Fixture.Document], spans: (Fixture.Document) -> [[HighlightSpan]]
-  ) -> (rows: Int, documents: Set<String>, report: String) {
+  ) -> (rows: Int, differing: Int, documents: Set<String>, report: String) {
     var rows = 0
     var names = Set<String>()
     var failures: [String] = []
@@ -136,7 +136,7 @@ private func describe(_ spans: [HighlightSpan], _ row: String) -> String {
       }
     }
     let report = "\(failures.count) of \(rows) rows differ:\n\(failures.prefix(20).joined(separator: "\n"))"
-    return (rows, names, report)
+    return (rows, failures.count, names, report)
   }
 
   /// Given the names the site's definitions bind, every row's spans are the site's.
@@ -146,18 +146,34 @@ private func describe(_ spans: [HighlightSpan], _ row: String) -> String {
     #expect(result.documents.isEmpty, "\(result.report)")
   }
 
-  /// The names read off the rows' shapes (`collectBoundNames`, the stand-in
-  /// for the definitions port) color the Examples menu as the site does, but
-  /// for the kinds of row its comment lists. The examples it gets wrong are
-  /// named here, so one it starts or stops getting right is noticed.
-  @Test func namesReadFromTheRowsColorTheExamples() {
-    // om' = solve(M, f) is a vector state by what solve returns: om_1 and om_2 need the definitions.
+  /// The names the Swift definitions bind (`boundNames`: Definitions.swift's
+  /// buildDefs, and the rows' shapes where the port leaves a row alone)
+  /// color the documents as the site's own names do, but for the kinds of
+  /// row `scanBoundNames` lists. The examples that differ are named here,
+  /// so one that starts or stops differing is noticed.
+  @Test func namesFromTheDefinitionsColorTheDocuments() {
+    // om' = solve(M, f) is a vector state by what solve returns, and states are not ported: om_1 and om_2
+    // need the definitions.
     let known: Set<String> = ["simulations (↻ to restart): double pendulum"]
     let examples = fixture.documents.filter { $0.colors != nil && !$0.name.hasPrefix("edge") }
     let result = differing(examples) { highlightRows($0.rows) }
     #expect(result.rows > 1000)
     #expect(result.documents == known, "\(result.report)")
+    // Every document, the edge cases and the rows half typed among them.
+    let all = differing(fixture.documents) { highlightRows($0.rows) }
+    print(
+      "Highlight conformance, by the Swift definitions' names: \(result.differing) of \(result.rows) example rows "
+        + "and \(all.differing) of \(all.rows) rows of every document differ from the site "
+        + "(\(all.documents.count) documents).")
+    #expect(all.differing == knownDifferingRows, "\(all.report)")
   }
+
+  /// Rows of the whole fixture that the Swift-derived names color differently
+  /// (the rows' shapes alone gave 72): all of them rows the definitions port
+  /// leaves alone, where a definition the site fails (`S = X +`, a `~` row
+  /// half typed, `p = "text"`) still binds its name here. Lower this as the
+  /// port reaches those rows.
+  private let knownDifferingRows = 30
 
   @Test func notesMatchTheSite() {
     for document in fixture.documents {
