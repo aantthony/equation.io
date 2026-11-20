@@ -14,9 +14,8 @@
 /// a sum of uniforms (an exact piecewise polynomial).
 ///
 /// A variable built on discrete bases alone that has no law of its own is
-/// enumerated (DiscreteEnumeration.swift). What the site answers by
-/// quadrature against a base law, or from its joint sample, is not ported:
-/// those paths throw `Unsupported`, and the row says so.
+/// enumerated (DiscreteEnumeration.swift). What is answered by quadrature
+/// against a base law, or from the joint sample, is ApproximateLaws.swift.
 
 /// A random variable: a declaration `X ~ Normal(0, 1)`, or an expression in
 /// others, `Y = X^2` (lib/dist.ts `RV`).
@@ -39,6 +38,12 @@ public struct DensityCurve: Equatable, Sendable {
   public var sd: Double
   /// Fraction of the mass that is defined.
   public var mass: Double
+  /// Point masses (a piecewise branch, floor, a constant): drawn as stems of
+  /// height = probability, never smeared into the density.
+  public var atoms: [DensityAtom]? = nil
+  /// Present when the tails are heavy enough that mean/sd are truncation
+  /// artifacts: robust location/spread for the readout to show instead.
+  public var robust: Robust? = nil
 
   /// A curve drawn `k` times as tall: a row over continuous intervals is
   /// drawn against their length measure, not a probability (`scaleCurve`).
@@ -46,6 +51,7 @@ public struct DensityCurve: Equatable, Sendable {
     if k == 1 { return self }
     var out = self
     out.pts = pts.enumerated().map { $0.offset % 2 == 1 ? $0.element * k : $0.element }
+    out.atoms = atoms?.map { DensityAtom(x: $0.x, p: $0.p * k) }
     return out
   }
 
@@ -137,6 +143,9 @@ public struct RVSystem: Equatable, Sendable {
   private var rvs: [String: RV] = [:]
   /// The names in the order they were declared.
   private var order: [String] = []
+  /// What the approximate tiers computed, by variable and parameter values
+  /// (ApproximateLaws.swift). Shared by the copies of a system.
+  let cache = RVCache()
 
   init(_ declarations: [RV] = []) {
     for rv in declarations { add(rv) }
@@ -160,7 +169,7 @@ public struct RVSystem: Equatable, Sendable {
   // MARK: What a variable is built on
 
   /// The base variables a variable is built on, through every derived one.
-  private func basesOf(_ name: String) -> [String] {
+  func basesOf(_ name: String) -> [String] {
     var out: [String] = []
     var seen: Set<String> = []
     func walk(_ n: String) {
@@ -181,7 +190,7 @@ public struct RVSystem: Equatable, Sendable {
   }
 
   /// Random variables of `e` that are not discrete (see isDiscreteVar).
-  private func continuousIn(_ e: Expr) -> [String] {
+  func continuousIn(_ e: Expr) -> [String] {
     freeVars(e).list.filter { rvs[$0] != nil && !isDiscreteVar($0) }
   }
 
@@ -469,7 +478,7 @@ public struct RVSystem: Equatable, Sendable {
   /// The variable's expression with every derived dependency inlined, so
   /// only base variables and parameters remain — or nil when the expansion
   /// blows up (shared subtrees duplicate under substitution).
-  private func grounded(_ name: String) -> Expr? {
+  func grounded(_ name: String) -> Expr? {
     if case .derived(_, let expr)? = rvs[name] { return ground(expr) }
     return nil
   }
@@ -599,19 +608,30 @@ public struct RVSystem: Equatable, Sendable {
     return shift != 0 ? acc.scaled(1, shift) : acc
   }
 
-  /// The density curve for a variable whose law is a uniform convolution:
-  /// the exact piecewise polynomial (`curve`). (Rows whose law is a
-  /// closed-form pdf never come here: they draw through the shader.) Nil
-  /// while its parameters declare no distribution.
-  ///
-  /// Port: the site's other tiers — the conditional-CDF curve of a transform
-  /// of one or two bases (`condBase`), and the sample estimate
-  /// (`estimateCurve`) — are not ported.
-  public func curve(_ name: String, _ env: [String: Double]) throws -> DensityCurve? {
+  /// The density curve for a variable, by the cheapest honest tier: the
+  /// exact piecewise polynomial when its law is a uniform convolution, the
+  /// deterministic conditional-CDF curve for transforms of one or two
+  /// independent bases, the sample estimate as the last resort (`curve`).
+  /// (Rows whose law is a closed-form pdf never come here: they draw through
+  /// the shader.) Nil while its parameters declare no distribution.
+  public func curve(_ name: String, _ env: [String: Double], view: (lo: Double, hi: Double)? = nil) throws
+    -> DensityCurve?
+  {
+    guard var c = try rawCurve(name, env, view: view) else { return nil }
+    // One verdict per variable: a mean that quadrature certified (absolutely
+    // convergent, see quadMoments) exists, whatever a tail-index estimate
+    // near its bar made of it.
+    if let robust = c.robust, !robust.meanOk, try quadMoments(name, env) != nil { c.robust?.meanOk = true }
+    return c
+  }
+
+  private func rawCurve(_ name: String, _ env: [String: Double], view: (lo: Double, hi: Double)?) throws
+    -> DensityCurve?
+  {
     guard case .usum(let terms, let d)? = exactLaw(name) else {
       if rvs[name] == nil { throw LanguageError("\(name) has an error in its definition.") }
       if isDiscreteVar(name) { return nil }  // no density: pmfRuns draws it
-      throw Unsupported("the density of a transformed random variable")
+      return try approximateCurve(name, env, view: view)
     }
     guard let pp = try usumPP(terms, d, env), let m = try exactMoments(name, env) else { return nil }
     return DensityCurve(pts: pp.curve(), mean: m.mean, sd: m.sd, mass: 1)
@@ -675,25 +695,22 @@ public struct RVSystem: Equatable, Sendable {
 
   /// Moments certified without a closed law (`quadMoments`): of a derived
   /// discrete variable, the sum against the base pmfs, where enumeration
-  /// reached and truncation is certified invisible in the mean.
-  ///
-  /// Port: for a transform of one continuous base the site integrates
-  /// against the base pdf (lib/integrate.ts); that is not ported.
+  /// reached and truncation is certified invisible in the mean; of a
+  /// transform of one continuous base, the integral against its pdf.
   func quadMoments(_ name: String, _ env: [String: Double]) throws -> (mean: Double, sd: Double, mass: Double)? {
     guard case .derived = rvs[name] else { return nil }  // base laws: exactMoments has them
     if isDiscreteVar(name) {
       guard let pmf = try pmfOf(name, env), pmf.meanExact else { return nil }
       return (pmf.mean, pmf.sd, pmf.mass)
     }
-    throw Unsupported("the mean of a transformed random variable")
+    return try integratedMoments(name, env)
   }
 
-  /// The mean of a variable: exact under its law when one is derivable, else
-  /// the enumerated mean of a discrete one (`mean`). NaN while its parameters
-  /// declare no distribution, or when the mean does not exist.
-  ///
-  /// Port: the site's last resorts — the mean of a drawn curve, and the
-  /// sample's — are not ported.
+  /// The mean of a variable: exact under its law when one is derivable,
+  /// quadrature against the base pdf for one-variable transforms, otherwise
+  /// the curve's mean (quadrature-grade for conditional-CDF curves, the
+  /// finite-sample mean for estimates; NaN when nothing is finite, or when
+  /// the mean does not exist or cannot be estimated — see meanUnstable) (`mean`).
   func mean(_ name: String, _ env: [String: Double]) throws -> Double {
     if let m = try exactMoments(name, env) { return m.mean }
     if let m = try quadMoments(name, env) { return m.mean }
@@ -703,9 +720,16 @@ public struct RVSystem: Equatable, Sendable {
       guard let pmf = try pmfOf(name, env), pmf.meanOk else { return .nan }
       return pmf.mean
     }
-    // A declaration with no moments has no distribution at these values:
-    // its sample is NaN throughout, and so is its mean.
-    return .nan
+    // Heavy tails (E(X^2) of a Cauchy): the sample mean is whatever the
+    // largest draw happened to be. NaN, and meanUnstable() says why.
+    if let c = try curve(name, env) { return c.robust?.meanOk == false ? .nan : c.mean }
+    var sum = 0.0
+    var n = 0.0
+    for x in try columns(name, env) where x.isFinite {
+      sum += x
+      n += 1
+    }
+    return n > 0 ? sum / n : .nan
   }
 
   /// Why mean() is NaN, when the reason is the law and not the parameters:
@@ -715,18 +739,29 @@ public struct RVSystem: Equatable, Sendable {
     if let m = try exactMoments(name, env) { return m.mean.isNaN }
     if try quadMoments(name, env) != nil { return false }
     if isDiscreteVar(name) { return try pmfOf(name, env)?.meanOk == false }
-    return false
+    return try curve(name, env)?.robust?.meanOk == false
   }
 
   /// What a derived row's readout says, decided in one place: exact μ, σ
-  /// under a closed law; for a discrete variable, what its enumeration
-  /// certifies (`moments`). Nil when nothing computes.
+  /// under a closed law; median/IQR where the tails make σ (and, unless
+  /// `meanOk`, μ) a truncation artifact; otherwise the best estimate —
+  /// quadrature where it settled, the curve's moments elsewhere (`moments`).
+  /// Nil when nothing computes.
   func moments(_ name: String, _ env: [String: Double]) throws -> Moments? {
     if let m = try exactMoments(name, env), m.mean.isFinite, m.sd.isFinite {
       return .exact(mean: m.mean, sd: m.sd, mass: 1, note: nil)
     }
+    // (Never the Hill estimate for a discrete variable: that reads a
+    // sample's tail, and a bounded law with a far atom looks like one.)
     if isDiscreteVar(name) { return try pmfOf(name, env).map(atomMoments) }
-    throw Unsupported("the moments of a transformed random variable")
+    let qm = try quadMoments(name, env)
+    if let qm, qm.sd.isFinite { return .estimate(mean: qm.mean, sd: qm.sd, mass: qm.mass, note: nil) }
+    let c = try curve(name, env)
+    if let c, let r = c.robust {
+      return .robust(median: r.median, iqr: r.iqr, meanOk: r.meanOk, mass: c.mass, note: nil)
+    }
+    if let qm { return .estimate(mean: qm.mean, sd: qm.sd, mass: qm.mass, note: nil) }  // a certified mean, σ = ∞
+    return c.map { .estimate(mean: $0.mean, sd: $0.sd, mass: $0.mass, note: nil) }
   }
 
   // MARK: Probabilities
@@ -753,11 +788,9 @@ public struct RVSystem: Equatable, Sendable {
   /// an estimate (3) (`eventProbability`). Constant bounds on one variable go
   /// through its law or its atoms; any other event over discrete variables
   /// alone is enumerated over the joint of their bases. Either way a discrete
-  /// event keeps its strictness — ties have mass. `single` is the row's
-  /// bounded variable, when it has that shape.
-  ///
-  /// Port: everything else the site estimates over its joint sample, which
-  /// is not ported.
+  /// event keeps its strictness — ties have mass. Everything else is the
+  /// Monte Carlo fraction of the joint sample. `single` is the row's bounded
+  /// variable, when it has that shape.
   func eventProbability(_ body: Expr, _ single: ProbShade?, _ env: [String: Double]) throws
     -> (value: Double, exact: Bool)
   {
@@ -765,11 +798,12 @@ public struct RVSystem: Equatable, Sendable {
       if let value = try exactProbability(single.rv, single.bounds, env) { return (value, true) }
       if isDiscreteVar(single.rv) {
         guard let pmf = try pmfOf(single.rv, env) else { return (.nan, true) }
-        return (try atomProbability(pmf, single.bounds, env), true)
+        guard let value = try atomProbability(pmf, single.bounds, env) else { return (.nan, true) }
+        return (value, pmf.exact)
       }
     }
-    if continuousIn(body).isEmpty, let value = try enumeratedProbability(body, env) { return (value, true) }
-    throw Unsupported("probabilities estimated from samples")
+    if continuousIn(body).isEmpty, let found = try enumeratedProbability(body, env) { return found }
+    return (try sampleFraction(body, env), false)
   }
 
   /// Where an E(…) row's marker stands: x = the mean, reaching up to the law
@@ -777,7 +811,9 @@ public struct RVSystem: Equatable, Sendable {
   /// stem at the mean when the mean is a whole number, and the axis when it
   /// falls between stems; for a continuous one, the exact pdf or the drawn
   /// curve. Nil when there is no mean to mark.
-  public func markerHeight(_ name: String, _ env: [String: Double]) throws -> (x: Double, h: Double)? {
+  public func markerHeight(_ name: String, _ env: [String: Double], view: (lo: Double, hi: Double)? = nil) throws
+    -> (x: Double, h: Double)?
+  {
     let m = try mean(name, env)
     if !m.isFinite { return nil }
     if isDiscreteVar(name) { return try atomNear(name, m, env) }
@@ -785,7 +821,7 @@ public struct RVSystem: Equatable, Sendable {
     if let exact = exactDist(name) {
       h = try evaluate(pdfExpr(exact, .num(m)), env)
     } else {
-      h = try curve(name, env)?.density(at: m) ?? 0
+      h = try curve(name, env, view: view)?.density(at: m) ?? 0
     }
     if !h.isFinite || h < 0 { h = 0 }
     return (m, h)

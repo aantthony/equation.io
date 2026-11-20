@@ -34,11 +34,21 @@ import Testing
     #expect(analysis.random.has("X") && analysis.random.has("@9"))
   }
 
-  @Test func whatIsNotPortedSaysSo() {
+  @Test func whatHasNoLawIsApproximated() throws {
     // Quadrature and the joint sample, which stands in for an enumeration past its cap too.
-    let rows = ["X ~ Normal(0, 1)", "Y = sin(X)", "E(X^3)", "P(X > Y)", "D ~ Geometric(0.000001)", "D^2", "L ~ m X + b"]
+    let rows = ["X ~ Normal(0, 1)", "Y = sin(X)", "E(X^2)", "P(X > Y)", "D ~ Geometric(0.000001)", "D^2", "L ~ m X + b"]
     let analysis = analyze(rows)
-    #expect(analysis.rows.map { $0.unsupported != nil } == [false, true, true, true, false, true, false])
+    #expect(analysis.rows.map { $0.unsupported != nil } == [false, false, false, false, false, false, false])
+    #expect(analysis.rows[2].info == "≈ 1.0000" && analysis.rows[3].info == "≈ 0.500")
+    #expect(analysis.rows[5].info?.hasSuffix("(sampled)") == true)
+    // sin of a normal: a curve on [-1, 1] with all of the mass under it.
+    let curve = try #require(try analysis.random.curve("Y", [:]))
+    #expect(abs(curve.pts[0] + 1) < 1e-6 && curve.mass == 1 && abs(curve.mean) < 1e-12 && curve.atoms == nil)
+    var area = 0.0
+    for i in stride(from: 0, to: curve.pts.count - 3, by: 2) {
+      area += (curve.pts[i + 1] + curve.pts[i + 3]) / 2 * (curve.pts[i + 2] - curve.pts[i])
+    }
+    #expect(abs(area - 1) < 1e-3)
     // A fit is a definition of its coefficients; one that fails says why, as the site does.
     let fit = analyze(["L = [1, 2, 4]", "L ~ m [0, 1, 2] + b", "y = m x + b", "L ~ c x"])
     #expect(fit.rows.map { $0.unsupported != nil } == [false, false, false, false])
@@ -102,6 +112,113 @@ private func near(_ a: [Double], _ b: [Double]) -> Bool {
   a.count == b.count && zip(a, b).allSatisfy { near($0, $1) }
 }
 
+/// The tolerance of the approximate tiers (ApproximateLaws.swift). The port
+/// runs the site's arithmetic in the site's order over the same sample, so
+/// what separates the two is the last bit of sin, exp, log and their kin in
+/// the two math libraries (V8's are fdlibm's, not the system's). Over the
+/// corpus a sample column agrees to a few parts in 10¹², and what is a smooth
+/// function of one — a quantile, a moment, a kernel estimate, a window, a
+/// sample's fraction — is held to this. Two things are not smooth, and each
+/// has its own measure below: a spread about a far mean (`sameSpread`) and a
+/// conditional-CDF curve over values that tie (`tieSlack`).
+let APPROXIMATE_TOLERANCE = 1e-9
+
+/// Two numbers of an approximate tier, against the `scale` they are read on.
+private func about(_ a: Double, _ b: Double, scale: Double = 0, slack: Double = 0) -> Bool {
+  if a.isNaN || b.isNaN { return a.isNaN && b.isNaN }
+  return a == b || abs(a - b) <= APPROXIMATE_TOLERANCE * max(abs(a), abs(b), scale) + slack
+}
+
+/// Two standard deviations about a mean. These tiers form one as the root of
+/// a second moment less the mean squared, so it is the second moment that
+/// agrees to the tolerance: of ln of a Gamma(2·10⁶), mean 14.5 and σ 0.0007,
+/// the site's own σ holds eight digits.
+private func sameSpread(_ a: Double, _ b: Double, mean: Double) -> Bool {
+  if about(a, b) { return true }
+  guard a.isFinite, b.isFinite, mean.isFinite else { return false }
+  return abs(a * a - b * b) <= APPROXIMATE_TOLERANCE * (mean * mean + max(a * a, b * b))
+}
+
+/// What a last bit is worth in the height of a conditional-CDF curve. That
+/// tier reads a CDF off the sorted values of g over a quantile grid, where
+/// equal values are one step and unequal ones two. A grid symmetric about a
+/// fold of g (sin over a uniform, the square of a StudentT) holds pairs of
+/// nodes whose values are equal in exact arithmetic, so whether a pair comes
+/// out equal is the last bit of g — in the site's curve as in the port's.
+/// Each pair that falls the other way moves the CDF by half a sample there,
+/// which differentiated over a cell `dz` wide is the height returned here:
+/// one sample's mass in one cell. Rasterized again through a deep view
+/// (smaller cells), the same bit is worth more. Zero for the other tiers.
+private func tieSlack(_ rvs: RVSystem, _ rv: String, _ pts: [Double]) -> Double {
+  if rvs.exactLaw(rv) != nil { return 0 }
+  let bases = rvs.basesOf(rv)
+  guard (1...2).contains(bases.count), bases.allSatisfy({ rvs.baseDist($0).map(isDiscrete) == false }) else { return 0 }
+  // (QC_SINGLE, or QC_OUTER × QC_INNER.)
+  let samples = bases.count == 1 ? 8192.0 : 512.0 * 512.0
+  var dz = Double.infinity
+  for i in stride(from: 2, to: pts.count, by: 2) where pts[i] > pts[i - 2] { dz = min(dz, pts[i] - pts[i - 2]) }
+  return dz.isFinite ? 1 / (samples * dz) : 0
+}
+
+/// A polyline as the site drew it, against its own width and height.
+private func samePolyline(_ mine: [Double], _ theirs: [Double], slack: Double) -> Bool {
+  guard theirs.count == mine.count else { return false }
+  var (width, height) = (0.0, 0.0)
+  for i in stride(from: 0, to: theirs.count - 1, by: 2) {
+    width = max(width, abs(theirs[i] - theirs[0]))
+    height = max(height, abs(theirs[i + 1]))
+  }
+  return mine.indices.allSatisfy {
+    $0 % 2 == 0 ? about(mine[$0], theirs[$0], scale: width) : about(mine[$0], theirs[$0], scale: height, slack: slack)
+  }
+}
+
+/// A curve as the site drew it: its polyline, its point masses, and what its
+/// readout would say.
+private func sameCurve(_ mine: DensityCurve, _ theirs: Any, slack: Double) -> Bool {
+  guard let theirs = theirs as? [String: Any] else { return false }
+  guard samePolyline(mine.pts, (theirs["pts"] as! [Any]).map(number), slack: slack) else { return false }
+  let atoms = theirs["atoms"] as? [[String: Any]]
+  guard atoms?.count == mine.atoms?.count else { return false }
+  for (a, b) in zip(mine.atoms ?? [], atoms ?? []) where !about(a.x, number(b["x"]!)) || !about(a.p, number(b["p"]!)) {
+    return false
+  }
+  if let robust = theirs["robust"] as? [String: Any] {
+    guard let r = mine.robust, about(r.median, number(robust["median"]!)), about(r.iqr, number(robust["iqr"]!)),
+      r.meanOk == robust["meanOk"] as! Bool
+    else { return false }
+  } else if mine.robust != nil {
+    return false
+  }
+  // (A mean of 0 is 0 against the spread.)
+  let sd = number(theirs["sd"]!)
+  return about(mine.mean, number(theirs["mean"]!), scale: sd.isFinite ? sd : 0)
+    && sameSpread(mine.sd, sd, mean: mine.mean) && about(mine.mass, number(theirs["mass"]!))
+}
+
+/// A derived row's moments as the site decided them (`RVSystem.moments`).
+private func sameMoments(_ mine: Moments, _ theirs: Any) -> Bool {
+  guard let theirs = theirs as? [String: Any] else { return false }
+  func has(_ key: String, _ value: Double, scale: Double = 0) -> Bool {
+    theirs[key].map { about(value, number($0), scale: scale.isFinite ? scale : 0) } ?? false
+  }
+  func spread(_ sd: Double, _ mean: Double) -> Bool {
+    theirs["sd"].map { sameSpread(sd, number($0), mean: mean) } ?? false
+  }
+  func noted(_ note: String?) -> Bool { note == theirs["note"] as? String }
+  switch mine {
+  case .exact(let mean, let sd, let mass, let note):
+    return theirs["kind"] as? String == "exact" && has("mean", mean, scale: sd) && spread(sd, mean) && has("mass", mass)
+      && noted(note)
+  case .estimate(let mean, let sd, let mass, let note):
+    return theirs["kind"] as? String == "estimate" && has("mean", mean, scale: sd) && spread(sd, mean)
+      && has("mass", mass) && noted(note)
+  case .robust(let median, let iqr, let meanOk, let mass, let note):
+    return theirs["kind"] as? String == "robust" && has("median", median, scale: iqr) && has("iqr", iqr)
+      && has("mass", mass) && meanOk == theirs["meanOk"] as? Bool && noted(note)
+  }
+}
+
 /// How what the port draws of a density, pmf, prob or expect plan differs
 /// from what lib/dist.ts hands web/main.ts for it (apple/corpus/analysis.ts
 /// `drawnOf`): a pmf's stems, the whole law and through a window; the stems or
@@ -151,11 +268,17 @@ func drawnDifferences(_ plan: CpuPlan?, _ want: Any?, _ analysis: DocumentAnalys
     check("stems", want["all"], { try rvs.pmfRuns(rv, env) }, same: sameRuns)
     check("stems in a window", want["window"], { try rvs.pmfRuns(rv, env, view: window) }, same: sameRuns)
   case .density(let rv, _):
-    check("curve", want["curve"], { try rvs.curve(rv, env) }) { curve, theirs in
-      guard let theirs = theirs as? [String: Any] else { return false }
-      return samePoints(curve.pts, theirs["pts"]!) && near(curve.mean, number(theirs["mean"]!))
-        && near(curve.sd, number(theirs["sd"]!)) && near(curve.mass, number(theirs["mass"]!))
+    check("curve", want["curve"], { try rvs.curve(rv, env) }) {
+      sameCurve($0, $1, slack: tieSlack(rvs, rv, $0.pts))
     }
+    // The same curve through a view deep inside it.
+    if let zoomed = want["zoomed"] as? [String: Any], let view = zoomed["view"] as? [String: Any] {
+      let window = (lo: number(view["lo"]!), hi: number(view["hi"]!))
+      check("curve in a window", zoomed["curve"], { try rvs.curve(rv, env, view: window) }) {
+        sameCurve($0, $1, slack: tieSlack(rvs, rv, $0.pts))
+      }
+    }
+    check("moments", want["moments"], { try rvs.moments(rv, env) }, same: sameMoments)
   case .prob(_, let shade?):
     check("selection", want["all"], { try rvs.pmfRuns(shade.rv, env, select: shade.bounds) }, same: sameRuns)
     check(
@@ -166,7 +289,11 @@ func drawnDifferences(_ plan: CpuPlan?, _ want: Any?, _ analysis: DocumentAnalys
       {
         try rvs.curve(shade.rv, env)?.shadePolygon(
           lo: try shade.bounds.lo.map { try evaluate($0, env) }, hi: try shade.bounds.hi.map { try evaluate($0, env) })
-      }, same: samePoints)
+      }
+    ) { mine, theirs in
+      guard let theirs = (theirs as? [Any])?.map(number) else { return false }
+      return samePolyline(mine, theirs, slack: tieSlack(rvs, shade.rv, (try? rvs.curve(shade.rv, env))??.pts ?? []))
+    }
   case .value(_, let shade?):
     // The area a definite integral's row shades (IntShade.swift), through the same window.
     if shadeNames(shade) != want["names"] as? [String] { out.append("drawn names: got \(shadeNames(shade))") }
@@ -187,7 +314,18 @@ func drawnDifferences(_ plan: CpuPlan?, _ want: Any?, _ analysis: DocumentAnalys
   case .expect(let rv):
     check("marker", want["mark"], { try rvs.markerHeight(rv, env) }) { mark, theirs in
       guard let theirs = theirs as? [String: Any] else { return false }
-      return near(mark.x, number(theirs["x"]!)) && near(mark.h, number(theirs["h"]!))
+      // Where the mean stands, against the spread it stands in; how high, against the curve it reaches.
+      let curve = rvs.isDiscreteVar(rv) || rvs.exactDist(rv) != nil ? nil : (try? rvs.curve(rv, env)) ?? nil
+      let spread = (try? rvs.moments(rv, env)).flatMap { m -> Double? in
+        switch m {
+        case .exact(_, let sd, _, _), .estimate(_, let sd, _, _): sd.isFinite ? sd : nil
+        case .robust(_, let iqr, _, _, _): iqr
+        }
+      }
+      let height = curve.map { c in stride(from: 1, to: c.pts.count, by: 2).reduce(0) { max($0, c.pts[$1]) } } ?? 0
+      return about(mark.x, number(theirs["x"]!), scale: spread ?? 0)
+        && about(
+          mark.h, number(theirs["h"]!), scale: height, slack: curve.map { 2 * tieSlack(rvs, rv, $0.pts) } ?? 0)
     }
   default:
     break
