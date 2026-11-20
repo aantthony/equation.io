@@ -63,9 +63,27 @@ public struct Curve2D: Equatable, Codable, Sendable {
 /// Everything drawable in a 2D frame, in back-to-front draw order
 /// (web/render2d.ts `Layers2D`). A layer joins this struct when its shader is ported.
 public struct Layers2D: Equatable, Codable, Sendable {
+  public var fractals: [Fractal2D]?
+  public var domains: [Curve2D]?
+  public var colors: [ColorField2D]?
+  public var conformals: [Curve2D]?
+  public var vfields: [VField2D]?
+  public var tfields: [TField2D]?
+  public var complexes: [Curve2D]?
   public var curves: [Curve2D]?
 
-  public init(curves: [Curve2D]? = nil) {
+  public init(
+    fractals: [Fractal2D]? = nil, domains: [Curve2D]? = nil, colors: [ColorField2D]? = nil,
+    conformals: [Curve2D]? = nil, vfields: [VField2D]? = nil, tfields: [TField2D]? = nil,
+    complexes: [Curve2D]? = nil, curves: [Curve2D]? = nil
+  ) {
+    self.fractals = fractals
+    self.domains = domains
+    self.colors = colors
+    self.conformals = conformals
+    self.vfields = vfields
+    self.tfields = tfields
+    self.complexes = complexes
     self.curves = curves
   }
 }
@@ -192,6 +210,32 @@ public final class Renderer2D {
       }
     }
 
+    func drawField(_ item: Curve2D, _ frag: (String, [String]?) -> String) {
+      drawProgram(frag(item.field, item.params), item.color, item.params, item.uniforms)
+    }
+
+    for f in layers.fractals ?? [] {
+      // The site leaves a fractal's own uniforms unset; they are set here, as every other layer's are.
+      let frag = fractalFrag(f.step, seed: f.seed, maxIter: f.maxIter, params: f.params)
+      drawProgram(frag, f.color, f.params, f.uniforms)
+    }
+    for d in layers.domains ?? [] { drawField(d) { domainFrag($0, params: $1) } }
+    for c in layers.colors ?? [] {
+      drawProgram(
+        colorFrag(c.field, params: c.params, locals: c.locals, space: c.space), c.color, c.params, c.uniforms)
+    }
+    for c in layers.conformals ?? [] { drawField(c) { conformalFrag($0, params: $1) } }
+    for f in layers.vfields ?? [] {
+      drawProgram(vfieldFrag(f.fx, f.fy, params: f.params), f.color, f.params, f.uniforms)
+    }
+    for f in layers.tfields ?? [] where f.entries.count == 4 && (f.jacobian?.count ?? 4) == 4 {
+      let frag =
+        f.streamlines == true
+        ? tlinesFrag(f.entries, params: f.params, jacobian: f.jacobian)
+        : tfieldFrag(f.entries, params: f.params, jacobian: f.jacobian)
+      drawProgram(frag, f.color, f.params, f.uniforms)
+    }
+    for c in layers.complexes ?? [] { drawField(c) { complexFrag($0, params: $1) } }
     for c in layers.curves ?? [] {
       drawProgram(curveFrag(c.field, params: c.params, graphEval: c.graphEval), c.color, c.params, c.uniforms)
     }

@@ -13,6 +13,8 @@ public final class MetalContext {
   /// Shaders compiled since the context was made, so a test can assert that
   /// a slider's drag hits the cache (web/gl.ts `glStats`).
   public private(set) var compiles = 0
+  /// Of those, the ones that didn't compile: a test that draws expects none.
+  public private(set) var failures = 0
   /// Pipelines by fragment source, so editing one equation doesn't recompile
   /// the others; nil for a source that didn't compile.
   private var pipelines: [String: FragmentPipeline?] = [:]
@@ -61,6 +63,7 @@ public final class MetalContext {
       return FragmentPipeline(
         state: state, slots: translated.slots, count: translated.count, textures: translated.textures)
     } catch {
+      failures += 1
       print("Shader compile error: \(error)\n---\n\(glsl)")
       return nil
     }

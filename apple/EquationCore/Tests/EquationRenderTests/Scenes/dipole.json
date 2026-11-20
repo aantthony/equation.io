@@ -1,0 +1,1 @@
+{"layers":{"complexes":[{"params":[],"field":"(c_ln((vec2(x, y) - vec2(2.0, 0.0))) - c_ln((vec2(x, y) + vec2(2.0, 0.0))))","color":[0.176,0.439,0.702]}]},"env":{}}

@@ -1,0 +1,1 @@
+{"layers":{"fractals":[{"params":[],"step":"(c_mul((vec2(abs((zc).x), 0.0) - c_mul(vec2(0.0, 1.0), vec2(abs((zc).y), 0.0))), (vec2(abs((zc).x), 0.0) - c_mul(vec2(0.0, 1.0), vec2(abs((zc).y), 0.0)))) + vec2(x, y))","seed":"zero","maxIter":250,"color":[0.176,0.439,0.702]}]},"env":{},"view":{"ratio":1,"cx":-0.35,"cy":0.35,"upp":0.002583333333333333}}
