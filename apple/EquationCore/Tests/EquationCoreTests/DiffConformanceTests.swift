@@ -42,7 +42,7 @@ import Testing
 
 /// The fixture writes every number as text, since JSONSerialization reads
 /// some doubles an ulp off; this puts the exact doubles back, for `decode`.
-private func exactNumbers(_ json: Any) -> Any {
+func exactNumbers(_ json: Any) -> Any {
   if let list = json as? [Any] { return list.map(exactNumbers) }
   guard var object = json as? [String: Any] else { return json }
   if object["kind"] as? String == "num", let text = object["value"] as? String {
