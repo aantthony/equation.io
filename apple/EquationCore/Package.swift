@@ -21,6 +21,10 @@ let package = Package(
       dependencies: ["EquationCore"],
       resources: [.copy("Fixtures")]
     ),
-    .testTarget(name: "EquationRenderTests", dependencies: ["EquationCore", "EquationRender"]),
+    .testTarget(
+      name: "EquationRenderTests",
+      dependencies: ["EquationCore", "EquationRender"],
+      resources: [.copy("Scenes")]
+    ),
   ]
 )
