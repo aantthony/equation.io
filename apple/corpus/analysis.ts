@@ -55,6 +55,7 @@ import { LEFTOVER_CASES, recordData } from './cases-leftovers.ts';
 import { SAMPLED_CASES } from './cases-sampled.ts';
 import * as planeMap from '../../lib/plane-map.ts';
 import { PLANE_CASES, recordPlanes } from './cases-planes.ts';
+import { MEASURE_CASES } from './cases-measure.ts';
 
 const fixtures = new URL('../EquationCore/Tests/EquationCoreTests/Fixtures/', import.meta.url);
 
@@ -1106,6 +1107,7 @@ LEFTOVER_CASES.forEach((text, k) => docs.push({ name: `case leftover ${k + 1}`, 
 INTERVAL_CASES.forEach((text, k) => docs.push({ name: `case intervals ${k + 1}`, rows: splitStatements(text) }));
 SAMPLED_CASES.forEach((text, k) => docs.push({ name: `case sampled ${k + 1}`, rows: splitStatements(text) }));
 PLANE_CASES.forEach((text, k) => docs.push({ name: `case planes ${k + 1}`, rows: splitStatements(text) }));
+MEASURE_CASES.forEach((text, k) => docs.push({ name: `case measure ${k + 1}`, rows: splitStatements(text) }));
 randomDocs(Number(process.env.RANDOM_DOCS ?? 600)).forEach((text, k) =>
   docs.push({ name: `case random ${k + 1}`, rows: splitStatements(text) }),
 );
