@@ -96,7 +96,9 @@ import Testing
   }
 
   @Test func whatIsNotPortedSaysSo() {
-    let rows = ["L = [1, 2, 3]", "z = x^2 + y^2", "X ~ Normal(0, 1)", "s_{n+1} = push(s_n, n)", "int[0..1] x dx", "(u, u, u)"]
+    let rows = [
+      "L = [1, 2, 3]", "z = x^2 + y^2", "X ~ Normal(0, 1)", "s_{n+1} = push(s_n, n)", "int[0..1] x dx", "(u, u, u)",
+    ]
     for text in rows {
       let row = analyze([text]).rows[0]
       #expect(row.unsupported != nil, "\(text)")

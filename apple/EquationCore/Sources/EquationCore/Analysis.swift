@@ -680,7 +680,9 @@ public func analyze(_ sources: [String]) -> DocumentAnalysis {
       }
       // Whole-number sliders step one at a time; otherwise a round step
       // (1, 2 or 5 × 10^k), so round values sit on it.
-      row.slider = Slider(min: lo, max: hi, step: form.whole || boundConsts.names.contains(name) ? 1 : niceSpacing((hi - lo) / 400, 1).major, value: value)
+      // (A slider that is a Σ/Π bound, or the index a term is read at, steps so too.)
+      let whole = form.whole || boundConsts.names.contains(name)
+      row.slider = Slider(min: lo, max: hi, step: whole ? 1 : niceSpacing((hi - lo) / 400, 1).major, value: value)
     }
   }
   // The constants once more: a recurrence's chain of terms is among them now.

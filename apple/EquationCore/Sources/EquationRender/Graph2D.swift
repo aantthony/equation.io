@@ -109,11 +109,12 @@ public struct Graph2D: Equatable, Sendable {
 
   /// What is drawn over the shader passes at a time: the rows the CPU
   /// evaluates (points, parametric curves). `bounds` is the part of the
-  /// plane in view, which a sequence's dots, a cobweb and an integral's area
-  /// are drawn over (without it, over the window a 1000-pixel square frame
-  /// opens on); `theme` gives a cobweb's diagonal its color.
+  /// plane in view, which a sequence's dots and a cobweb's diagonal are
+  /// drawn over; `theme` gives that diagonal its color. Without bounds they
+  /// are drawn over a window wide enough for most: a sequence's first 4000
+  /// terms, one dot each as the site draws them in any window narrower.
   public func overlay(at time: Double, bounds: Bounds? = nil, theme: GraphTheme = .light) -> Overlay2D {
-    let bounds = bounds ?? Bounds(view: opening(width: 1000, height: 1000), width: 1000, height: 1000)
+    let bounds = bounds ?? Bounds(xmin: -4000, xmax: 3999, ymin: -4000, ymax: 4000)
     var env = environment(at: time)
     env["t"] = time
     var overlay = Overlay2D()

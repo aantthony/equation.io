@@ -166,7 +166,9 @@ private func unrollSum(_ e: Expr) -> Expr? {
 }
 
 /// Resolve a lattice row's expression with `own` left open (`resolveCells`).
-private func resolveCells(_ e: Expr, _ own: Set<String>, _ getFn: @escaping GetFn, _ ropts: ResolveOpts) throws -> Expr {
+private func resolveCells(
+  _ e: Expr, _ own: Set<String>, _ getFn: @escaping GetFn, _ ropts: ResolveOpts
+) throws -> Expr {
   var opts = ropts
   opts.openVars.formUnion(own)
   // Cells are whole numbers, so a case may test equality: {s = 3: 1, 0},
