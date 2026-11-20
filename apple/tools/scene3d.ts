@@ -24,7 +24,7 @@ import { buildTube, curveFrames } from '../../lib/curve3d.ts';
 import { type Expr, evaluate } from '../../lib/expr.ts';
 import { fanFillable, vertexSampler } from '../../lib/figure-vertices.ts';
 import { traceField } from '../../lib/flow.ts';
-import { toGLSL } from '../../lib/glsl.ts';
+import { GLSL_PRELUDE, toGLSL, withHelpers } from '../../lib/glsl.ts';
 import { hullGeometrySampler } from '../../lib/hull-geometry.ts';
 import { traceIntersection } from '../../lib/intersection.ts';
 import { DARK_PALETTE, LIGHT_PALETTE, takesColor } from '../../lib/palette.ts';
@@ -289,8 +289,15 @@ rows.forEach((row, index) => {
   draw(row.cpu, row.gpu, color, index, text, point ? row.def?.name : undefined);
 });
 
+// The loop helpers the shaders name (recursive functions, Fourier sums), as
+// the page splices them into a shader, their tables written as constants.
+const MARK = '\n// the scene\n';
+const shaders = JSON.stringify(scene, (_, value) => (ArrayBuffer.isView(value) ? undefined : value));
+const linked = withHelpers(GLSL_PRELUDE + MARK + shaders, 0);
+const helpers = linked.slice(GLSL_PRELUDE.length, linked.indexOf(MARK)).trim() || undefined;
+
 // JSON has no NaN; the Swift decoder reads the string.
-const json = JSON.stringify({ camera, scene, env: constEnv, time }, (_, value) => {
+const json = JSON.stringify({ camera, scene, env: constEnv, time, helpers }, (_, value) => {
   // A float's nine digits, not the seventeen of the double it widens to.
   if (value instanceof Float32Array)
     return Array.from(value, v => (Number.isNaN(v) ? 'NaN' : Number(v.toPrecision(9))));

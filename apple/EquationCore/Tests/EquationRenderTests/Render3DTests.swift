@@ -39,7 +39,7 @@ private func difference(_ a: CGImage, _ b: CGImage) -> Double {
 @Suite struct Render3D {
   /// Each fixture compiles every shader it asks for, and draws something
   /// over the empty scene's axes and grid, in both themes.
-  @Test(arguments: ["surfaces", "torus", "figures", "cloud", "flow", "globe"])
+  @Test(arguments: ["surfaces", "torus", "figures", "cloud", "flow", "globe", "bulb"])
   func sceneDraws(_ name: String) throws {
     let metal = try #require(MetalContext())
     let graph = try fixture(name)
@@ -58,7 +58,7 @@ private func difference(_ a: CGImage, _ b: CGImage) -> Double {
 
   /// Every layer a scene can hold is in some fixture, so `sceneDraws` compiles every shader.
   @Test func fixturesCoverTheLayers() throws {
-    let scenes = try ["surfaces", "torus", "figures", "cloud", "flow", "globe"].map { try fixture($0).scene }
+    let scenes = try ["surfaces", "torus", "figures", "cloud", "flow", "globe", "bulb"].map { try fixture($0).scene }
     #expect(scenes.contains { !$0.implicits.isEmpty })
     #expect(scenes.contains { !$0.psurfaces.isEmpty })
     #expect(scenes.contains { !$0.tubes.isEmpty })

@@ -63,6 +63,11 @@ public final class Renderer3D {
   /// own frames, only for the next move to discard it. A picture drawn all
   /// at once sets it to 0.
   public var rest = 0.15
+  /// The GLSL of the loop helpers the scenes' shaders name (see ProgramCache3D).
+  public var helpers: String {
+    get { cache.helpers }
+    set { cache.helpers = newValue }
+  }
   /// Shaders compiled since the renderer was made (web/gl.ts `glStats`).
   public var compiles: Int { cache.compiles }
   /// How many of them didn't compile, and so draw nothing.

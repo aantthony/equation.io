@@ -1,3 +1,4 @@
+import EquationCore
 import Foundation
 import Metal
 
@@ -176,7 +177,19 @@ final class ProgramCache3D {
     self.metal = metal
   }
 
-  func get(_ vert: String, _ frag: String) -> Program3D? {
+  /// The declarations of the loop helpers (`eq_loop_…`: recursive functions,
+  /// Fourier sums) the fragment shaders name. The site keeps a registry the
+  /// language fills as it compiles a row, and splices the ones a shader
+  /// names in after the prelude (lib/glsl.ts `withHelpers`); until the
+  /// language's Swift port declares helpers, whoever builds the scene hands
+  /// their GLSL over with it.
+  var helpers = ""
+
+  func get(_ vert: String, _ fragment: String) -> Program3D? {
+    var frag = fragment
+    if frag.contains("eq_loop_"), !helpers.isEmpty {
+      frag.replace(glslPrelude, with: "\(glslPrelude)\n\(helpers)\n", maxReplacements: 1)
+    }
     let key = vert + "\0" + frag
     if let cached = map[key] { return cached }
     // Bound the cache; old programs are cheap to rebuild.

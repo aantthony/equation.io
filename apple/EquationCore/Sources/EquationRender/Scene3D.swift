@@ -16,16 +16,20 @@ public struct Graph3D: Equatable, Codable, Sendable {
   public var frame: Frame2D?
   /// Seconds since the graph opened.
   public var time: Double?
+  /// The GLSL of the loop helpers (`eq_loop_…`) the scene's shaders name:
+  /// see `Renderer3D.helpers`.
+  public var helpers: String?
 
   public init(
     scene: Scene3D = Scene3D(), camera: Camera3D? = nil, env: [String: Double]? = nil, frame: Frame2D? = nil,
-    time: Double? = nil
+    time: Double? = nil, helpers: String? = nil
   ) {
     self.scene = scene
     self.camera = camera
     self.env = env
     self.frame = frame
     self.time = time
+    self.helpers = helpers
   }
 
   /// A graph from JSON. A vertex that lifts the pen is the string "NaN"
@@ -50,6 +54,7 @@ extension MetalContext {
     let renderer = renderer ?? Renderer3D(self)
     let rest = renderer.rest
     defer { renderer.rest = rest }
+    if let helpers = graph.helpers { renderer.helpers = helpers }
     // Nothing moves between this picture's frames, so none of them waits.
     renderer.rest = 0
     let camera = graph.camera ?? Camera3D()
