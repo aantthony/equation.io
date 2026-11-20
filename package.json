@@ -34,7 +34,8 @@
     "swift:test": "pnpm swift:corpus && pnpm swift:lookups && pnpm swift:highlight && pnpm swift:diff-corpus && pnpm swift:solve-corpus && pnpm swift:analysis && swift test --package-path apple/EquationCore",
     "app:data": "node --experimental-transform-types --no-warnings apple/tools/app-data.ts",
     "reference": "node --experimental-transform-types --no-warnings scripts/reference.ts",
-    "app:eval": "mkdir -p apple/evals/.build && swiftc -swift-version 6 -O -parse-as-library apple/Equation/Sources/Assistant.swift apple/Equation/Sources/Instructions.swift apple/evals/Runner.swift -o apple/evals/.build/runner && apple/evals/.build/runner"
+    "app:eval": "mkdir -p apple/evals/.build && swiftc -swift-version 6 -O -parse-as-library apple/Equation/Sources/Assistant.swift apple/Equation/Sources/Instructions.swift apple/evals/Runner.swift -o apple/evals/.build/runner && apple/evals/.build/runner",
+    "app:eval:pcc": "xcodegen -q -s apple/Equation/project.yml && xcodebuild -quiet -project apple/Equation/Equation.xcodeproj -scheme EquationEvals -destination platform=macOS -configuration Release -derivedDataPath apple/evals/.build/dd -allowProvisioningUpdates build && apple/evals/.build/dd/Build/Products/Release/EquationEvals.app/Contents/MacOS/EquationEvals --model pcc"
   },
   "private": true,
   "license": "MIT",

@@ -11,6 +11,7 @@ import FoundationModels
 //   pnpm app:eval --runs 1 --task unit-cube --task slider-amplitude
 //   pnpm app:eval --sampling greedy        # as the app answers (ChatModel.options); default: sampled
 //
+//   pnpm app:eval:pcc                     # Apple's server model on Private Cloud Compute (a signed build)
 //   pnpm app:eval --model openai          # a hosted baseline (gpt-5.5; --openai-model to change)
 //   pnpm app:eval --model openai --reference web/public/llms.txt
 //                                          # the whole reference in its instructions, in place
@@ -191,14 +192,22 @@ enum Sampling: String {
   }
 }
 
-/// Apple's on-device model, as the app's Ask uses it (never Private Cloud Compute here).
+/// Apple's model, with the app's instructions and tools: the one on the
+/// device, or (`server`) the one on Private Cloud Compute, which needs the
+/// runner signed with the com.apple.developer.private-cloud-compute
+/// entitlement (pnpm app:eval:pcc builds it that way).
 struct OnDeviceModel: EvalModel {
-  let name = "on-device"
+  var server = false
+  var name: String { server ? "pcc" : "on-device" }
   var sampling = Sampling.default
 
   func respond(to prompt: String, graph: any GraphTools) async throws -> Turn {
-    let session = LanguageModelSession(
-      model: SystemLanguageModel.default, tools: cappedTools(graph), instructions: ChatModel.instructions)
+    let session =
+      server
+      ? LanguageModelSession(
+        model: PrivateCloudComputeLanguageModel(), tools: cappedTools(graph), instructions: ChatModel.instructions)
+      : LanguageModelSession(
+        model: SystemLanguageModel.default, tools: cappedTools(graph), instructions: ChatModel.instructions)
     var turn = Turn(reply: try await session.respond(to: prompt, options: sampling.options).content)
     // As the app does (Chat.swift): one follow-up, in the same session, if a row has an error.
     // The session's tools share one budget, so the call cap covers both requests.
@@ -357,6 +366,7 @@ struct OpenAIModel: EvalModel {
 enum ModelChoice: String {
   case onDevice = "on-device"
   case openAI = "openai"
+  case pcc
 
   func make(openAIModel: String, reference: String?, sampling: Sampling) throws -> any EvalModel {
     switch self {
@@ -364,6 +374,15 @@ enum ModelChoice: String {
       guard reference == nil else { throw RunnerError("the reference doesn't fit the on-device model's 8K context") }
       return OnDeviceModel(sampling: sampling)
     case .openAI: return OpenAIModel(model: openAIModel, key: try OpenAIModel.key(), reference: reference)
+    case .pcc:
+      guard reference == nil else { throw RunnerError("the reference is for the hosted baseline") }
+      let server = PrivateCloudComputeLanguageModel()
+      guard server.isAvailable else {
+        throw RunnerError(
+          "Private Cloud Compute is unavailable (\(server.availability)): the runner must be signed with the "
+            + "com.apple.developer.private-cloud-compute entitlement (pnpm app:eval:pcc)")
+      }
+      return OnDeviceModel(server: true, sampling: sampling)
     }
   }
 }
@@ -405,7 +424,7 @@ struct Runner {
         sampling = mode
       default:
         throw RunnerError(
-          "usage: runner [--runs N] [--task id]… [--model on-device|openai] [--openai-model id] [--reference llms.txt] [--sampling default|greedy]"
+          "usage: runner [--runs N] [--task id]… [--model on-device|pcc|openai] [--openai-model id] [--reference llms.txt] [--sampling default|greedy]"
         )
       }
     }
@@ -427,6 +446,10 @@ struct Runner {
       results["instructionsTokens"] = try? await system.tokenCount(for: Instructions(ChatModel.instructions))
       results["toolsTokens"] = try? await system.tokenCount(for: ChatModel.tools(graph))
       results["sampling"] = sampling.rawValue
+    }
+    if choice == .pcc {
+      results["sampling"] = sampling.rawValue
+      results["quotaBefore"] = "\(PrivateCloudComputeLanguageModel().quotaUsage)"
     }
 
     // Saved after every task, so a run cut short keeps what it finished ("partial": true until the end).

@@ -128,3 +128,4 @@ apple/EquationCore/Tests/EquationAssistTests/Fixtures/*.json
 apple/Equation/Data/
 apple/Equation/Equation.xcodeproj/
 apple/Equation/Sources/Info.plist
+apple/evals/Info.plist

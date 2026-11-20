@@ -74,3 +74,32 @@ targets:
         ENABLE_APP_SANDBOX: YES
         ENABLE_USER_SELECTED_FILES: readwrite
         ENABLE_OUTGOING_NETWORK_CONNECTIONS: YES
+  # The Ask evals' runner (apple/evals/Runner.swift) as a signed bundle, which
+  # is what the Private Cloud Compute entitlement needs; the on-device evals
+  # run a plain swiftc build (pnpm app:eval). Run from the repository root:
+  #   pnpm app:eval:pcc --runs 10
+  EquationEvals:
+    type: application
+    platform: macOS
+    deploymentTarget: "27.0"
+    sources:
+      - path: Sources/Assistant.swift
+      - path: Sources/Instructions.swift
+      - path: ../evals/Runner.swift
+    info:
+      path: ../evals/Info.plist
+      properties:
+        LSUIElement: true
+    entitlements:
+      path: ../evals/Evals.entitlements
+      properties:
+        com.apple.developer.private-cloud-compute: true
+    settings:
+      base:
+        # The app's own identifier: the Private Cloud Compute capability is enabled on it.
+        PRODUCT_BUNDLE_IDENTIFIER: io.equation.app
+        SWIFT_VERSION: "6.0"
+        CODE_SIGN_STYLE: Automatic
+        DEVELOPMENT_TEAM: 5X6237AEMK
+        ENABLE_APP_SANDBOX: NO
+        ENABLE_HARDENED_RUNTIME: YES
