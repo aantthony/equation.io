@@ -192,8 +192,15 @@ private func recover<T>(_ run: () throws -> T) throws -> T? {
 func lowerObjects(_ e: Expr, _ defs: BuiltDefs, _ opts: ResolveOpts, named: Bool = false) throws -> Low {
   var e = e
   func plotVariable(_ v: String) -> Bool { ["x", "y", "z", "u", "v"].contains(v) || defs.fields.has(v) }
-  // Drawn over something continuous: a plot variable.
-  func continuous(_ e: Expr) -> Bool { freeVars(e).contains(where: plotVariable) }
+  // Drawn over something continuous: a plot variable, or an interval in a
+  // tuple, which traces as u does (Interval.swift) — so [(interval(0, 1),
+  // 1), …] is a family of segments, as [(u, 1), …] is of curves. (A bare
+  // interval is a number to draw the density of, and a list of them is not.)
+  func traced(_ e: Expr) -> Bool {
+    if case .vec = e, hasInterval(e) { return true }
+    return childrenOf(e).contains(where: traced)
+  }
+  func continuous(_ e: Expr) -> Bool { freeVars(e).contains(where: plotVariable) || traced(e) }
   let get = listGetter(defs)
   // (A named point's components, and a vector state's.)
   let comps = opts.comps
@@ -830,11 +837,13 @@ extension Resolver {
       if case .var(let name) = e, opts.isList(name) { return true }
       return childrenOf(e).contains(where: hasList)
     }
-    // Over x, u or a filter of them: an integral against a measure (Measure.swift).
+    // Over x, u, an interval or a filter of them: an integral against a measure (Measure.swift).
     let continuous = continuousNames(whole)
-    if !continuous.isEmpty && !whole.contains(where: hasList) {
+    let hidden = intervalsIn(.vec(whole))
+    if !(continuous.isEmpty && hidden.isEmpty) && !whole.contains(where: hasList) {
       return try reduceContinuous(
-        name, conds: conds, value: value, lone: !filtered && !conds.isEmpty && name != "count", names: continuous)
+        name, conds: conds, value: value, lone: !filtered && !conds.isEmpty && name != "count", names: continuous,
+        hidden: hidden)
     }
     if barePiecewise(raw) != nil { arg = try resolve(raw) }
     // A tuple literal spreads into arguments, as legacyCallArgs does.

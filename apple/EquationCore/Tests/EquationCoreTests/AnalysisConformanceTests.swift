@@ -273,6 +273,10 @@ import Testing
       case .ineq2d(let field, let edges):
         same("field", field, gpu["field"])
         sameList("edges", edges, gpu["edges"])
+      case .projected2d(let relation, let field, let slope):
+        check("gpu\(at) relation", relation.rawValue, gpu["relation"] as? String)
+        same("field", field, gpu["field"])
+        same("slope", slope, gpu["slope"])
       case .scalar2d(let field):
         same("field", field, gpu["field"])
       case .vfield2d(let fx, let fy):
@@ -338,6 +342,12 @@ import Testing
       return .implicit2d(residual: try expr("residual"), equation: try expr("equation"), levels: levels)
     case "ineq2d":
       return .ineq2d(
+        constraints: try (o["constraints"] as! [[String: Any]]).map {
+          Constraint(residual: try decode($0["residual"]!), strict: $0["strict"] as! Bool)
+        })
+    case "projected2d":
+      return .projected2d(
+        relation: ProjectedRelation(rawValue: o["relation"] as! String)!,
         constraints: try (o["constraints"] as! [[String: Any]]).map {
           Constraint(residual: try decode($0["residual"]!), strict: $0["strict"] as! Bool)
         })
@@ -437,9 +447,10 @@ import Testing
     case "pregion": return .pregion(comps: try exprs("comps"))
     case "psurface": return .psurface(comps: try exprs("comps"), paint: try o["paint"].map { try decode($0) })
     case "density", "pmf":
-      if o["mass"] != nil { throw FixtureError(description: "a density scaled by its intervals' length") }
+      // (Scaled by its intervals' length.)
+      let mass = try o["mass"].map { try decode($0) }
       let rv = o["rv"] as! String
-      return o["type"] as! String == "pmf" ? .pmf(rv: rv, mass: nil) : .density(rv: rv, mass: nil)
+      return o["type"] as! String == "pmf" ? .pmf(rv: rv, mass: mass) : .density(rv: rv, mass: mass)
     case "expect": return .expect(rv: o["rv"] as! String)
     case "prob":
       let shade = try (o["shade"] as? [String: Any]).map { s in

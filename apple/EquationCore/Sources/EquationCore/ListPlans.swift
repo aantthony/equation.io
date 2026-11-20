@@ -231,7 +231,7 @@ func classifyFamily(_ members: [Expr], defined: Set<String>, fields: [String: Ex
     throw LanguageError(
       "A family of scalar fields cannot be drawn — for curves write y = …, or pick one member, like L[k].")
   }
-  if first == "solid" {
+  if classified[0].solid != nil {
     throw LanguageError("A list of solids cannot be drawn yet — write each solid on a row of its own.")
   }
   if first == "scalar3d" {

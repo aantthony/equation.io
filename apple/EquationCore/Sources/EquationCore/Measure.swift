@@ -1,8 +1,8 @@
 /// Reductions over continuous multisets (lib/measure.ts; docs/multisets.md
 /// §5, "Multiplicity becomes measure").
 ///
-/// `x`, `y`, `z` (all reals) and `u`, `v` ([0, 1]) are infinite multisets
-/// whose multiplicity is length. A reduction over them is an integral against
+/// `x`, `y`, `z` (all reals), `u`, `v` ([0, 1]) and each `interval(a, b)` are
+/// infinite multisets whose multiplicity is length. A reduction over them is an integral against
 /// that measure: `count` is the measure, `total` the integral, `mean` their
 /// ratio. A filter keeps a subset and measures it with the geometric measure
 /// of its dimension.
@@ -21,8 +21,7 @@
 ///   quadtree over interval enclosures of lib/certify.ts, marching squares
 ///   and certified root counting). Any other filter in one or two
 ///   coordinates — a region (`x^2 + y^2 < 1`), an implicit curve, points —
-///   says it is not supported yet. So does `interval(a, b)`, which the
-///   resolver does not read.
+///   says it is not supported yet.
 
 private func num(_ value: Double) -> Expr { .num(value) }
 private func vr(_ name: String) -> Expr { .var(name) }
@@ -447,17 +446,19 @@ extension Resolver {
   /// `name` over the continuous set `conds` keep of `value` (lib/measure.ts
   /// `reduceOverSet`, from where the set is known to be continuous). `lone`:
   /// the argument was one comparison, whose kept members are the values.
-  func reduceContinuous(_ name: String, conds: [Expr], value written: Expr, lone: Bool, names: [String]) throws
-    -> Expr
-  {
-    var value = written
+  /// `hidden`: the intervals the set ranges over, each a coordinate over its
+  /// bounds (Interval.swift).
+  func reduceContinuous(
+    _ name: String, conds written: [Expr], value: Expr, lone: Bool, names: [String], hidden: [HiddenInterval] = []
+  ) throws -> Expr {
+    var (conds, value) = (written, value)
     if lone {
-      // One coordinate: its kept members are numbers.
-      if names.count != 1 {
+      // One coordinate, x or an interval: its kept members are numbers.
+      if names.count + hidden.count != 1 {
         throw LanguageError(
           "The members of this filter are points, and \(name)(…) needs numbers — for its size, use count(…).")
       }
-      value = vr(names[0])
+      value = names.first.map(vr) ?? hidden[0].node
     }
     if name == "stdev" || name == "median" || name == "hist" {
       throw LanguageError(
@@ -468,6 +469,13 @@ extension Resolver {
     for n in CONTINUOUS where names.contains(n) {
       let geometric = GEOMETRIC.contains(n)
       coords.append(Coord(name: n, lo: geometric ? NEG_INF : num(0), hi: geometric ? INF : num(1), geometric: geometric))
+    }
+    for (k, h) in hidden.enumerated() { coords.append(Coord(name: "@iv\(k)", lo: h.lo, hi: h.hi, geometric: false)) }
+    if !hidden.isEmpty {
+      var byKey: [String: Expr] = [:]
+      for (k, h) in hidden.enumerated() { byKey[h.key] = vr("@iv\(k)") }
+      conds = conds.map { c in replaceIntervals(c) { byKey[$0.key]! } }
+      value = replaceIntervals(value) { byKey[$0.key]! }
     }
     let cs = try conds.flatMap(comparisons)
     return try reduceMeasure(name, cs, value, coords)

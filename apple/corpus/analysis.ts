@@ -48,6 +48,7 @@ import { DEFINE_CASES } from './cases-define.ts';
 import { DISCRETE_CASES } from './cases-discrete.ts';
 import { FITS_CASES } from './cases-fits.ts';
 import { INTEGRAL_CASES } from './cases-integrals.ts';
+import { INTERVAL_CASES } from './cases-intervals.ts';
 import { PANEL_CASES, recordGridFields, recordStates } from './cases-panels.ts';
 import { SURFACE_CASES } from './cases-surfaces.ts';
 import { LEFTOVER_CASES, recordData } from './cases-leftovers.ts';
@@ -108,6 +109,8 @@ for (const type of ['implicit3d', 'scalar3d', 'spacecurve', 'system', 'vfield3d'
 for (const type of ['density', 'pmf', 'expect', 'prob']) PORTED.add(type);
 // Lists and families (Lists.swift, ObjectLists.swift, ListPlans.swift).
 for (const type of ['vlist', 'plist', 'dlist', 'dscatter', 'histogram', 'family']) PORTED.add(type);
+// A family over an interval (ClassifyIntervals.swift).
+PORTED.add('projected2d');
 // Geodesics of a surface (Geodesic.swift).
 PORTED.add('geodesic');
 function slim(plan: { type: string } | undefined): unknown {
@@ -1087,6 +1090,7 @@ INTEGRAL_CASES.forEach((text, k) => docs.push({ name: `case integral ${k + 1}`, 
 SURFACE_CASES.forEach((text, k) => docs.push({ name: `case surfaces ${k + 1}`, rows: splitStatements(text) }));
 DEFINE_CASES.forEach((text, k) => docs.push({ name: `case define ${k + 1}`, rows: splitStatements(text) }));
 LEFTOVER_CASES.forEach((text, k) => docs.push({ name: `case leftover ${k + 1}`, rows: splitStatements(text) }));
+INTERVAL_CASES.forEach((text, k) => docs.push({ name: `case intervals ${k + 1}`, rows: splitStatements(text) }));
 randomDocs(Number(process.env.RANDOM_DOCS ?? 600)).forEach((text, k) =>
   docs.push({ name: `case random ${k + 1}`, rows: splitStatements(text) }),
 );

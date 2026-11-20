@@ -12,9 +12,6 @@
 ///   w  = k × r′                  (in the plane, k (−y′, x′))
 /// w is r″ with its part along r′ removed, scaled: the curvature vector
 /// K = κN = w/|r′|⁴. Nothing here tests whether the curve is straight.
-///
-/// Not ported: a curve over an interval (`u = interval(0, 2pi)`), as
-/// intervals are not.
 
 /// The operators on a parametric curve in u (`CURVE_OPS`).
 let curveOps: Set<String> = ["curvature", "torsion", "osculating", "frame"]
@@ -135,22 +132,34 @@ func frameOf(_ r: [Expr], _ d: AlongU, _ u0: Expr) throws -> Expr {
 extension Resolver {
   /// What a curve operator acts on, as its components in u: a tuple, a named
   /// curve (c = (cos(2pi u), sin(2pi u)), written out through any scalar it
-  /// uses), or a function of one parameter, called at u (`curveOperand`).
-  private func curveOperand(_ name: String, _ arg: Expr) throws -> [Expr] {
+  /// uses), or a function of one parameter, called at u (`curveOperand`). A
+  /// curve over one interval instead (`u = interval(0, 2pi)` above, or
+  /// `s = interval(…)`) is read over that interval's own values, written as
+  /// u; `over` is the interval, to put back where the result is a function
+  /// along the curve.
+  private func curveOperand(_ name: String, _ arg: Expr) throws -> (items: [Expr], over: Expr?) {
     let usage =
       "\(name) takes a parametric curve in u, like \(curveOpExample[name]!) with C = (cos(2pi u), sin(2pi u))."
-    // Port: a curve over u's own interval is read at that interval's values.
-    if opts.interval("u") != nil { throw Unsupported("interval(…)") }
+    // Port: where an interval is not read (Interval.swift), neither is u's.
+    let uInterval = opts.interval("u")
+    if uInterval != nil, !opts.intervals { throw Unsupported("interval(…)") }
     var r = arg
     if case .var(let fname) = arg, let fn = try getFn(fname) {
       if fn.params.count != 1 || fn.recursive { throw LanguageError(usage) }
-      r = substVars(fn.body, [fn.params[0]: .var("u")])
+      r = substVars(fn.body, [fn.params[0]: uInterval ?? .var("u")])
     }
     r = try lowerGeom(r, comps: opts.comps, isList: opts.isList)
     // (A named field over x, y or z is written out too, to be refused.)
     r = throughFields(r, over: ["u", "x", "y", "z"])
-    // Port: nor is the one interval of a curve without u put back for u.
-    if !intervalsIn(r).isEmpty { throw Unsupported("interval(…)") }
+    // The interval the curve runs along, read at its own values as u: u's own
+    // (`u = interval(0, 2pi)`), or else the one interval of a curve without u.
+    // Any other interval stays, a family of curves.
+    let hidden = intervalsIn(r)
+    if !hidden.isEmpty, !opts.intervals { throw Unsupported("interval(…)") }
+    let uKey = uInterval.map(exprKey)
+    let along =
+      hidden.first { $0.key == uKey } ?? (hidden.count == 1 && !freeVars(r).contains("u") ? hidden[0] : nil)
+    if let along { r = replaceIntervals(r) { $0.key == along.key ? .var("u") : $0.node } }
     if case .var = r, case .var(let n) = arg {
       let what = opts.consts(n) != nil ? "a number" : opts.isList(n) ? "a list" : nil
       if let what { throw LanguageError("\(name): \(n) is \(what), not a curve in u. \(usage)") }
@@ -165,7 +174,7 @@ extension Resolver {
       throw LanguageError("\(name) needs a curve, which moves with u — this is a fixed point. \(usage)")
     }
     if vars.contains("v") || vars.contains(where: spaceNames.contains) { throw LanguageError(usage) }
-    return items
+    return (items, along?.node)
   }
 
   /// Whether e is a list: a literal, a data column or a named list, or one
@@ -196,7 +205,7 @@ extension Resolver {
           ? "\(name) takes a curve and where on it: \(example)."
           : "\(name) takes a curve, and optionally where on it: \(example).")
     }
-    let r = try curveOperand(name, args[0])
+    let (r, over) = try curveOperand(name, args[0])
     let u0 = args.count > 1 ? args[1] : nil
     // κ(u) and τ(u) are functions of u, so k(u) = curvature(C, u) is κ; the
     // circle and frame are drawn over u of their own, which a u0 in u would
@@ -223,6 +232,7 @@ extension Resolver {
     if name == "osculating" { return try osculatingOf(r, d, u0!) }
     if name == "frame" { return try frameOf(r, d, u0!) }
     let along = name == "curvature" ? try curvatureOf(r, d) : try torsionOf(r, d)
-    return u0.map { substVars(along, ["u": $0]) } ?? along
+    if let u0 { return substVars(along, ["u": u0]) }
+    return over.map { substVars(along, ["u": $0]) } ?? along
   }
 }

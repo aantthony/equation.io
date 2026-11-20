@@ -60,6 +60,7 @@ public struct Graph2D: Equatable, Sendable {
     animated = !analysis.animated.isEmpty
     var vfields: [VField2D] = []
     var ineqs: [Ineq2D] = []
+    var projections: [Projected2D] = []
     var scalars: [Scalar2D] = []
     var curves: [Curve2D] = []
     var complexLayers = ComplexLayers()
@@ -89,11 +90,15 @@ public struct Graph2D: Equatable, Sendable {
       case .family(let members):
         // One layer per member (Graph2D+Lists.swift).
         Self.addFamily(members, color: color, curves: &curves, ineqs: &ineqs, vfields: &vfields)
+        Self.addProjections(members, color: color, into: &projections)
       case .implicit2d(let field, _):
         let graphEval = gpu.graphEval.map { Curve2D.GraphEval(glsl: $0.glsl, slopeScale: $0.slopeScale) }
         curves.append(Curve2D(field: field, graphEval: graphEval, color: color, params: gpu.params))
       case .ineq2d(let field, let edges):
         ineqs.append(Ineq2D(field: field, color: color, params: gpu.params, edges: edges))
+      case .projected2d:
+        // A family over an interval, searched along u per pixel (Graph2D+Intervals.swift).
+        Self.addProjections([gpu], color: color, into: &projections)
       case .scalar2d(let field):
         scalars.append(Scalar2D(field: field, color: color, params: gpu.params))
       case .vfield2d(let fx, let fy):
@@ -122,6 +127,7 @@ public struct Graph2D: Equatable, Sendable {
     complexLayers.write(to: &layers)
     if !tfields.isEmpty { layers.tfields = tfields }
     if !bifs.isEmpty { layers.bifs = bifs }
+    if !projections.isEmpty { layers.projections = projections }
     lattice = Self.latticeAxes(analysis)
     if let lattice, let written, let asked = window {
       let oriented = Self.orientLattice(x: asked.x, y: asked.y, written: written, axes: lattice)

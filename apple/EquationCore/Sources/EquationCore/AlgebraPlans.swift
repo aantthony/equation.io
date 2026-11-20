@@ -9,7 +9,7 @@ extension Classified {
   /// a list.
   var rowKind: String {
     switch readout {
-    case nil: object.publicKind
+    case nil: solid != nil ? "solid" : object.publicKind
     case .flat: "flat"
     case .blades: "multivector"
     default: "action"
