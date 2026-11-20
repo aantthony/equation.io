@@ -47,6 +47,13 @@ export const REST_CASES: string[] = [
   'a_{n+1} = 2 a_n; b_n = a_n + 1; b_3; c_{n+1} = c_n + a_n; s_n = sum(k=0..n, a_k); s_3; b_[1..3]; c_4',
   'a_n = [1, 2, 3][n]; b_n = mean([n, 2n]); c_{n+1} = [1, 2][1] c_n; L = [3, 1, 2]; d_n = L[n]; e_n = n count(L)',
   'L = [3, 1, 4, 1, 5]; b_0 = 0; b_{n+1} = b_n + L[n + 1]; b_3; b_5; b_6; b_9; T = sort(L); c_{n+1} = c_n T[n + 1]; c_2',
+  // The derivative of a list: a named one is a constant to x, y and z; one written out goes item by item.
+  'N = [1..4]; y = d/dx x^N; y = d/dx [x, x^2, sin(x)]; L = [1, 2]; y = d/dx (L x); d/dt L; a = 2; d/da (L a)',
+  'N = [1..3]; y = d^2/dx^2 x^N; y = d/dx [1..3]; d/du (N u); x = d/dy (y^N); d/dx (N x y); d/dz (N z); y = d/dx floor(N x)',
+  'L = [1, 2]; grad(L x y); div((L x, y)); f(x) = x^L; y = d/dx f(x); g = x^L; d/dx g; hessian(L x^2); laplacian(L x^2)',
+  'y = d/dx (x^[1, 2]); y = d/dx ([x, 2x] [1, 2]); y = d/dx ([x, 2x]^2); y = d^2/dx^2 [x^2, x^3]; y = d/dx (2^[x, 2x])',
+  'f(a) = d/dx (a x^2 + a); y = f([1, 2]); g(a) = a + d/dx (a x); y = g([1, 2]); y = d/dx sum(n=1..2, [1, 2] x^n)',
+  'a_n = n^2; y = d/dx (x a_[1..3]); y = d/dx (x^[1, 2] + [x, 1]); P = [(1, 2), (3, 4)]; d/dx (P.x x); y = d/dx (x P)',
 ];
 
 /** What web/scene.ts draws of a graph's plan, from lib/graph.ts: its vertices, its arrows as they read, and

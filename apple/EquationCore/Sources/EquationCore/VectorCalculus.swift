@@ -118,7 +118,8 @@ extension Resolver {
     if args.count != 1 { throw LanguageError("\(name) takes one expression: \(example).") }
     let f = try vectorOperand(name, args[0])
     var components: [Expr]?
-    switch f {
+    // (A list the resolver has met carries its identity: `listLiteral`.)
+    switch listLiteral(f).map({ Expr.list($0.items) }) ?? f {
     case .list, .eq, .ineq:
       let what = name == "div" || name == "curl" ? "a vector field" : "a scalar expression"
       throw LanguageError("\(name) needs \(what), like \(example).")

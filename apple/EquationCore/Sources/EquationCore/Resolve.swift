@@ -165,8 +165,8 @@ struct Resolver {
   private static let fdH = 1e-4
 
   func applyDiff(_ operand: Expr, _ v: String, _ order: Int) throws -> Expr {
-    try refuseListDerivative(operand)
     var e = throughFields(operand)
+    try refuseListDerivative(e, v)
     // A component that does not exist — F_1 of a function F, G_1 of a point
     // whose components are G_x, G_y — would differentiate to 0.
     for name in freeVars(e) {
@@ -174,7 +174,7 @@ struct Resolver {
       // /^(.+)_[^_]+$/: the base before the last underscore.
       guard let cut = u.lastIndex(of: unit("_")), cut > 0, cut < u.count - 1 else { continue }
       let base = String(u[..<cut])
-      if opts.definition(name) != nil { continue }
+      if opts.definition(name) != nil || opts.isList(name) { continue }
       let comps = opts.comps(base)
       if let comps, !comps.contains(name) {
         throw LanguageError(

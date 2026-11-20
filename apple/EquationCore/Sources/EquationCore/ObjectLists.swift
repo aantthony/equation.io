@@ -1017,11 +1017,18 @@ extension Resolver {
     return settledNode(Low(.list(items), namedAxes(listName, seq.own)))
   }
 
-  /// What a derivative cannot reach yet: the site differentiates a list
-  /// literal item by item, and refuses a named one.
-  func refuseListDerivative(_ e: Expr) throws {
-    if holdsList(e) || freeVars(e).contains(where: opts.isList) {
-      throw Unsupported("the derivative of a list")
+  /// A list is still just a name when a derivative is taken, and `diff`
+  /// treats an unknown name as a constant: so differentiating one would
+  /// answer 0 for every element. Elements may only use constants, states and
+  /// t, so that is right for x, y and z (d/dx x^N with N a list) and wrong
+  /// for the rest, which says so (lib/defs.ts `applyDiff`). A list written
+  /// out is differentiated item by item (Diff.swift).
+  func refuseListDerivative(_ e: Expr, _ v: String) throws {
+    if ["x", "y", "z"].contains(v) { return }
+    if let list = freeVars(e).first(where: opts.isList) {
+      throw LanguageError(
+        "\(list) is a list, and d/d\(v) cannot differentiate one"
+          + " — write the derivative of its elements, like [d/d\(v) f(\(v)), …].")
     }
   }
 }

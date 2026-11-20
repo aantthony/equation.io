@@ -149,6 +149,14 @@ public func diff(_ e: Expr, _ v: String) throws(DiffError) -> Expr {
   case .call(let name, let args):
     // A continuous interval's parameter varies on its own, not with x.
     if name == INTERVAL { return ZERO }
+    // A list with its origin or its axes (Expr.swift): elementwise, and
+    // still the same list (lib/expr.ts `sameList`). One with neither is a
+    // new list, as the node the TypeScript builds for it is: d/dx [x, 2x]^2
+    // chooses [x, 2x] and [1, 2] apart.
+    if name == LIST_ORIGIN || name == LIST_SEQ, args.count == 2 {
+      return .call(name, [args[0], try diff(args[1], v)])
+    }
+    if name == LIST_ID, args.count == 2, case .list(let items) = try diff(args[1], v) { return identifiedList(items) }
     if name == "atan2" || (name == "atan" && args.count == 2) {
       // Fewer than two arguments is the TypeScript reading `undefined.kind`.
       guard args.count >= 2 else { throw DiffError("Cannot read properties of undefined (reading 'kind')") }
