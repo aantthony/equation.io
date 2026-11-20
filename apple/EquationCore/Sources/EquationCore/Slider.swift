@@ -172,12 +172,14 @@ func formatSliderNumber(_ v: Double) -> String {
   JS.string(JS.number(JS.toPrecision(v, 6)))
 }
 
-/// A "nice" spacing (1, 2, or 5 × 10^k) at least `minPx` pixels apart
-/// (web/render2d.ts `niceSpacing`, its major step).
-func niceSpacing(_ upp: Double, _ minPx: Double) -> Double {
+/// A "nice" spacing (1, 2, or 5 × 10^k) at least `minPx` pixels apart, and
+/// the finer one that divides it (web/render2d.ts `niceSpacing`): a grid's
+/// lines, and a slider's step.
+public func niceSpacing(_ upp: Double, _ minPx: Double) -> (major: Double, minor: Double) {
   let target = upp * minPx
-  let k = log10(target).rounded(.down)
-  let base = JS.pow(10, k)
-  for m in [1.0, 2, 5, 10] where m * base >= target { return m * base }
-  return 10 * base
+  let base = JS.pow(10, log10(target).rounded(.down))
+  for (m, div) in [(1.0, 5.0), (2, 4), (5, 5), (10, 5)] where m * base >= target {
+    return (m * base, m * base / div)
+  }
+  return (10 * base, 2 * base)
 }

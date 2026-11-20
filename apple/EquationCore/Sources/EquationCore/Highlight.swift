@@ -283,9 +283,6 @@ private func numberEnd(_ u: [UInt16], _ i: Int, _ end: Int) -> Int? {
 
 // MARK: - Sequences
 
-/// A sequence letter: one Latin or Greek letter (a_n, θ_n).
-private func isSequenceLetter(_ u: UInt16) -> Bool { isNameStart(u) && u != 0x5F }
-
 /// How a sequence row reads (lib/seq.ts `scanSeqRec`), as far as the names it binds go.
 private enum SequenceRow {
   /// `a_n = …` or the recurrence `a_{n+1} = …`.
@@ -300,13 +297,13 @@ private enum SequenceRow {
 private func scanSeqRec(_ u: [UInt16]) -> SequenceRow? {
   var c = RowScanner(u)
   c.space()
-  guard let letter = c.peek, isSequenceLetter(letter) else { return nil }
+  guard let letter = c.peek, isNameLetter(letter) else { return nil }
   c.i += 1
   let name = String(decoding: [letter], as: UTF16.self)
   /// One sequence letter, between optional spaces.
   func index(_ c: inout RowScanner) -> String? {
     c.space()
-    guard let p = c.peek, isSequenceLetter(p) else { return nil }
+    guard let p = c.peek, isNameLetter(p) else { return nil }
     c.i += 1
     c.space()
     return String(decoding: [p], as: UTF16.self)
@@ -360,7 +357,7 @@ private func scanSeqRec(_ u: [UInt16]) -> SequenceRow? {
     }
   } else if c.eat(0x30) {
     sub = .zero
-  } else if let p = c.peek, isSequenceLetter(p) {
+  } else if let p = c.peek, isNameLetter(p) {
     c.i += 1
     sub = .plain(String(decoding: [p], as: UTF16.self))
   }

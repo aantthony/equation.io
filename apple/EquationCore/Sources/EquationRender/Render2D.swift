@@ -157,16 +157,6 @@ public struct Frame2D: Equatable, Codable, Sendable {
   }
 }
 
-/// Pick a "nice" grid spacing (1, 2, or 5 × 10^k) at least minPx pixels apart.
-public func niceSpacing(_ upp: Double, _ minPx: Double) -> (major: Double, minor: Double) {
-  let target = upp * minPx
-  let base = pow(10, floor(log10(target)))
-  for (m, div) in [(1.0, 5.0), (2, 4), (5, 5), (10, 5)] where m * base >= target {
-    return (m * base, m * base / div)
-  }
-  return (10 * base, 2 * base)
-}
-
 public final class Renderer2D {
   public let metal: MetalContext
   /// Cell textures by the shade buffer they were uploaded from (Cells2D.swift).

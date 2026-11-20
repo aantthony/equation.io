@@ -146,7 +146,7 @@ func usesIndex(_ u: Units, _ index: String) -> Bool {
 private func sequenceLetter(_ text: String) -> String? {
   var s = RowScanner(text)
   s.space()
-  guard let c = s.peek, isASCIILetter(c) || greekNameChars.contains(c) else { return nil }
+  guard let c = s.peek, isNameLetter(c) else { return nil }
   let letter = String(s.u[s.i...s.i])
   s.i += 1
   func assigns(_ s: RowScanner) -> String? {
@@ -154,10 +154,7 @@ private func sequenceLetter(_ text: String) -> String? {
     t.space()
     return t.assignment()
   }
-  func isLetter(_ c: UInt16?) -> Bool {
-    guard let c else { return false }
-    return isASCIILetter(c) || greekNameChars.contains(c)
-  }
+  func isLetter(_ c: UInt16?) -> Bool { c.map(isNameLetter) ?? false }
   // T[i, j] = …
   var table = s
   table.space()
@@ -650,7 +647,7 @@ public func analyze(_ sources: [String]) -> DocumentAnalysis {
       }
       // Whole-number sliders step one at a time; otherwise a round step
       // (1, 2 or 5 × 10^k), so round values sit on it.
-      row.slider = Slider(min: lo, max: hi, step: form.whole ? 1 : niceSpacing((hi - lo) / 400, 1), value: value)
+      row.slider = Slider(min: lo, max: hi, step: form.whole ? 1 : niceSpacing((hi - lo) / 400, 1).major, value: value)
     }
   }
   return DocumentAnalysis(

@@ -269,7 +269,7 @@ func scanOpenHead(_ text: String) -> String? {
 private func unbraceTerm(_ text: Units) -> Units {
   var s = RowScanner(text)
   s.space()
-  guard let letter = s.peek, isASCIILetter(letter) || greekNameChars.contains(letter) else { return text }
+  guard let letter = s.peek, isNameLetter(letter) else { return text }
   s.i += 1
   let head = s.i
   guard s.eat("_") else { return text }
@@ -279,7 +279,7 @@ private func unbraceTerm(_ text: Units) -> Units {
     let start = s.i
     if let c = s.peek, isDigit(c) {
       while let c = s.peek, isDigit(c) { s.i += 1 }
-    } else if let c = s.peek, isASCIILetter(c) || greekNameChars.contains(c) {
+    } else if let c = s.peek, isNameLetter(c) {
       s.i += 1
       while let c = s.peek, isASCIILetter(c) || isDigit(c) || c == unit("_") { s.i += 1 }
     } else {

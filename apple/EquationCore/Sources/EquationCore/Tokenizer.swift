@@ -56,7 +56,10 @@ let superscripts: [UInt16: String] = [
 @inline(__always) func isSubscriptDigit(_ u: UInt16) -> Bool { u >= 0x2080 && u <= 0x2089 }
 @inline(__always) func isASCIILetter(_ u: UInt16) -> Bool { (u >= 0x41 && u <= 0x5A) || (u >= 0x61 && u <= 0x7A) }
 
-func isNameStart(_ u: UInt16) -> Bool { isASCIILetter(u) || u == 0x5F || greekNameChars.contains(u) }
+/// One Latin or Greek letter (`[A-Za-zGreek]`): a sequence's name or its
+/// index (a_n, θ_n), the variable of a d/dx.
+func isNameLetter(_ u: UInt16) -> Bool { isASCIILetter(u) || greekNameChars.contains(u) }
+func isNameStart(_ u: UInt16) -> Bool { isNameLetter(u) || u == 0x5F }
 func isWrittenName(_ u: UInt16) -> Bool { isNameStart(u) || isDigit(u) || isSubscriptDigit(u) }
 
 /// JavaScript's `\s`.

@@ -66,7 +66,7 @@ struct Resolver {
   private func dVarName(_ n: Expr) -> String? {
     guard case .var(let name) = n else { return nil }
     let u = Array(name.utf16)
-    guard u.count == 2, u[0] == unit("d"), isASCIILetter(u[1]) || greekNameChars.contains(u[1]) else { return nil }
+    guard u.count == 2, u[0] == unit("d"), isNameLetter(u[1]) else { return nil }
     return String(u[1...])
   }
 
