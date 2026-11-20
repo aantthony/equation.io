@@ -981,7 +981,11 @@ private func validateDeclarations(_ order: [String], _ declarations: [String: RV
       let cycle = Array(path[path.firstIndex(of: name)!...]) + [name]
       let message = "\(cycle.joined(separator: " → ")) is circular."
       for cn in cycle {
-        if let k = broken.firstIndex(where: { $0.0 == cn }) { broken[k].1 = message } else { broken.append((cn, message)) }
+        if let k = broken.firstIndex(where: { $0.0 == cn }) {
+          broken[k].1 = message
+        } else {
+          broken.append((cn, message))
+        }
       }
       return
     }
@@ -1028,7 +1032,11 @@ func buildRVDeclarations(
     if declarations.updateValue(rv, forKey: rv.name) == nil { order.append(rv.name) }
   }
   func fail(_ i: Int, _ error: Error) {
-    if let error = error as? Unsupported { built.unsupported[i] = error.what } else { built.errors[i] = errorMessage(error) }
+    if let error = error as? Unsupported {
+      built.unsupported[i] = error.what
+    } else {
+      built.errors[i] = errorMessage(error)
+    }
   }
 
   let resolver = Resolver(getFn: getFn, opts: ropts)

@@ -46,7 +46,8 @@ import Testing
   @Test func discreteArithmeticIsEnumerated() throws {
     let rows = ["D ~ DiscreteUniform(1, 6)", "F ~ DiscreteUniform(1, 6)", "S = D + F", "P(D > F)", "D / 2", "E(D^2)"]
     let analysis = analyze(rows)
-    #expect(analysis.rows.map(\.info) == [nil, nil, "μ = 7, σ = 2.41523", "≈ 0.4167", "μ = 1.75, σ = 0.853913", "≈ 15.1667"])
+    #expect(
+      analysis.rows.map(\.info) == [nil, nil, "μ = 7, σ = 2.41523", "≈ 0.4167", "μ = 1.75, σ = 0.853913", "≈ 15.1667"])
     let sum = try #require(try analysis.random.pmfOf("S", [:]))
     #expect(sum.xs == (2...12).map(Double.init) && abs(sum.ps[5] - 1.0 / 6) < 1e-15)
     // Atoms stand where the arithmetic puts them: every half from ½ to 3.

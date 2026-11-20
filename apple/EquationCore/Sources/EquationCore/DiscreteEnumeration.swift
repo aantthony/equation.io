@@ -725,8 +725,9 @@ extension RVSystem {
       case .call(_, let args): args
       default: nil
       }
-    guard let joint = try kids.map({ try enumerateTerms($0, env, budget) }) ?? enumerateTerms([e], env, budget, whole: true)
-    else { return nil }
+    let enumerated =
+      if let kids { try enumerateTerms(kids, env, budget) } else { try enumerateTerms([e], env, budget, whole: true) }
+    guard let joint = enumerated else { return nil }
     let size = joint.wp.count
     var vals = joint.cols.first ?? []
     var mags = joint.mags.first ?? []

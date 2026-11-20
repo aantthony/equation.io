@@ -35,6 +35,7 @@ import { realFourier, reconstructSeries, spectrumPoints } from '../../lib/fourie
 import { toGLSL } from '../../lib/glsl.ts';
 import { takesColor } from '../../lib/palette.ts';
 import { valueReadout } from '../../lib/plot.ts';
+import { fitRegression, formatFit } from '../../lib/regression.ts';
 import { rowKind } from '../../lib/row-kind.ts';
 import { sliderBounds, sliderForm, sliderValue, writeSlider } from '../../lib/slider.ts';
 import { keepNote, noteStart, splitStatements } from '../../lib/statements.ts';
@@ -867,6 +868,59 @@ const structures = STRUCTURES.map(([name, expr]) => ({
   glsl: attempt(() => toGLSL(expr)),
 }));
 
+// --- fits (lib/regression.ts) ---
+//
+// A fit reaches fitRegression through list lowering, which the Swift port does not have: the lists are written
+// out here, one model per observation with X (and Z) replaced by its numbers.
+
+const X5 = [0, 1, 2, 3, 4];
+const FITS: Array<{ y: number[]; x?: number[]; z?: number[]; model: string; params: string[]; fixed?: Record<string, number> }> = [
+  { y: [1.1, 2.9, 5.2, 6.8, 9.1], x: X5, model: 'm X + b', params: ['m', 'b'] },
+  { y: [9, 2, 1, 6, 17], x: [-2, -1, 0, 1, 2], model: 'a X^2 + b X + c', params: ['a', 'b', 'c'] },
+  { y: [2, 2.84, 4.03, 5.72, 8.11], x: [0, 0.5, 1, 1.5, 2], model: 'a exp(b X)', params: ['a', 'b'] },
+  { y: [1, 2, 3, 4, 5], x: X5, model: 'm X + k', params: ['m'], fixed: { k: 1 } },
+  { y: [3, 3, 3, 3, 3], x: X5, model: 'c', params: ['c'] },
+  { y: [1, 2, 3, 4, 5], x: X5, model: 'a X + b X', params: ['a', 'b'] },
+  { y: [1, 2, 3, 4, 5], x: X5, model: 'a b X', params: ['a', 'b'] },
+  { y: [1, 2, NaN, 4, 5], x: [0, 1, 2, NaN, 4], model: 'm X + b', params: ['m', 'b'] },
+  { y: [1, 2], x: [0, 1], model: 'a X^2 + b X + c', params: ['a', 'b', 'c'] },
+  { y: [1, 2, 3], x: [0, 1], model: 'm X', params: ['m'] },
+  { y: [1, 2, 3], x: [0, 1, 2], model: 'k X', params: [] },
+  { y: [1, 2, 3], x: [0, 1, 2], model: 'm ln(X - 1)', params: ['m'] },
+  { y: [1, 2, 3], x: [0, 1, 2], model: 'floor(m X)', params: ['m'] },
+  { y: [1, 2, 3], x: [0, 1, 2], model: 'm abs(X) + b', params: ['m', 'b'] },
+  { y: [0.1, 0.9, 2.1, 2.9, 4.2], x: X5, z: [1, 0, 2, 1, 3], model: 'a X + b Z + c', params: ['a', 'b', 'c'] },
+  { y: [0, 0.84, 0.91, 0.14, -0.76], x: X5, model: 'a sin(b X)', params: ['a', 'b'] },
+  { y: [5, 2.7, 1.6, 1.1, 0.9], x: X5, model: 'a exp(-b X) + c', params: ['a', 'b', 'c'] },
+  { y: [1, 4, 9, 16, 25], x: [1, 2, 3, 4, 5], model: 'a X^p', params: ['a', 'p'] },
+  { y: [1e200, 2e200, 3e200], x: [1, 2, 3], model: 'm X', params: ['m'] },
+  { y: [1, 2, 3], x: [1, 2, 3], model: 'a/(X - b)', params: ['a', 'b'] },
+  { y: [2.1, 3.9, 6.2, 7.8], x: [1, 2, 3, 4], model: 'a X + b + c + d + f + g + h + j + k', params: ['a', 'b', 'c', 'd', 'f', 'g', 'h', 'j', 'k'] },
+  { y: [0.5, 0.62, 0.73, 0.82, 0.88], x: X5, model: '1/(1 + exp(-(a + b X)))', params: ['a', 'b'] },
+];
+const fits = FITS.map(({ y, x = [], z = [], model, params, fixed = {} }) => {
+  const parsed = parseExpr(model);
+  const models = Array.from({ length: x.length || y.length }, (_, k) =>
+    substVars(parsed, { X: nm(x[k] ?? NaN), Z: nm(z[k] ?? NaN) }),
+  );
+  let result: unknown;
+  try {
+    const fit = fitRegression(y, models, params, fixed);
+    result = {
+      coefficients: Object.entries(fit.coefficients).map(([name, value]) => ({ name, value: num(value) })),
+      count: fit.count,
+      skipped: fit.skipped,
+      rmse: num(fit.rmse),
+      r2: fit.r2 === null ? null : num(fit.r2),
+      nonlinear: fit.nonlinear,
+      text: formatFit(fit),
+    };
+  } catch (err) {
+    result = { error: (err as Error).message };
+  }
+  return { y: y.map(num), models: models.map(tree), params, fixed, result };
+});
+
 const POW: Array<[number, number]> = [];
 for (const a of [0, -0, 1, -1, 2, -2, -8, 0.5, -0.5, 10, NaN, Infinity, -Infinity])
   for (const b of [0, 1, -1, 2, 3, 0.5, 1 / 3, 2 / 3, 0.33333, 1 / 7, 5 / 12, 1 / 13, -1 / 3, 2.5, NaN, Infinity, -Infinity])
@@ -946,6 +1000,7 @@ writeFileSync(
     substitution: Object.fromEntries(Object.entries(SUBSTITUTION).map(([name, e]) => [name, tree(e)])),
     structureEnvs: STRUCTURE_ENVS.map(env => Object.fromEntries(Object.entries(env).map(([k, v]) => [k, num(v)]))),
     structures,
+    fits,
     pow: POW.map(([a, b]) => ({ a: num(a), b: num(b), value: num(realPow(a, b)) })),
     numbers: NUMBERS.map(v => ({
       v: num(v),
