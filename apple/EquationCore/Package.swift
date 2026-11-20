@@ -8,6 +8,7 @@ let package = Package(
     .library(name: "EquationCore", targets: ["EquationCore"]),
     .library(name: "EquationRender", targets: ["EquationRender"]),
     .library(name: "EquationAssist", targets: ["EquationAssist"]),
+    .library(name: "EquationDocument", targets: ["EquationDocument"]),
   ],
   targets: [
     // The language core: no Foundation, so it also builds for WebAssembly.
@@ -31,5 +32,9 @@ let package = Package(
     // bundles: Foundation only, and nothing of the language's.
     .target(name: "EquationAssist"),
     .testTarget(name: "EquationAssistTests", dependencies: ["EquationAssist"], resources: [.copy("Fixtures")]),
+    // A graph document as a file: its rows and the data files they open,
+    // which the app's document type reads and writes.
+    .target(name: "EquationDocument", dependencies: ["EquationCore"]),
+    .testTarget(name: "EquationDocumentTests", dependencies: ["EquationCore", "EquationDocument"]),
   ]
 )

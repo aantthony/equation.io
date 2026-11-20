@@ -145,10 +145,88 @@ public func tableRow(_ text: String) -> (name: String, file: String, hash: Strin
   return (name, file, hash)
 }
 
-/// The name a row defines, whatever it defines: what a new table's name must
-/// not collide with (web/main.ts `rowNameFor`).
-public func definedName(_ text: String) -> String? {
-  scanDefinition(jsTrimmed(stripNote(text)))?.name
+/// A table row written again with the hash of the bytes it reads, its note
+/// kept (web/main.ts, `keepNote(eq.text, formatTableRow(…))`). The left side
+/// stays as the row wrote it: `e := open(…)` keeps its `:=` and its name.
+private func pinned(_ text: String, file: String, hash: String) -> String? {
+  let code = jsTrimmed(stripNote(text))
+  guard let definition = scanDefinition(code), case .table = definition else { return nil }
+  let opened = formatTableRow(name: "", file: file, hash: hash).dropFirst(" = ".count)
+  return keepNote(text, "\(definitionHead(definition, code)) \(opened)")
+}
+
+/// What a file's arrival does to a document's rows (web/main.ts
+/// `openDataFiles`): a row that names the file is pinned to its bytes;
+/// otherwise the file gets a row of its own, named for it, and — so that the
+/// drop draws something at once — a scatter of its first two numeric columns.
+///
+/// A row pinned to a different hash named those exact bytes on purpose:
+/// repointing it is the substitution the pin exists to prevent, so it keeps
+/// its hash, and the new bytes arrive as a row of their own. `notice` says
+/// what happened, as the site's does.
+///
+/// Port: a row whose hash these bytes answer is satisfied whatever the file
+/// is called now (the site asks for the same name too, and gives a renamed
+/// file a second row beside the one that already reads it).
+public func rowsOpening(
+  file: String, hash: String, table: CsvTable, in rows: [String]
+) -> (rows: [String], notice: String) {
+  var rows = rows
+  var known = false
+  var pinnedElsewhere = 0
+  for (i, text) in rows.enumerated() {
+    guard let row = tableRow(text) else { continue }
+    let answers = !row.hash.isEmpty && hash.hasPrefix(row.hash)
+    guard row.file == file || answers else { continue }
+    if !row.hash.isEmpty && !answers {
+      pinnedElsewhere += 1
+      continue
+    }
+    known = true
+    if let written = pinned(text, file: row.file, hash: hash), written != jsTrimmed(text) { rows[i] = written }
+  }
+  var notice: [String] = []
+  if pinnedElsewhere > 0 {
+    notice.append(
+      "\(file): \(pinnedElsewhere) row\(pinnedElsewhere == 1 ? "" : "s")"
+        + " pinned to other bytes kept — delete the hash there to use this file")
+  }
+  if known {
+    notice.append("\(file) reloaded")
+    return (rows, notice.joined(separator: " · "))
+  }
+  // A name no definition has claimed, by the rows' text (web/main.ts `rowNameFor`).
+  let taken = Set(rows.compactMap { scanDefinition(jsTrimmed(stripNote($0)))?.name })
+  let name = freeTableName(tableNameFor(file), taken: taken)
+  // On the trailing blank row if there is one, so two drops leave no gap.
+  if let last = rows.last, jsTrimmed(last).isEmpty { rows.removeLast() }
+  rows.append(formatTableRow(name: name, file: file, hash: hash))
+  let nums = table.columns.filter { if case .nums = $0.values { true } else { false } }
+  if nums.count >= 2 && table.rows <= TABLE_MAX_ROWS {
+    rows.append("(\(name).\(nums[0].name), \(name).\(nums[1].name))")
+  }
+  notice.append("\(file): \(table.rows) rows as \(name)")
+  return (rows, notice.joined(separator: " · "))
+}
+
+/// The rows with every table row that names a file without a hash pinned to
+/// the bytes it resolves to, so a link names the exact data the graph was
+/// built against (web/main.ts `pinTableHashes`); nil when none changes.
+public func pinningTableHashes(_ rows: [String], files: DataFiles) -> [String]? {
+  var out = rows
+  for (i, text) in rows.enumerated() {
+    guard let row = tableRow(text), row.hash.isEmpty, let found = files.lookup(file: row.file, hash: ""),
+      let written = pinned(text, file: row.file, hash: found.hash), written != jsTrimmed(text)
+    else { continue }
+    out[i] = written
+  }
+  return out == rows ? nil : out
+}
+
+/// The hashes of the files a document's rows read, of those on hand: what a
+/// saved document needs to carry, and no more.
+public func filesRead(by rows: [String], files: DataFiles) -> Set<String> {
+  Set(rows.compactMap { text in tableRow(text).flatMap { files.lookup(file: $0.file, hash: $0.hash)?.hash } })
 }
 
 /// A row that means to open a file but cannot (`badTableRow`): it claims a
