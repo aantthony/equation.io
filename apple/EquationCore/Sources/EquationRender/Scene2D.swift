@@ -70,9 +70,16 @@ extension MetalContext {
     pass.colorAttachments[0].storeAction = .store
     guard let encoder = buffer.makeRenderCommandEncoder(descriptor: pass) else { return nil }
     let view = scene.view ?? .opening(width: Double(width), height: Double(height))
+    // A mapped axis is gridded at its ticks, which follow from the maps and the window.
+    var frame = scene.frame ?? Frame2D()
+    if let maps = scene.maps, frame.ticks == nil {
+      let box = frame.vp ?? Frame2D.Box(x: 0, y: 0, w: Double(width), h: Double(height))
+      let ticks = mappedTicks(view, box.w, box.h, maps)
+      if ticks.x != nil || ticks.y != nil { frame.ticks = MappedTicks(x: ticks.x, y: ticks.y) }
+    }
     Renderer2D(self).render(
       encoder, target: (width, height), view: view, layers: scene.layers, time: scene.time ?? 0,
-      env: scene.env ?? [:], gridSpecs: scene.gridSpecs, frame: scene.frame ?? Frame2D(), theme: theme)
+      env: scene.env ?? [:], gridSpecs: scene.gridSpecs, frame: frame, theme: theme)
     encoder.endEncoding()
     buffer.commit()
     buffer.waitUntilCompleted()
