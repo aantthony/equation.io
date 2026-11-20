@@ -51,6 +51,27 @@ public enum ProductGlyph: String, Sendable {
   case dot, cross, outer, wedge, geometric
 }
 
+/// A continuous interval's hidden parameter (lib/expr.ts `INTERVAL`): not an
+/// identifier, so no document name or builtin can collide with it.
+let INTERVAL = "[interval]"
+/// The member a guard leaves where no case holds, `[none]()`: the empty box
+/// (lib/expr.ts `NONE`). Anything that still evaluates one gets NaN.
+let NONE = "[none]"
+/// The internal call angle(…) lowers to (lib/expr.ts `ANGLE_FN`): [angle](u0, u1, v0, v1).
+let ANGLE_FN = "[angle]"
+/// d/dp of [angle] is a difference of two of these, one per arm (lib/expr.ts
+/// `ANGLE_RATE_FN`): [angle′](v0, v1, w0, w1) is the turning rate of arm v
+/// moving with velocity w.
+let ANGLE_RATE_FN = "[angle′]"
+
+/// The name an internal call wears in a message (lib/expr.ts `plainFnName`):
+/// `[polygon]` is written polygon, and both angle helpers are the user's angle.
+func plainFnName(_ name: String) -> String {
+  if name == ANGLE_RATE_FN { return "angle" }
+  // As the TypeScript's slice(1, -1): the first and last characters go.
+  return name.hasPrefix("[") ? String(name.dropFirst().dropLast()) : name
+}
+
 /// Flatten a (possibly chained) inequality into its comparisons; comparison k
 /// compares the previous comparison's right side, so 0 < y < x yields
 /// [0 < y, y < x] (lib/expr.ts `ineqComparisons`). Empty unless `e` is an ineq.

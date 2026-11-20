@@ -91,7 +91,8 @@ import Testing
     report(failures, of: checked, entries.count)
   }
 
-  /// fourierGraphGLSL, handed the derivatives lib/diff.ts gave the TypeScript.
+  /// fourierGraphGLSL: the same text, having asked for the derivatives the
+  /// TypeScript asked lib/diff.ts for and been given the same answers.
   @Test func fourierGraphs() {
     var failures: [String] = []
     var checked = 0
@@ -110,8 +111,17 @@ import Testing
             throw DecodeError(description: "a derivative the TypeScript did not ask for")
           }
           next += 1
-          if let message = diffs[next - 1]["error"] { throw DecodeError(description: "\(message)") }
-          return try decode(diffs[next - 1]["out"]!)
+          let derivative = Result { () throws(DiffError) in try diff(e, v) }
+          // Compared as printed, so a NaN matches a NaN.
+          let have =
+            switch derivative {
+            case .success(let d): "\(d)"
+            case .failure(let error): "error: \(error.message)"
+            }
+          let want =
+            try (diffs[next - 1]["error"] as? String).map { "error: \($0)" } ?? "\(decode(diffs[next - 1]["out"]!))"
+          if have != want { stray = true }
+          return try derivative.get()
         }
       }
       var want = entry
@@ -121,7 +131,7 @@ import Testing
       } else if entry["error"] == nil {
         want["out"] = "none"
       }
-      if stray || next != asked.count { have = .success("asked for \(next) of \(asked.count) derivatives") }
+      if stray || next != asked.count { have = .success("asked for \(next) of \(asked.count) derivatives, or got others") }
       if let failure = differs(want, have, "\(expr)") { failures.append(failure) }
     }
     report(failures, of: checked, entries.count)

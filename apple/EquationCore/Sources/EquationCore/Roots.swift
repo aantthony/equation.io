@@ -56,7 +56,7 @@ private let SAMPLES = 1536
 
 /// All roots of f(v) in [lo, hi]. `.zero` means f is identically zero.
 public func findRoots(
-  _ f: Expr, _ v: String, _ lo: Double, _ hi: Double, evaluate: Evaluator, polynomialRoots: PolynomialRoots? = nil
+  _ f: Expr, _ v: String, _ lo: Double, _ hi: Double, evaluate: Evaluator = evaluate, polynomialRoots: PolynomialRoots? = nil
 ) -> FoundRoots {
   if !(hi > lo) || !lo.isFinite || !hi.isFinite { return .roots([]) }
   switch polynomialRoots?(f, v) {

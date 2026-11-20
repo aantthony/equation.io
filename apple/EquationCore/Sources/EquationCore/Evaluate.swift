@@ -325,11 +325,6 @@ func angleRateFn(_ v0: Double, _ v1: Double, _ w0: Double, _ w1: Double) -> Doub
   return (a0 * (w1 / s) - a1 * (w0 / s)) / (a0 * a0 + a1 * a1)
 }
 
-let angleFnName = "[angle]"
-let angleRateFnName = "[angle′]"
-/// The member a guard leaves where no case holds: evaluates to NaN.
-let noneFnName = "[none]"
-
 /// The builtins `evaluate` runs (lib/expr.ts `EVAL_FNS`), for the elementary
 /// set. A missing argument is JavaScript's `undefined`, which is NaN to
 /// arithmetic; extra arguments are ignored.
@@ -360,7 +355,7 @@ let evalFunctions: [String: @Sendable ([Double]) -> Double] = {
     "sinc": one { $0 == 0 ? 1 : sin($0) / $0 },
     "coth": one { 1 / tanh($0) },
   ]
-  fns[noneFnName] = { _ in .nan }
+  fns[NONE] = { _ in .nan }
   fns["normalpdf"] = { xs in normalpdf(arg(xs, 0), arg(xs, 1), arg(xs, 2)) }
   fns["normalcdf"] = { xs in normalcdf(arg(xs, 0), arg(xs, 1), arg(xs, 2)) }
   fns["gcd"] = two { a, b in
@@ -385,8 +380,8 @@ let evalFunctions: [String: @Sendable ([Double]) -> Double] = {
     }
     return 1
   }
-  fns[angleFnName] = { xs in angleFn(arg(xs, 0), arg(xs, 1), arg(xs, 2), arg(xs, 3)) }
-  fns[angleRateFnName] = { xs in angleRateFn(arg(xs, 0), arg(xs, 1), arg(xs, 2), arg(xs, 3)) }
+  fns[ANGLE_FN] = { xs in angleFn(arg(xs, 0), arg(xs, 1), arg(xs, 2), arg(xs, 3)) }
+  fns[ANGLE_RATE_FN] = { xs in angleRateFn(arg(xs, 0), arg(xs, 1), arg(xs, 2), arg(xs, 3)) }
   return fns
 }()
 
@@ -463,7 +458,7 @@ func evaluate(_ e: Expr, _ env: inout [String: Double]) throws -> Double {
   case .call(let name, let args):
     if let index = boundSumIndex(e) { return try evalReduce(name, args, index, &env) }
     guard let fn = evalFunctions[name] else {
-      if name == intervalFnName {
+      if name == INTERVAL {
         throw LanguageError(
           "An interval is a range of numbers, not one value: "
             + "draw it in a row of its own, in a tuple, or beside x and y."
@@ -510,6 +505,3 @@ func evaluate(_ e: Expr, _ env: inout [String: Double]) throws -> Double {
     return try otherwise.map { try evaluate($0, &env) } ?? .nan
   }
 }
-
-/// A continuous interval's hidden parameter (lib/interval.ts): not an identifier.
-let intervalFnName = "[interval]"

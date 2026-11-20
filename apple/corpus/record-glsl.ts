@@ -46,7 +46,7 @@ function recorded<T>(input: object, call: () => T): T {
 }
 
 /** The derivatives fourierGraphGLSL asks for while it runs: the Swift port
- *  is handed lib/diff.ts's answers, which it does not have yet. */
+ *  must ask its own differentiator for the same ones, and get these answers. */
 let graphDiffs: object[] | null = null;
 
 vi.mock(import('../../lib/diff.ts'), async load => {

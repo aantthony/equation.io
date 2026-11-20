@@ -355,17 +355,17 @@ private func fourierLoop(_ e: Expr) throws(ShaderError) -> FourierLoop? {
 /// `glsl` is a vec4 in x and `reach` (in x units): the value, the slope in
 /// the position, and the band the curve stays in within reach of x.
 ///
-/// `diff` is lib/diff.ts `diff`, d(e)/d(v), which this file does not have:
-/// the caller passes it.
+/// `differentiate` is `diff` (Diff.swift) unless a caller has reason to
+/// watch what is asked of it, as the conformance test does.
 public func fourierGraphGLSL(
-  _ e: Expr, diff: (Expr, String) throws -> Expr
+  _ e: Expr, differentiate: (Expr, String) throws -> Expr = { e, v in try diff(e, v) }
 ) throws(ShaderError) -> (glsl: String, slopeScale: Double)? {
   guard let loop = try fourierLoop(e) else { return nil }
   var names: Set<String> = []
   freeVars(loop.count, into: &names)
   if names.contains("x") { return nil }
   do {
-    if case .num(let slope) = try diff(loop.position, "x"), slope.isFinite {
+    if case .num(let slope) = try differentiate(loop.position, "x"), slope.isFinite {
       return (try loop.call("\(try fmt(abs(slope))) * reach"), slope)
     }
   } catch {

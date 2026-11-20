@@ -98,7 +98,7 @@ import Testing
     #expect(mapped == Expr.neg(.num(1)))
     let piecewise = try parseExpr("{x > 0: 1, 2}")
     #expect(childrenOf(piecewise).count == 3)
-    let derivative = try Sym.diff(try parseExpr("x^3 + sin(2 x)"), "x")
+    let derivative = try diff(try parseExpr("x^3 + sin(2 x)"), "x")
     let expected = try parseExpr("3 x^2 + cos(2 x) 2")
     #expect(derivative == expected)
   }

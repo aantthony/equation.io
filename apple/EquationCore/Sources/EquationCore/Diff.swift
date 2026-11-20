@@ -20,24 +20,6 @@ public struct DiffError: Error, Equatable, Sendable {
   }
 }
 
-/// A continuous interval's hidden parameter (lib/expr.ts `INTERVAL`): not an
-/// identifier, so no document name or builtin can collide with it.
-let INTERVAL = "[interval]"
-/// The internal call angle(…) lowers to (lib/expr.ts `ANGLE_FN`): [angle](u0, u1, v0, v1).
-let ANGLE_FN = "[angle]"
-/// d/dp of [angle] is a difference of two of these, one per arm (lib/expr.ts
-/// `ANGLE_RATE_FN`): [angle′](v0, v1, w0, w1) is the turning rate of arm v
-/// moving with velocity w.
-let ANGLE_RATE_FN = "[angle′]"
-
-/// The name an internal call wears in a message (lib/expr.ts `plainFnName`):
-/// `[polygon]` is written polygon, and both angle helpers are the user's angle.
-func plainFnName(_ name: String) -> String {
-  if name == ANGLE_RATE_FN { return "angle" }
-  // As the TypeScript's slice(1, -1): the first and last characters go.
-  return name.hasPrefix("[") ? String(name.dropFirst().dropLast()) : name
-}
-
 private let ZERO = Expr.num(0)
 private let ONE = Expr.num(1)
 
@@ -118,17 +100,6 @@ private let SINC_PRIME_SERIES: [(Double, Double)] = (1...5).map { n in
 private let LN10 = 2.302585092994046
 private let TWO_OVER_SQRT_PI = 2 / Double.pi.squareRoot()
 
-/// Why a node the scalar pipeline cannot carry is refused (lib/expr.ts
-/// `structuralDiagnostic`), for the kinds Swift's Expr has.
-private func structuralDiagnosticForDiff(_ e: Expr) -> String {
-  switch e {
-  case .range: return "'..' ranges only appear in sum(n=1..N, …), prod(…), int[a..b], or a list like [1..10]."
-  case .index: return "List indexing must resolve before scalar evaluation."
-  case .eqtest(let op, _, _): return "'\(op.rawValue)' tests a list inside a filter."
-  default: return "(…) must be the whole expression."
-  }
-}
-
 /// d(e)/d(v). Throws for functions without a usable derivative.
 public func diff(_ e: Expr, _ v: String) throws(DiffError) -> Expr {
   switch e {
@@ -166,7 +137,7 @@ public func diff(_ e: Expr, _ v: String) throws(DiffError) -> Expr {
       return mul(pow(a, b), add(mul(db, call("ln", a)), mul(b, div(try diff(a, v), a))))
     }
   case .index, .range, .eqtest:
-    throw DiffError(structuralDiagnosticForDiff(e), nonSmooth: true)
+    throw DiffError(structuralDiagnostic(e), nonSmooth: true)
   case .call(let name, let args):
     // A continuous interval's parameter varies on its own, not with x.
     if name == INTERVAL { return ZERO }

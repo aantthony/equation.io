@@ -106,8 +106,8 @@ struct Resolver {
   /// Numerator forms: d(^k), -d(^k), C·d(^k).
   private func numeratorWrap(_ n: Expr) -> (order: Int, wrap: (Expr) -> Expr)? {
     if let order = dOrder(n) { return (order, { $0 }) }
-    if case .neg(let a) = n, let order = dOrder(a) { return (order, Sym.neg) }
-    if case .bin(.mul, let c, let b, _) = n, let order = dOrder(b) { return (order, { Sym.mul(c, $0) }) }
+    if case .neg(let a) = n, let order = dOrder(a) { return (order, neg) }
+    if case .bin(.mul, let c, let b, _) = n, let order = dOrder(b) { return (order, { mul(c, $0) }) }
     return nil
   }
 
@@ -161,13 +161,15 @@ struct Resolver {
     }
     for _ in 0..<order {
       do {
-        e = try Sym.diff(e, v)
-      } catch is Sym.NonSmoothError {
+        e = try diff(e, v)
+      } catch {
+        // (Any other error is the row's own: an inequality, a tuple.)
+        guard error.nonSmooth else { throw LanguageError(error.message) }
         // factorial, gamma, floor, …: expand a symbolic central difference.
         let vv = Expr.var(v)
         let h = Expr.num(Resolver.fdH)
-        e = Sym.div(
-          Sym.sub(substVars(e, [v: Sym.add(vv, h)]), substVars(e, [v: Sym.sub(vv, h)])), .num(2 * Resolver.fdH))
+        e = div(
+          sub(substVars(e, [v: add(vv, h)]), substVars(e, [v: sub(vv, h)])), .num(2 * Resolver.fdH))
       }
     }
     return e
@@ -490,7 +492,7 @@ private func lowerPoints(_ e: Expr, _ comps: (String) -> [String]?) throws -> Lo
     return .vec(names.map { .var($0) })
   case .neg(let inner):
     switch try lo(inner) {
-    case .vec(let items): return .vec(items.map(Sym.neg))
+    case .vec(let items): return .vec(items.map(neg))
     case .scalar(let a): return .scalar(.neg(a))
     }
   case .bin(let op, let lhs, let rhs, let glyph):
@@ -509,7 +511,7 @@ private func lowerPoints(_ e: Expr, _ comps: (String) -> [String]?) throws -> Lo
           throw LanguageError(
             "Cannot \(op == .add ? "add" : "subtract") a \(x.count)-component and a \(y.count)-component vector.")
         }
-        return .vec(zip(x, y).map { op == .add ? Sym.add($0, $1) : Sym.sub($0, $1) })
+        return .vec(zip(x, y).map { op == .add ? add($0, $1) : sub($0, $1) })
       case .mul:
         if glyph != nil { throw Unsupported("dot and cross products") }
         throw LanguageError("Use A · B or A × B (or dot(A, B), cross(A, B)) to multiply points.")
@@ -519,14 +521,14 @@ private func lowerPoints(_ e: Expr, _ comps: (String) -> [String]?) throws -> Lo
     case (.vec(let x), .scalar(let y)):
       switch op {
       case .add, .sub: throw LanguageError("Cannot \(op == .add ? "add" : "subtract") a point and a number.")
-      case .mul: return .vec(x.map { Sym.mul($0, y) })
-      case .div: return .vec(x.map { Sym.div($0, y) })
+      case .mul: return .vec(x.map { mul($0, y) })
+      case .div: return .vec(x.map { div($0, y) })
       case .pow: throw LanguageError("Cannot raise a point to a power — |A| is its length.")
       }
     case (.scalar(let x), .vec(let y)):
       switch op {
       case .add, .sub: throw LanguageError("Cannot \(op == .add ? "add" : "subtract") a point and a number.")
-      case .mul: return .vec(y.map { Sym.mul(x, $0) })
+      case .mul: return .vec(y.map { mul(x, $0) })
       case .div: throw LanguageError("Cannot divide by a point.")
       case .pow: throw LanguageError("Cannot raise a point to a power — |A| is its length.")
       }
