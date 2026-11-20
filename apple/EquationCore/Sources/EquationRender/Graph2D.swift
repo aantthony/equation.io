@@ -38,6 +38,7 @@ public struct Graph2D: Equatable, Sendable {
     var ineqs: [Ineq2D] = []
     var scalars: [Scalar2D] = []
     var curves: [Curve2D] = []
+    var complexLayers = ComplexLayers()
     for (index, row) in analysis.rows.enumerated() {
       switch row.view {
       case .grid(let mode)?: grid = Frame2D.Grid(rawValue: mode) ?? .on
@@ -52,18 +53,22 @@ public struct Graph2D: Equatable, Sendable {
       case .none:
         break
       case .implicit2d(let field, _):
-        curves.append(Curve2D(field: field, color: color, params: gpu.params))
+        let graphEval = gpu.graphEval.map { Curve2D.GraphEval(glsl: $0.glsl, slopeScale: $0.slopeScale) }
+        curves.append(Curve2D(field: field, graphEval: graphEval, color: color, params: gpu.params))
       case .ineq2d(let field, let edges):
         ineqs.append(Ineq2D(field: field, color: color, params: gpu.params, edges: edges))
       case .scalar2d(let field):
         scalars.append(Scalar2D(field: field, color: color, params: gpu.params))
       case .vfield2d(let fx, let fy):
         vfields.append(VField2D(fx: fx, fy: fy, color: color, params: gpu.params))
+      case .complexField, .fractal2d, .color2d:
+        complexLayers.add(gpu, color: color)
       }
     }
     // A vector field's streamlines flow whether or not it reads t.
     if !vfields.isEmpty { animated = true }
     layers = Layers2D(vfields: vfields, ineqs: ineqs, scalars: scalars, curves: curves)
+    complexLayers.write(to: &layers)
   }
 
   /// The constants' values `time` seconds after the graph opened: what the uniforms read.

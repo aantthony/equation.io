@@ -28,6 +28,18 @@ public indirect enum MathObject: Equatable, Sendable {
   /// agree everywhere (`identity`). `constant`: the row reads like a slider
   /// named e, pi or i, which the readout explains.
   case note(expr: Expr, variable: Bool, constant: String?, identity: Bool)
+  /// A complex number with no x or y in it: the point it is in the plane of w.
+  case complexPoint(expr: Expr)
+  /// A complex expression in u alone: the path it traces in the plane of w.
+  case complexPath(expr: Expr)
+  /// A complex value at every pixel: a potential (its real and imaginary
+  /// level curves), `domain(…)` coloring, or the grid `conformal(…)` pulls back.
+  case complexField(form: ComplexForm, expr: Expr)
+  /// `iter(step)`: z ↦ step(z), counted until it escapes. `seed` is "zero"
+  /// when the pixel enters the step (Mandelbrot), "pixel" when it starts it (Julia).
+  case fractal(step: Expr, seed: String, maxIter: Int)
+  /// `rgb(…)`, `hsl(…)`, `oklch(…)`: a colour at every pixel; `space` is the call's name.
+  case colorField(space: String, channels: [Expr])
 
   /// The kind as the site's tools name it (`publicKind`).
   public var publicKind: String {
@@ -40,6 +52,11 @@ public indirect enum MathObject: Equatable, Sendable {
     case .curveParametric: "pcurve"
     case .value: "value"
     case .note: "note"
+    case .complexPoint: "point"
+    case .complexPath: "pcurve"
+    case .complexField(let form, _): form.planType
+    case .fractal: "fractal2d"
+    case .colorField(let space, _): "\(space)2d"
     }
   }
 }
@@ -89,43 +106,10 @@ private func isVec(_ e: Expr) -> Bool {
   return false
 }
 
-/// Result typing (lib/complex.ts `inferScalarType`), for real expressions:
-/// what it is for here is what it refuses.
+/// Result typing (lib/complex.ts `inferScalarType`), where all that is asked
+/// of it is what it refuses.
 func checkScalar(_ e: Expr) throws {
-  switch e {
-  case .num, .var: return
-  case .neg(let a): try checkScalar(a)
-  case .bin(_, let a, let b, _):
-    try checkScalar(a)
-    try checkScalar(b)
-  case .call(_, let args): for a in args { try checkScalar(a) }
-  case .eq(let l, let r):
-    try checkScalar(l)
-    try checkScalar(r)
-  case .ineq: throw LanguageError("Unexpected inequality.")
-  case .vec: throw LanguageError("Vector in scalar context.")
-  case .list: throw LanguageError("A list can only be plotted as its own row.")
-  case .piecewise(let cases, let otherwise):
-    func condition(_ cond: Expr) throws {
-      if case .ineq(_, let l, let r, _) = cond {
-        try condition(l)
-        try condition(r)
-      } else {
-        try checkScalar(cond)
-      }
-    }
-    for c in cases {
-      try condition(c.cond)
-      try checkScalar(c.value)
-    }
-    if let otherwise { try checkScalar(otherwise) }
-  case .loop:
-    // Port: lib/complex.ts `loopTypes` types a loop's params and result.
-    throw Unsupported("recursive functions")
-  case .index, .range, .eqtest, .comp, .figure, .lazy, .trail, .label, .hist, .family:
-    throw LanguageError("This object must be lowered before scalar type inference.")
-  case .data, .str, .text: throw LanguageError("Expected a scalar expression.")
-  }
+  _ = try inferScalarType(e)
 }
 
 /// Match an equation that spells an ODE — dy/dx = f, y' = f, or a system
@@ -266,8 +250,18 @@ func classify(_ lowered: Expr, defined: Set<String>, fields: [String: Expr]) thr
   let ode = try matchODE(expr)
   if let ode { expr = .vec(ode) }
 
+  let special = specialForm(expr)
+  if let nested = nestedSpecial(expr, isRoot: true) {
+    throw LanguageError("\(nested)(…) must be the whole expression.")
+  }
   var vars = freeVars(expr)
-  if vars.contains("i") || vars.contains("w") { throw Unsupported("complex numbers") }
+  vars.remove("i")
+  // iter binds z as the iterate: z ↦ step(z) starting from the seed.
+  if special == "iter" { vars.remove("z") }
+  if vars.remove("w") {
+    vars.insert("x")
+    vars.insert("y")
+  }
   var params: [String] = []
   for v in vars.list where defined.contains(v) {
     params.append(v)
@@ -291,6 +285,15 @@ func classify(_ lowered: Expr, defined: Set<String>, fields: [String: Expr]) thr
   var paramSystem = false
   if case .eq(.vec, _) = expr { paramSystem = vars.contains("u") && !vars.contains("v") }
   if hasParam && hasSpace && !paramSystem { throw LanguageError("Cannot mix u/v with x/y/z.") }
+  // A bare complex expression in u alone is a path in the plane (below);
+  // every other complex use of u, v, or z has no 2D reading.
+  let complexRow = usesComplex(expr)
+  let complexPath = complexRow && isBareScalar(expr) && special == nil && vars.contains("u") && !vars.contains("v")
+  // (Vectors, lists, and domain(…)-style forms each say below what they take.)
+  if complexRow && hasParam && !complexPath && special == nil && !isVec(expr) && !isListNode(expr) {
+    throw LanguageError("A complex path is a bare expression in u alone, like exp(i 2 pi u).")
+  }
+  if complexRow && vars.contains("z") { throw LanguageError("Complex expressions plot in 2D only (x, y, w).") }
 
   func done(_ object: MathObject) -> Classified {
     var moving = animated
@@ -313,11 +316,21 @@ func classify(_ lowered: Expr, defined: Set<String>, fields: [String: Expr]) thr
   }
   // An equation whose sides agree everywhere has no curve to draw — it is a
   // claim, and it holds.
-  if case .eq(let l, let r) = expr, !isVec(l), !isVec(r), hasSpace, !hasParam, holdsEverywhere(l, r) {
+  if case .eq(let l, let r) = expr, !isVec(l), !isVec(r), hasSpace, !hasParam, !complexRow, holdsEverywhere(l, r) {
     return done(.note(expr: expr, variable: false, constant: nil, identity: true))
   }
 
+  if let special, case .call(_, let args) = expr {
+    return done(try classifySpecial(special, args, vars))
+  }
+
   if case .vec(let items) = expr {
+    // sort(S, re(S)) of a complex list: its members in order, a tuple.
+    if items.allSatisfy(isComplexValued) {
+      throw LanguageError(
+        "A tuple of complex numbers has no picture yet — a list of them draws as points, and T[k] picks one.")
+    }
+    if complexRow { throw LanguageError("Complex values are not supported in vectors.") }
     // Longer than a point: values at positions, shown as a readout.
     if items.count > 3 {
       if hasSpace || hasParam || items.contains(where: isVec) {
@@ -339,6 +352,10 @@ func classify(_ lowered: Expr, defined: Set<String>, fields: [String: Expr]) thr
     return done(.point(coordinates: items))
   }
 
+  // A complex-valued expression in u is the image of a path: its real and
+  // imaginary parts are an ordinary 2D parametric curve in the Argand plane
+  // (the plane of w = x + iy, where complex points and roots already sit).
+  if complexPath { return done(try classifyComplexPath(expr)) }
   if hasParam && !paramSystem {
     throw LanguageError(
       "u and v trace a curve or surface in a tuple, like (cos(u), sin(u)) or (u, v, u v); "
@@ -354,6 +371,7 @@ func classify(_ lowered: Expr, defined: Set<String>, fields: [String: Expr]) thr
     if left.count != right.count {
       throw LanguageError("Mismatched components: \(left.count) on the left, \(right.count) on the right.")
     }
+    if complexRow { throw LanguageError("Complex values are not supported in systems.") }
     throw Unsupported("systems of equations")
   }
 
@@ -367,19 +385,27 @@ func classify(_ lowered: Expr, defined: Set<String>, fields: [String: Expr]) thr
     for c in comparisons {
       let less = c.op == .lt || c.op == .le
       let residual = Expr.bin(.sub, less ? c.l : c.r, less ? c.r : c.l)
-      try checkScalar(residual)
+      if try inferScalarType(residual) == .complex {
+        throw LanguageError("Complex inequality: compare re(…) or im(…) instead.")
+      }
       constraints.append(Constraint(residual: residual, strict: c.op == .lt || c.op == .gt))
     }
     return done(.region(constraints: constraints))
   }
 
   if case .eq(let l, let r) = expr {
-    try checkScalar(l)
-    try checkScalar(r)
+    let left = try inferScalarType(l)
+    if try left == .complex || inferScalarType(r) == .complex {
+      if !hasSpace {
+        throw LanguageError("A constant complex comparison has no isolated roots — use w as the unknown.")
+      }
+      // Port: a complex equation is a system in x and y (lib/plot.ts), solved for its roots.
+      throw Unsupported("complex equations")
+    }
     if vars.contains("z") { throw Unsupported("surfaces in space") }
     let graphRhs: Expr? = isVar(l, "y") ? r : isVar(r, "y") ? l : nil
     let levels = levelFamily(l, r, params, defined)
-    if let graphRhs, !freeVars(graphRhs).contains("y") {
+    if let graphRhs, !freeVars(graphRhs).contains("y"), !freeVars(graphRhs).contains("w") {
       return done(.curveGraph(rhs: graphRhs, equation: expr, levels: levels))
     }
     return done(.curveImplicit(residual: .bin(.sub, l, r), equation: expr, levels: levels))
@@ -387,7 +413,11 @@ func classify(_ lowered: Expr, defined: Set<String>, fields: [String: Expr]) thr
 
   // A bare scalar that depends on the screen's x and y is drawn at every
   // pixel. There is no implicit graph: the curve is `y = sin(x)`.
-  try checkScalar(expr)
+  // Bare scalar expression: typing does not generate shader text.
+  if try inferScalarType(expr) == .complex {
+    if !hasSpace && !hasParam { return done(.complexPoint(expr: expr)) }
+    return done(.complexField(form: .potential, expr: expr))
+  }
   if vars.contains("z") { throw Unsupported("scalar fields in space") }
   if hasSpace { return done(.scalarField(expr: expr)) }
   return done(.value(expr: expr))
