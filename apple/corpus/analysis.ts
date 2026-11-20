@@ -12,6 +12,7 @@
  * the number formatting readouts are written with) beside the parser's
  * fixtures.
  */
+import { createHash } from 'node:crypto';
 import { writeFileSync } from 'node:fs';
 import { analyzeRows } from '../../lib/analysis.ts';
 import { diff } from '../../lib/diff.ts';
@@ -47,7 +48,7 @@ import { FITS_CASES } from './cases-fits.ts';
 import { INTEGRAL_CASES } from './cases-integrals.ts';
 import { PANEL_CASES, recordGridFields, recordStates } from './cases-panels.ts';
 import { SURFACE_CASES } from './cases-surfaces.ts';
-import { LEFTOVER_CASES, recordMetrics } from './cases-leftovers.ts';
+import { LEFTOVER_CASES, recordData, recordMetrics } from './cases-leftovers.ts';
 
 const fixtures = new URL('../EquationCore/Tests/EquationCoreTests/Fixtures/', import.meta.url);
 
@@ -906,6 +907,10 @@ const recorded = docs.map(({ name, rows }) => {
   };
 });
 writeFileSync(new URL('analysis.json', fixtures), JSON.stringify(recorded, replacer) + '\n');
+writeFileSync(
+  new URL('data.json', fixtures),
+  JSON.stringify(recordData(bytes => createHash('sha256').update(bytes).digest('hex'))) + '\n',
+);
 const rowCount = recorded.reduce((n, d) => n + d.rows.length, 0);
 console.log(`${recorded.length} documents (${EXAMPLES.flatMap(c => c[1]).length} examples), ${rowCount} rows`);
 

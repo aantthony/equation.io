@@ -99,7 +99,7 @@ func metricPartial(_ e: Expr, _ v: String) throws(DiffError) -> Expr {
 func smoothPartial(_ e: Expr, _ v: String) throws -> Expr {
   do {
     return try diff(e, v)
-  } catch let error as DiffError {
+  } catch {
     if !error.nonSmooth { throw LanguageError(error.message) }
     let h = 1e-4
     func at(_ h: Double) -> Expr { substVars(e, [v: add(.var(v), .num(h))]) }
@@ -387,7 +387,7 @@ func parseMetric(_ rhs: Expr, _ ctx: MetricContext) throws -> PanelMetric {
         g[i].append(j < i ? g[j][i] : mul(.num(0.5), try metricPartial(try metricPartial(Q, vars[i]), vars[j])))
       }
     }
-  } catch let error as DiffError {
+  } catch {
     if error.nonSmooth { throw notQuadratic }
     throw LanguageError(error.message)
   }

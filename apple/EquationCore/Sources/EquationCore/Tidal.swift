@@ -60,7 +60,7 @@ func writtenComponents(
   var form: [Expr] = []
   do {
     for (a, b) in pairs { form.append(mul(.num(0.5), try metricPartial(try metricPartial(Q, slot(a)), slot(b)))) }
-  } catch let error as DiffError {
+  } catch {
     throw LanguageError(error.message)
   }
   for e in form {
