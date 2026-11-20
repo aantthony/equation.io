@@ -38,19 +38,21 @@ extension AxisMap: Codable {
 
 extension AxisMaps: Codable {
   private enum CodingKeys: String, CodingKey {
-    case x, y
+    case x, y, plane
   }
 
   public init(from decoder: any Decoder) throws {
     let container = try decoder.container(keyedBy: CodingKeys.self)
     self.init(
       x: try container.decodeIfPresent(AxisMap.self, forKey: .x),
-      y: try container.decodeIfPresent(AxisMap.self, forKey: .y))
+      y: try container.decodeIfPresent(AxisMap.self, forKey: .y),
+      plane: try container.decodeIfPresent(PlaneMap.self, forKey: .plane))
   }
 
   public func encode(to encoder: any Encoder) throws {
     var container = encoder.container(keyedBy: CodingKeys.self)
     try container.encodeIfPresent(x, forKey: .x)
     try container.encodeIfPresent(y, forKey: .y)
+    try container.encodeIfPresent(plane, forKey: .plane)
   }
 }

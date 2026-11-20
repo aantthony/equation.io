@@ -8,8 +8,8 @@ import Foundation
 // The site keeps what it carried while the arrays and the map stay the same
 // (WeakMaps keyed by the array: `mappedColumns`, `planeLineCache`,
 // `planeClouds`, `planeRegions`). A Swift array has no identity to key by, so
-// nothing is kept here: a caller that redraws a still picture keeps the
-// carried overlay itself.
+// nothing is kept for an axis map, which is cheap to carry through. What a
+// plane map carries is kept by the arrays' values (`PlaneCarried`).
 
 /// A straight segment is cut until each mapped piece strays from its chord
 /// by under this fraction of the segment's mapped length (a straight run in
@@ -18,17 +18,6 @@ import Foundation
 /// extra evaluation.
 private let mappedBend = 0.0005
 private let mappedDepth = 12
-
-public typealias ScreenPoint = (Double, Double)
-
-/// Carries a point to the screen; a plane map follows on from `hint`, the
-/// screen point of a neighbour, so a line stays on one copy of the plane.
-public typealias Carry = (_ x: Double, _ y: Double, _ hint: ScreenPoint?) -> ScreenPoint
-
-/// Carries a straight run a → b (lib/plane-map.ts `Segment`; `mappedSegment` is one).
-public typealias Segment = (
-  _ a: ScreenPoint, _ b: ScreenPoint, _ map: Carry, _ from: ScreenPoint?
-) -> (piece: [Double], end: ScreenPoint)
 
 /// The indices a row added to a list `count` long since its mark.
 private func tail(_ from: Int, _ count: Int) -> Range<Int> { min(from, count)..<count }
@@ -77,49 +66,17 @@ public func mappedSegment(
   return (out, pb)
 }
 
-/// The way back through a plane map over one screen window (lib/plane-map.ts
-/// `PlaneInverse`, with `planeLines` and `planeShapes`), as `planeOverlay`
-/// reads it. The map itself, and its numerical inverse, are not ported (they
-/// need the language's evaluator and derivative): whoever ports them conforms
-/// to this, and `mapOverlay` takes one where the site reads `maps.plane`.
-public protocol PlaneInverse {
-  /// Every screen point in or just around the window showing (x, y).
-  func all(_ x: Double, _ y: Double) -> [ScreenPoint]
-  /// One screen point showing (x, y): in the window if one is.
-  func first(_ x: Double, _ y: Double) -> ScreenPoint
-  /// A region's triangles, carried to the screen.
-  func triangles(_ tris: [Double]) -> [Double]
-  /// `planeLines`: a line on every copy of the plane the window shows.
-  func lines(count: Int, vertex: (Int) -> ScreenPoint, closed: Bool, segment: Segment) -> [[Double]]
-  /// `planeShapes`: a closed shape to fill, whole on each copy of the plane it shows on.
-  func shapes(count: Int, vertex: (Int) -> ScreenPoint, segment: Segment) -> [PlaneShape]
-}
-
-/// A shape carried to the screen (lib/plane-map.ts `PlaneShape`): an outline
-/// to fill, or not closed on the screen; a fill with no outline of its own
-/// (`stroke` false) is drawn by another entry's outline.
-public struct PlaneShape: Equatable, Sendable {
-  public var pts: [Double]
-  public var closed: Bool
-  public var stroke: Bool?
-
-  public init(pts: [Double], closed: Bool, stroke: Bool? = nil) {
-    self.pts = pts
-    self.closed = closed
-    self.stroke = stroke
-  }
-}
-
 /// Carry what a row added to the overlay since `mark` from x and y to a
 /// mapped panel's screen coordinates (lib/axis-map.ts). Positions the map
 /// cannot show (x ≤ 0 on a log axis) become NaN: points there are dropped,
-/// and lines break there, as they do at any other gap. With `plane`, the row
-/// goes through that plane map instead, and `maps` is not read.
-public func mapOverlay(
-  _ o: inout Overlay2D, mark: OverlayMark, maps: AxisMaps, plane: (any PlaneInverse)? = nil
-) {
-  if let plane {
-    planeOverlay(&o, mark: mark, inverse: plane)
+/// and lines break there, as they do at any other gap. A plane map's way
+/// back is built over the screen window, `box`: without one, nothing could
+/// be placed, and drawing x and y as the screen's X and Y would be wrong, so
+/// what the row added is dropped.
+public func mapOverlay(_ o: inout Overlay2D, mark: OverlayMark, maps: AxisMaps, box: ScreenBox? = nil) {
+  if let plane = maps.plane {
+    var kept = PlaneCarried()
+    planeOverlay(&o, mark: mark, inverse: box.map { PlaneInverse(plane, $0) }, kept: &kept)
     return
   }
   let mx = { (v: Double) in maps.x.map { toScreen($0, v) } ?? v }
@@ -190,20 +147,46 @@ private func mapPolylines(_ o: inout Overlay2D, mark: OverlayMark, map: Carry) {
   }
 }
 
+/// What was carried through a plane map over one window, by the values
+/// carried: the site's `planeLineCache` and `planeRegions`. (A point's and a
+/// cloud's places are remembered by the inverse itself.)
+struct PlaneCarried {
+  struct Line: Hashable {
+    var pts: [Double]
+    var fill: Bool
+    var closed: Bool
+  }
+  var lines: [Line: [PlaneShape]] = [:]
+  var regions: [[Double]: [Double]] = [:]
+
+  /// A row that moves makes new values every frame: what is kept is dropped
+  /// once it is this many, where the site's is collected with its arrays.
+  static let limit = 256
+}
+
 /// mapOverlay through a plane map (lib/plane-map.ts), whose way back is found
 /// numerically. A point is drawn wherever the screen shows it (twice, on an
 /// angle range wider than 2π); a line, a region's triangle and a cloud's dot
 /// at one place, a line followed along from its start and cut where it
-/// cannot be (the seam of an angle).
-private func planeOverlay(_ o: inout Overlay2D, mark: OverlayMark, inverse: any PlaneInverse) {
-  let kept = o.points[min(mark.points, o.points.count)...].flatMap { p in
+/// cannot be (the seam of an angle). Without an inverse (no window to build
+/// one over) nothing is placed.
+func planeOverlay(_ o: inout Overlay2D, mark: OverlayMark, inverse: PlaneInverse?, kept: inout PlaneCarried) {
+  guard let inverse else {
+    o.points.removeSubrange(min(mark.points, o.points.count)...)
+    o.polylines.removeSubrange(min(mark.polylines, o.polylines.count)...)
+    if o.clouds != nil { o.clouds!.removeSubrange(min(mark.clouds, o.clouds!.count)...) }
+    if o.regions != nil { o.regions!.removeSubrange(min(mark.regions, o.regions!.count)...) }
+    if o.texts != nil { o.texts!.removeSubrange(min(mark.texts, o.texts!.count)...) }
+    return
+  }
+  let placed = o.points[min(mark.points, o.points.count)...].flatMap { p in
     inverse.all(p.x, p.y).map { at -> Overlay2D.Point in
       var q = p
       (q.x, q.y) = at
       return q
     }
   }
-  o.points.replaceSubrange(min(mark.points, o.points.count)..., with: kept)
+  o.points.replaceSubrange(min(mark.points, o.points.count)..., with: placed)
   for k in tail(mark.clouds, o.clouds?.count ?? 0) {
     let cloud = o.clouds![k]
     let carried = zip(cloud.xs, cloud.ys).map { inverse.first($0, $1) }
@@ -216,15 +199,23 @@ private func planeOverlay(_ o: inout Overlay2D, mark: OverlayMark, inverse: any 
     let vertex = { (k: Int) -> ScreenPoint in (pts[2 * k], pts[2 * k + 1]) }
     let closed = l.closed == true
     let fill = l.fill != nil && closed
-    // A shape to fill stays one shape, on each copy of the plane it shows on.
-    // A line on each copy the window shows.
-    let shapes =
-      fill
-      ? inverse.shapes(count: pts.count / 2, vertex: vertex, segment: mappedSegment)
-      : inverse.lines(count: pts.count / 2, vertex: vertex, closed: closed, segment: mappedSegment).map {
-        // Cut into pieces, it no longer closes on itself.
-        PlaneShape(pts: $0, closed: closed && $0.allSatisfy(\.isFinite))
-      }
+    let key = PlaneCarried.Line(pts: pts, fill: fill, closed: closed)
+    let shapes: [PlaneShape]
+    if let hit = kept.lines[key] {
+      shapes = hit
+    } else {
+      // A shape to fill stays one shape, on each copy of the plane it shows on.
+      // A line on each copy the window shows.
+      shapes =
+        fill
+        ? planeShapes(inverse, pts.count / 2, vertex, mappedSegment)
+        : planeLines(inverse, pts.count / 2, vertex, closed, mappedSegment).map {
+          // Cut into pieces, it no longer closes on itself.
+          PlaneShape(pts: $0, closed: closed && $0.allSatisfy(\.isFinite))
+        }
+      if kept.lines.count >= PlaneCarried.limit { kept.lines.removeAll() }
+      kept.lines[key] = shapes
+    }
     let carried = shapes.map { shape -> Overlay2D.Polyline in
       var line = l
       line.pts = shape.pts
@@ -245,7 +236,17 @@ private func planeOverlay(_ o: inout Overlay2D, mark: OverlayMark, inverse: any 
     }
     o.polylines += carried.dropFirst()
   }
-  for k in tail(mark.regions, o.regions?.count ?? 0) { o.regions![k].tris = inverse.triangles(o.regions![k].tris) }
+  for k in tail(mark.regions, o.regions?.count ?? 0) {
+    let tris = o.regions![k].tris
+    if let hit = kept.regions[tris] {
+      o.regions![k].tris = hit
+    } else {
+      let carried = inverse.triangles(tris)
+      if kept.regions.count >= PlaneCarried.limit { kept.regions.removeAll() }
+      kept.regions[tris] = carried
+      o.regions![k].tris = carried
+    }
+  }
   for k in tail(mark.texts, o.texts?.count ?? 0) {
     (o.texts![k].x, o.texts![k].y) = inverse.first(o.texts![k].x, o.texts![k].y)
   }

@@ -3,6 +3,28 @@ import Testing
 
 @testable import EquationCore
 
+/// `body` on a thread with the main thread's stack (8 MB), where the app
+/// analyses a document. A test's own thread has 512 KB, which a debug build's
+/// frames fill on a deep row (a 50-term Σ, lowered a frame per term).
+func onMainStack<T>(_ body: @escaping () -> T) -> T {
+  let box = StackBox(body)
+  let done = DispatchSemaphore(value: 0)
+  let thread = Thread {
+    box.value = box.body()
+    done.signal()
+  }
+  thread.stackSize = 8 << 20
+  thread.start()
+  done.wait()
+  return box.value!
+}
+
+private final class StackBox<T>: @unchecked Sendable {
+  var value: T?
+  let body: () -> T
+  init(_ body: @escaping () -> T) { self.body = body }
+}
+
 /// Holds the Swift language trunk to the TypeScript one: for every example
 /// in the site's menu and a set of targeted documents, each row the port
 /// supports must come to what lib/analysis.ts says of it — its kind, error,
@@ -23,10 +45,12 @@ import Testing
     var reasons: [String: Int] = [:]
     for doc in docs {
       let name = doc["name"] as! String
+      // ANALYSIS_ONLY=<part of a name> compares those documents alone.
+      if let only = ProcessInfo.processInfo.environment["ANALYSIS_ONLY"], !name.contains(only) { continue }
       let rows = doc["rows"] as! [String]
       let results = doc["results"] as! [[String: Any]]
       let isExample = !name.hasPrefix("case ")
-      let analysis = analyze(rows)
+      let analysis = onMainStack { analyze(rows) }
       #expect(analysis.rows.count == rows.count)
       var whole = true
       for (i, want) in results.enumerated() {
@@ -292,10 +316,11 @@ import Testing
         check("gpu space", space, gpu["space"] as? String)
         same("field", field, gpu["field"])
         same("locals", locals, gpu["locals"])
-      case .tfield2d(let entries, let streamlines):
+      case .tfield2d(let entries, let streamlines, let jacobian):
         sameList("entries", entries, gpu["entries"])
         check("gpu streamlines", streamlines, gpu["streamlines"] as? Bool ?? false)
-        if gpu["jacobian"] != nil { out.append("gpu: a matrix field on mapped axes") }
+        if let jacobian { sameList("jacobian", jacobian, gpu["jacobian"]) }
+        check("gpu jacobian", jacobian != nil, gpu["jacobian"] != nil)
       case .cobweb(let curveField):
         same("curveField", curveField, gpu["curveField"])
       case .bifurcation(let field):
@@ -382,8 +407,9 @@ import Testing
         dim: (o["dim"] as! NSNumber).intValue, pts: try exprs("pts"), closed: o["closed"] as! Bool,
         arrow: o["arrow"] as? Bool ?? false, hull: o["hull"] as? Bool ?? false, over: over)
     case "tfield2d":
-      if o["jacobian"] != nil { throw FixtureError(description: "a matrix field on mapped axes") }
-      return .tfield2d(entries: try exprs("entries"), streamlines: o["streamlines"] as? Bool ?? false)
+      return .tfield2d(
+        entries: try exprs("entries"), streamlines: o["streamlines"] as? Bool ?? false,
+        jacobian: o["jacobian"] == nil ? nil : try exprs("jacobian"))
     case "tuple":
       // A multivector's coefficients, or a flat's.
       if let blades = o["blades"] as? [String: Any] {

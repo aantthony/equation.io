@@ -304,20 +304,13 @@ private struct Reference: Decodable {
     #expect(later.bars == reference.unmapped.bars)
   }
 
-  /// A plane map's inverse is a parameter (lib/plane-map.ts is not ported): mapOverlay hands it every list.
-  @Test func aPlaneInverseCarriesEveryList() {
-    struct Shift: PlaneInverse {
-      func all(_ x: Double, _ y: Double) -> [ScreenPoint] { [(x + 10, y), (x + 20, y)] }
-      func first(_ x: Double, _ y: Double) -> ScreenPoint { (x + 10, y) }
-      func triangles(_ tris: [Double]) -> [Double] { tris.map { $0 + 1 } }
-      func lines(count: Int, vertex: (Int) -> ScreenPoint, closed: Bool, segment: Segment) -> [[Double]] {
-        [(0..<count).flatMap { [vertex($0).0 + 10, vertex($0).1] }, [0, 0, .nan, .nan]]
-      }
-      func shapes(count: Int, vertex: (Int) -> ScreenPoint, segment: Segment) -> [PlaneShape] {
-        [PlaneShape(pts: [0, 0, 1, 0, 1, 1], closed: true, stroke: false), PlaneShape(pts: [0, 0, 1, 1], closed: false)]
-      }
-    }
+  /// A plane map carries every list through its way back (lib/plane-map.ts): here a shift, and a turn.
+  @Test func aPlaneMapCarriesEveryList() throws {
     let blue: CSSColor = "rgb(45, 112, 179)"
+    func near(_ a: [Double], _ b: [Double]) -> Bool {
+      a.count == b.count && zip(a, b).allSatisfy { abs($0 - $1) < 1e-6 }
+    }
+    let shift = AxisMaps(plane: try parsePlaneMap("(X - 10, Y)"))
     var overlay = Overlay2D(
       points: [.init(x: 1, y: 2, color: blue)],
       clouds: [.init(xs: [1, 2], ys: [3, 4], color: blue)],
@@ -327,16 +320,75 @@ private struct Reference: Decodable {
       ],
       regions: [.init(tris: [0, 0, 1, 0, 0, 1], fill: blue)],
       texts: [.init(x: 1, y: 2, text: "a", color: blue)])
-    mapOverlay(&overlay, mark: markOverlay(Overlay2D()), maps: AxisMaps(), plane: Shift())
-    #expect(overlay.points.map(\.x) == [11, 21])
-    #expect(overlay.clouds?[0].xs == [11, 12])
-    #expect(overlay.regions?[0].tris == [1, 1, 2, 1, 1, 2])
-    #expect(overlay.texts?[0].x == 11)
-    // The line, on each copy the window shows; a piece that was cut no longer closes. Then the shape's pieces.
-    #expect(overlay.polylines.count == 4)
-    #expect(overlay.polylines[0].pts == [10, 0, 11, 1, 12, 0] && overlay.polylines[0].closed == true)
-    #expect(overlay.polylines[1].noStroke == true && overlay.polylines[1].fill == blue)
-    #expect(overlay.polylines[2].closed == false && overlay.polylines[2].fill == nil)
-    #expect(overlay.polylines[3].closed == false && overlay.polylines[3].pts.count == 4)
+    let box = ScreenBox(lo: [0, -5], hi: [20, 5])
+    mapOverlay(&overlay, mark: markOverlay(Overlay2D()), maps: shift, box: box)
+    #expect(near(overlay.points.map(\.x), [11]))
+    #expect(near(overlay.clouds?[0].xs ?? [], [11, 12]))
+    #expect(near(overlay.regions?[0].tris ?? [], [10, 0, 11, 0, 10, 1]))
+    #expect(near([overlay.texts?[0].x ?? .nan], [11]))
+    #expect(overlay.polylines.count == 2)
+    // The line goes round to where it started; the shape is still one to fill.
+    #expect(near(overlay.polylines[0].pts, [10, 0, 11, 1, 12, 0, 10, 0]))
+    #expect(near(overlay.polylines[1].pts, [10, 0, 11, 1, 12, 0]))
+    #expect(overlay.polylines[1].closed == true && overlay.polylines[1].fill == blue)
+
+    // The polar screen two turns wide shows a point twice, and a line on both copies.
+    let polar = AxisMaps(plane: try parsePlaneMap("(Y cos(X), Y sin(X))"))
+    var twice = Overlay2D(points: [.init(x: 0, y: 2, color: blue)], polylines: [.init(pts: [1, 1, 1, 2], color: blue)])
+    let wide = ScreenBox(lo: [0, 0.5], hi: [4 * Double.pi, 4])
+    mapOverlay(&twice, mark: markOverlay(Overlay2D()), maps: polar, box: wide)
+    // (And once more just past the window's edge, where a search still looks.)
+    #expect(near(twice.points.map(\.x).sorted(), [Double.pi / 2, 5 * Double.pi / 2, 9 * Double.pi / 2]))
+    #expect(twice.points.allSatisfy { abs($0.y - 2) < 1e-6 })
+    #expect(twice.polylines.count == 3)
+    // Without a window there is no way back, and nothing is drawn in the wrong place.
+    var lost = Overlay2D(points: [.init(x: 0, y: 2, color: blue)])
+    mapOverlay(&lost, mark: markOverlay(Overlay2D()), maps: polar)
+    #expect(lost.points.isEmpty)
+  }
+
+  /// A document whose view maps (x, y) together: what its rows place is on the screen, its coordinate
+  /// grids go through the map, its window is written in X and Y, and a drag reads the screen back.
+  @Test func aPlaneMappedPanel() throws {
+    let rows = [
+      "r = sqrt(x^2 + y^2)", "view((x, y) = (Y cos(X), Y sin(X)), X = -pi..pi, Y = 0..4)", "(0, 2)", "A = (-1, 0)",
+      "x^2 + y^2 = 4", "segment((1, 0), (0, 1))", "w^2 = -1", "int[0..1] x dx", "hist([1, 2])",
+    ]
+    let analysis = analyze(rows)
+    #expect(analysis.rows[8].error?.contains("histogram bars") == true)
+    #expect(analysis.rows.dropLast().allSatisfy { $0.error == nil && $0.unsupported == nil })
+    let graph = Graph2D(analysis, colors: analysis.rows.map { _ in RGB(0.2, 0.4, 0.6) })
+    #expect(graph.maps?.plane?.text == "(Y cos(X), Y sin(X))")
+    let (width, height) = (800.0, 400.0)
+    let scene = graph.scene(at: 0, width: width, height: height)
+    let view = try #require(scene.view)
+    let bounds = Graph2D.Bounds(view: view, width: width, height: height)
+    // (The window that shows both ranges asked for, at one scale.)
+    #expect(abs(bounds.xmin + 4) < 1e-9 && abs(bounds.xmax - 4) < 1e-9 && abs(bounds.ymax - 4) < 1e-9)
+    let overlay = try #require(scene.overlay)
+    func has(_ x: Double, _ y: Double) -> Bool {
+      overlay.points.contains { abs($0.x - x) < 1e-6 && abs($0.y - y) < 1e-6 }
+    }
+    // (0, 2) at the angle π/2; A at π and at −π, the window's two edges; the roots ±i.
+    #expect(has(.pi / 2, 2))
+    #expect(has(.pi, 1) && has(-.pi, 1))
+    #expect(has(.pi / 2, 1) && has(-.pi / 2, 1))
+    // The segment is a line, bent: from angle 0 to π/2, nearest the origin half way. (And again on the
+    // copies of the plane just past the window, where a line is still followed.)
+    let line = try #require(overlay.polylines.first { abs($0.pts[0]) < 1e-6 })
+    #expect(overlay.polylines.count >= 2 && line.pts.count > 4)
+    #expect(abs(line.pts[line.pts.count - 2] - .pi / 2) < 1e-6)
+    #expect(abs(line.pts.enumerated().filter { $0.offset % 2 == 1 }.map(\.element).min()! - 0.5.squareRoot()) < 1e-3)
+    // The integral reads out, and shades nothing: its area would stand on a bent y = 0.
+    if case .value(_, let shade)? = analysis.rows[7].cpu { #expect(shade == nil) } else { Issue.record("no value") }
+    // r's circles are level lines of the screen's Y.
+    let specs = try #require(scene.gridSpecs)
+    #expect(specs.count == 1 && specs[0].gradGlsl != nil)
+    #expect(graph.screenPoint(0, 2, bounds: bounds).map { abs($0.x - .pi / 2) < 1e-6 && abs($0.y - 2) < 1e-6 } == true)
+    let dropped = try #require(graph.dragToPlane(.pi / 2, 3, upp: view.upp, uppY: view.uppY))
+    #expect(dropped.x == 0 && dropped.y == 3)
+    #expect(
+      formatViewRow(view, width: width, height: height, maps: graph.maps)
+        == "view((x, y) = (Y cos(X), Y sin(X)), X = -4..4, Y = 0..4)")
   }
 }

@@ -42,8 +42,8 @@ public enum CpuPlan: Equatable, Sendable {
   /// columns. `arrow`: a head at the last vertex; `hull`: the convex hull of
   /// the points is what is drawn.
   case polygon(dim: Int, pts: [Expr], closed: Bool, arrow: Bool, hull: Bool, over: [Column]?)
-  /// A 2×2 matrix field's entries, row-major.
-  case tfield2d(entries: [Expr], streamlines: Bool)
+  /// A 2×2 matrix field's entries, row-major; on mapped axes, with the maps' Jacobian.
+  case tfield2d(entries: [Expr], streamlines: Bool, jacobian: [Expr]? = nil)
   /// Values read out: a long tuple's (`length` of them in all), or a
   /// matrix's or tensor's, nested by `shape`.
   case tuple(values: [Expr], shape: [Int]?, length: Int?)
@@ -193,7 +193,7 @@ public struct GpuPlan: Equatable, Sendable {
     /// calculations `locals` declares.
     case color2d(space: String, field: String, locals: String)
     /// A 2×2 matrix field's entries, row-major, each in floats x, y and t.
-    case tfield2d(entries: [String], streamlines: Bool)
+    case tfield2d(entries: [String], streamlines: Bool, jacobian: [String]? = nil)
     /// A cobweb's curve y = f(x), as an implicit field.
     case cobweb(curveField: String)
     /// A recurrence's map in the float `a`, its parameter the pixel's x.
@@ -304,7 +304,8 @@ public func compileCpu(_ classified: Classified) throws -> CpuPlan {
   case .figure(let form, let dimension, let vertices, let over):
     return compileFigure(form: form, dimension: dimension, vertices: vertices, over: over)
   case .tensorField(let entries, let streamlines):
-    return .tfield2d(entries: try entries.map(real), streamlines: streamlines)
+    return .tfield2d(
+      entries: try entries.map(real), streamlines: streamlines, jacobian: try classified.jacobian?.map(real))
   case .tuple(let values, let shape, let length):
     return .tuple(values: try values.map(real), shape: shape, length: length)
   case .note(let expr, let variable, let constant, let identity):
@@ -434,7 +435,10 @@ public func compileGpu(_ classified: Classified) throws -> GpuPlan {
   case .complexField(let form, let expr):
     return plan(.complexField(form: form, field: try scalar(expr)))
   case .tensorField(let entries, let streamlines):
-    return plan(.tfield2d(entries: try entries.map { try glsl(sub($0)) }, streamlines: streamlines))
+    return plan(
+      .tfield2d(
+        entries: try entries.map { try glsl(sub($0)) }, streamlines: streamlines,
+        jacobian: try classified.jacobian?.map { try glsl(sub($0)) }))
   case .cobweb(let expr, let variable, _):
     return plan(.cobweb(curveField: try glsl(sub(.eq(.var("y"), substVars(expr, [variable: .var("x")]))))))
   case .bifurcation(let expr, let variable, _):

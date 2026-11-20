@@ -36,15 +36,6 @@ private let surfaceUsage =
   "Expected on((X, Y, Z) = (cos(y) cos(x), cos(y) sin(x), sin(y)), x = lo..hi, y = lo..hi): the surface the "
   + "panel’s rows are drawn on."
 
-/// Whether a map's expression writes a Σ, Π or ∫ anywhere.
-private func writesSum(_ e: Expr) -> Bool {
-  switch e {
-  case .call(let name, _) where name == "sum" || name == "prod" || name == "int": return true
-  case .var(let name) where name == "sum" || name == "prod" || name == "int": return true
-  default: return childrenOf(e).contains(where: writesSum)
-  }
-}
-
 /// Parse the right side of `(X, Y, Z) = (…)` in an on(…) row, with the
 /// ranges of x and y (`parseSurfaceMap`). Sliders are read at their value,
 /// as a view map reads them, so moving one reanalyses. `documentNames` are
@@ -53,19 +44,24 @@ func parseSurfaceMap(
   _ src: String, x: [Double], y: [Double], env: [String: Double] = [:], documentNames: Set<String> = [],
   valueNames: Set<String> = []
 ) throws -> SurfaceMap {
-  guard let parsed = try? parseExpr(src, valueNames: valueNames), case .vec(let items) = parsed, items.count == 3
+  var doc = MapDoc()
+  (doc.documentNames, doc.valueNames) = (documentNames, valueNames)
+  return try parseSurfaceMap(src, x: x, y: y, env: env, doc: doc)
+}
+
+func parseSurfaceMap(
+  _ src: String, x: [Double], y: [Double], env: [String: Double], doc: MapDoc
+) throws -> SurfaceMap {
+  guard let parsed = try? parseExpr(src, valueNames: doc.valueNames), case .vec(let written) = parsed,
+    written.count == 3
   else {
     throw LanguageError(surfaceUsage)
   }
-  // Port: the site writes a map's sums out term by term (`expandMapSums`).
-  if writesSum(parsed) { throw Unsupported("sums in a surface's map") }
-  // A bare function name (`cos x`) would otherwise read as a name with no value (`expandMapSums`).
-  for v in freeVars(parsed).list where builtinFn(v) == v && env[v] == nil && !documentNames.contains(v) {
-    throw LanguageError("\(v) is a function — write it with parentheses, e.g. \(v)(x).")
-  }
+  // Its sums written out term by term (MapSums.swift).
+  let items = try written.map { try expandMapSums($0, ["x", "y"], env, doc) }
   var values: [String: Expr] = [:]
   var uses = false
-  for name in freeVars(parsed).list {
+  for name in freeVars(.vec(items)).list {
     if name == "x" || name == "y" {
       uses = true
     } else if name != "pi" && name != "e" {

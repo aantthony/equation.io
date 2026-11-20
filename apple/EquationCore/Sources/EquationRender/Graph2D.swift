@@ -44,6 +44,8 @@ public struct Graph2D: Equatable, Sendable {
   let systemsSolved = SolvedSystems()
   /// Each parametric region's triangles (Graph2D+ParametricRegions.swift).
   let sampledRegions = SampledRegions()
+  /// The way back through the panel's plane map (Graph2D+Maps.swift).
+  let planes = PlaneInverses()
 
   public struct Window: Equatable, Sendable {
     public var x: [Double]?
@@ -105,8 +107,10 @@ public struct Graph2D: Equatable, Sendable {
         vfields.append(VField2D(fx: fx, fy: fy, color: color, params: gpu.params))
       case .complexField, .fractal2d, .color2d:
         complexLayers.add(gpu, color: color)
-      case .tfield2d(let entries, let streamlines):
-        tfields.append(TField2D(entries: entries, color: color, params: gpu.params, streamlines: streamlines))
+      case .tfield2d(let entries, let streamlines, let jacobian):
+        tfields.append(
+          TField2D(
+            entries: entries, color: color, params: gpu.params, streamlines: streamlines, jacobian: jacobian))
       case .cobweb(let curveField):
         // The map's curve y = f(x); its path is the overlay's.
         curves.append(Curve2D(field: curveField, color: color, params: gpu.params))
@@ -165,7 +169,7 @@ public struct Graph2D: Equatable, Sendable {
       let css = CSSColor(color)
       // A mapped panel carries what the row places to its screen.
       let mark = markOverlay(overlay)
-      defer { carry(&overlay, row, since: mark) }
+      defer { carry(&overlay, row, since: mark, bounds: bounds) }
       // A named point (`A = (1, 2)`) has no plan of its own: its components
       // are the constants A_x and A_y, and it is drawn with its name.
       if row.cpu == nil, let name = row.definition?.name, let x = env["\(name)_x"], let y = env["\(name)_y"],

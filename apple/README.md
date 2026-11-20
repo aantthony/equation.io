@@ -106,6 +106,10 @@ labels, points, polylines, clouds, bars, regions, a graph's vertices, text) is `
 it as `overlay`. A mapped axis (`view(x = 10^X)`) is the core's
 `AxisMap.swift`, which also rewrites a row for one; its ticks are
 `AxisTicks.swift`, and `MapOverlay.swift` carries a row's overlay through one.
+A view that maps both at once (`view((x, y) = (Y cos(X), Y sin(X)))`) is
+`PlaneMap.swift`, and `PlaneInverse.swift` its way back from the plane to the
+screen, found numerically and held to lib/plane-map.ts by a fixture of its
+own (`PlaneConformanceTests`).
 
 `Graph2D` is one panel filling a frame; `GraphPanels` (EquationRender) is a
 document as its panels, split by `---` rows (the core's `Panels.swift`), each

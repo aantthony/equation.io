@@ -9,7 +9,12 @@ import Foundation
 /// there it is taken from `mine`, so the two compare equal.
 func mappedViewSpec(_ view: [String: Any], like mine: ViewSpec) throws -> ViewSpec? {
   guard let maps = view["maps"] as? [String: Any] else { return nil }
-  if maps["plane"] != nil { throw FixtureError(description: "a plane map") }
+  var plane: PlaneMap?
+  if let m = maps["plane"] as? [String: Any] {
+    plane = PlaneMap(
+      text: m["text"] as! String, forward: try (m["forward"] as! [Any]).map { try decode($0) },
+      jacobian: try (m["jacobian"] as! [Any]).map { try decode($0) })
+  }
   func map(_ key: String) throws -> AxisMap? {
     guard let m = maps[key] as? [String: Any] else { return nil }
     return AxisMap(
@@ -25,5 +30,5 @@ func mappedViewSpec(_ view: [String: Any], like mine: ViewSpec) throws -> ViewSp
   if case .mappedView(let mx, let my, _, _, _) = mine { (x, y) = (mx, my) }
   return .mappedView(
     x: pair("x", x), y: pair("y", y), ratio: view["ratio"].map(number), locked: view["locked"] as? Bool ?? false,
-    maps: AxisMaps(x: try map("x"), y: try map("y")))
+    maps: AxisMaps(x: try map("x"), y: try map("y"), plane: plane))
 }

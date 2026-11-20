@@ -68,10 +68,11 @@ extension Graph2D {
     default: return
     }
     // (With no window given, the one a graph opens on.)
-    let window = window ?? Bounds(xmin: -8, xmax: 8, ymin: -6, ymax: 6)
+    let row = analysis.rows[index]
+    // (On a mapped panel, a system that is placed solves over what the maps show: Graph2D+Maps.swift.)
+    guard let window = solveWindow(row, window ?? Bounds(xmin: -8, xmax: 8, ymin: -6, ymax: 6)) else { return }
     let (vlo, vhi) = ([window.xmin, window.ymin], [window.xmax, window.ymax])
     guard zip(vlo, vhi).allSatisfy({ $0.isFinite && $1.isFinite && $1 > $0 }) else { return }
-    let row = analysis.rows[index]
     var values = (row.classified?.params ?? []).map { (env[$0] ?? .nan).bitPattern }
     if row.classified?.animated == true { values.append((env["t"] ?? 0).bitPattern) }
     let vars = ["x", "y"]
