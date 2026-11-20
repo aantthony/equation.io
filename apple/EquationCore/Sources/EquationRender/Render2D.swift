@@ -63,9 +63,24 @@ public struct Curve2D: Equatable, Codable, Sendable {
 /// Everything drawable in a 2D frame, in back-to-front draw order
 /// (web/render2d.ts `Layers2D`). A layer joins this struct when its shader is ported.
 public struct Layers2D: Equatable, Codable, Sendable {
+  /// Contour stacks of f for `f(x,y) = c` rows; drawn under the other layers.
+  public var levels: [LevelSpec]?
+  public var ineqs: [Ineq2D]?
+  public var projections: [Projected2D]?
+  public var bifs: [Bif2D]?
+  /// `gain` multiplies F before it is shaded (0.6 without).
+  public var scalars: [Scalar2D]?
   public var curves: [Curve2D]?
 
-  public init(curves: [Curve2D]? = nil) {
+  public init(
+    levels: [LevelSpec]? = nil, ineqs: [Ineq2D]? = nil, projections: [Projected2D]? = nil, bifs: [Bif2D]? = nil,
+    scalars: [Scalar2D]? = nil, curves: [Curve2D]? = nil
+  ) {
+    self.levels = levels
+    self.ineqs = ineqs
+    self.projections = projections
+    self.bifs = bifs
+    self.scalars = scalars
     self.curves = curves
   }
 }
@@ -192,6 +207,25 @@ public final class Renderer2D {
       }
     }
 
+    // Contour stacks sit just above the grid, under everything else, so the
+    // solid level and any other layer stay readable on top.
+    for lv in layers.levels ?? [] {
+      drawProgram(levelsFrag(lv), lv.color, lv.params, ["uMajor": lv.major, "uMinor": lv.minor])
+    }
+    for q in layers.ineqs ?? [] {
+      drawProgram(ineqFrag(q.field, edges: q.edges, params: q.params), q.color, q.params, q.uniforms)
+    }
+    for q in layers.projections ?? [] {
+      drawProgram(
+        projFrag(q.field, relation: q.relation, slope: q.slope, params: q.params), q.color, q.params, q.uniforms)
+    }
+    for b in layers.bifs ?? [] {
+      drawProgram(bifFrag(b.field, params: b.params), b.color, b.params, b.uniforms)
+    }
+    for s in layers.scalars ?? [] {
+      let extra = (s.uniforms ?? [:]).merging(["uGain": s.gain ?? 0.6]) { _, gain in gain }
+      drawProgram(scalarFrag(s.field, params: s.params), s.color, s.params, extra)
+    }
     for c in layers.curves ?? [] {
       drawProgram(curveFrag(c.field, params: c.params, graphEval: c.graphEval), c.color, c.params, c.uniforms)
     }
