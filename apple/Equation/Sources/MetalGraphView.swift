@@ -1,54 +1,7 @@
 import EquationCore
+import EquationRender
 import MetalKit
 import SwiftUI
-
-/// The setting that draws graphs in Metal where it can: View ▸ Draw with
-/// Metal, or `EQUATION_RENDERER=metal` in the environment.
-let metalRendererKey = "metalRenderer"
-
-/// The graph. The web renderer draws it, and reports on the rows either way;
-/// with the Metal renderer switched on, a document whose every row Metal can
-/// draw is drawn by it instead, over the web view. Any other row (a slider,
-/// a surface, a point, …) leaves the whole document to the web renderer.
-struct GraphSurface: View {
-  @Binding var document: GraphDocument
-  var model: GraphModel
-  @AppStorage(metalRendererKey) private var metal = false
-  @Environment(\.colorScheme) private var colorScheme
-
-  var body: some View {
-    let theme = colorScheme == .dark ? GraphTheme.dark : .light
-    ZStack {
-      GraphView(document: $document, model: model)
-      if metal, MetalCanvas.available, let scene = MetalScene(rows: document.rows, status: model.status, theme: theme) {
-        MetalGraphView(scene: scene, theme: theme, generation: document.generation, model: model)
-      }
-    }
-  }
-}
-
-/// What the Metal renderer draws for a document.
-struct MetalScene: Equatable {
-  var curves: [MetalCurve] = []
-  /// A row reads t, so the graph redraws every frame.
-  var animated = false
-
-  /// Nil when a row is not one the Metal renderer draws yet.
-  init?(rows: [GraphRow], status: [RowStatus], theme: GraphTheme) {
-    for (index, row) in rows.enumerated() {
-      guard let plot = plotRow(row.text) else { return nil }
-      guard case .curve(let field, let animated) = plot else { continue }
-      // The web renderer's color for the row, once it has reported on these
-      // rows; until then, the palette in order.
-      var color = theme.palette[curves.count % theme.palette.count]
-      if status.count == rows.count, let reported = status[index].color, reported.count == 3 {
-        color = SIMD3(Float(reported[0]), Float(reported[1]), Float(reported[2]))
-      }
-      curves.append(MetalCurve(field: field, color: color))
-      if animated { self.animated = true }
-    }
-  }
-}
 
 /// The window onto the plane, shared by the Metal view and the labels over it.
 @MainActor @Observable
@@ -56,8 +9,9 @@ final class GraphViewport {
   var view = View2D()
 }
 
-private struct MetalGraphView: View {
-  var scene: MetalScene
+/// The graph's Metal view, with the overlay's labels over it.
+struct MetalGraphView: View {
+  var analysis: GraphAnalysis
   var theme: GraphTheme
   var generation: Int
   var model: GraphModel
@@ -65,79 +19,34 @@ private struct MetalGraphView: View {
   @Environment(\.displayScale) private var displayScale
 
   var body: some View {
-    MetalCanvasView(scene: scene, theme: theme, generation: generation, viewport: viewport, model: model)
+    MetalCanvasView(analysis: analysis, theme: theme, generation: generation, viewport: viewport, model: model)
       .overlay {
-        AxisLabels(view: viewport.view, scale: displayScale, color: theme.label)
+        AxisLabels(view: viewport.view, scale: displayScale, theme: theme)
           .allowsHitTesting(false)
       }
   }
 }
 
-/// The numbers along the axes (web/render2d.ts `drawLabels2D`): at each major
-/// grid line, beside the axis, or along the edge once the axis is off screen.
+/// The overlay: the numbers along the axes (EquationRender `drawLabels2D`).
 private struct AxisLabels: View {
   var view: View2D
   /// Device pixels per point.
   var scale: Double
-  var color: SIMD3<Float>
+  var theme: GraphTheme
 
   var body: some View {
     Canvas { context, size in
-      let w = size.width
-      let h = size.height
-      let upp = view.upp * scale  // math units per point
-      let major = niceSpacing(upp: view.upp, minPx: 90).major
-      guard w > 0, h > 0, upp > 0, major > 0, major.isFinite else { return }
-      let screenX = { (x: Double) in (x - view.cx) / upp + w / 2 }
-      let screenY = { (y: Double) in h / 2 - (y - view.cy) / upp }
-      let axisY = min(max(screenY(0), 12), h - 6)
-      let axisX = min(max(screenX(0), 4), w - 30)
-      let style = Color(red: Double(color.x), green: Double(color.y), blue: Double(color.z))
-
-      func label(_ value: Double, x: Double, baseline: Double) {
-        let text = context.resolve(Text(axisLabel(value)).font(.system(size: 11)).foregroundStyle(style))
-        let rise = text.firstBaseline(in: CGSize(width: 400, height: 100))
-        context.draw(text, at: CGPoint(x: x, y: baseline - rise), anchor: .topLeading)
-      }
-      /// The multiples of the major spacing between two edges, but zero.
-      func ticks(from low: Double, to high: Double) -> [Double] {
-        let first = (low / major).rounded(.up)
-        let count = min(max(Int((high / major).rounded(.down) - first) + 1, 0), 200)
-        return (0..<count).map { (first + Double($0)) * major }.filter { abs($0) >= major / 2 }
-      }
-
-      for x in ticks(from: view.cx - w / 2 * upp, to: view.cx + w / 2 * upp) {
-        label(x, x: screenX(x) + 2, baseline: axisY + 13 <= h ? axisY + 13 : axisY - 4)
-      }
-      for y in ticks(from: view.cy - h / 2 * upp, to: view.cy + h / 2 * upp) {
-        label(y, x: axisX + 4, baseline: screenY(y) - 3)
+      context.withCGContext { ctx in
+        drawLabels2D(ctx, size: size, view: view, dpr: scale, theme: theme)
       }
     }
   }
-}
-
-/// An axis numeral: plain to ten significant digits, 1e5 and 2e-5 beyond.
-func axisLabel(_ value: Double) -> String {
-  if value == 0 { return "0" }
-  let magnitude = abs(value)
-  if magnitude >= 1e5 || magnitude < 1e-4 {
-    var exponent = Int(floor(log10(magnitude)))
-    var mantissa = (value / pow(10, Double(exponent))).rounded()
-    if abs(mantissa) >= 10 {
-      mantissa /= 10
-      exponent += 1
-    }
-    return "\(Int(mantissa))e\(exponent)"
-  }
-  let rounded = Double(String(format: "%.9e", value)) ?? value
-  let text = "\(rounded)"
-  return text.hasSuffix(".0") ? String(text.dropLast(2)) : text
 }
 
 // MARK: - The Metal view
 
 private struct MetalCanvasView {
-  var scene: MetalScene
+  var analysis: GraphAnalysis
   var theme: GraphTheme
   var generation: Int
   var viewport: GraphViewport
@@ -157,9 +66,9 @@ private struct MetalCanvasView {
   }
 
   @MainActor private func update(_ canvas: MetalCanvas, _ coordinator: Coordinator) {
-    canvas.curves = scene.curves
+    canvas.layers = analysis.layers
     canvas.theme = theme
-    canvas.animated = scene.animated
+    canvas.animated = analysis.animated
     // A replaced document opens as a new graph: reframed, its clock at zero.
     if let shown = coordinator.generation, shown != generation { canvas.open() }
     coordinator.generation = generation
@@ -189,13 +98,11 @@ private struct MetalCanvasView {
 /// Draws the graph, and moves its window: a drag or a two-finger scroll
 /// pans, a pinch (or Shift and a scroll) zooms about the pointer.
 final class MetalCanvas: MTKView, MTKViewDelegate {
-  static let available = MTLCreateSystemDefaultDevice() != nil
-
   let viewport: GraphViewport
-  private let renderer: MetalRenderer?
+  private let renderer: Renderer2D?
 
-  var curves: [MetalCurve] = [] {
-    didSet { if curves != oldValue { redraw() } }
+  var layers = Layers2D() {
+    didSet { if layers != oldValue { redraw() } }
   }
   var theme = GraphTheme.light {
     didSet { if theme != oldValue { redraw() } }
@@ -218,10 +125,10 @@ final class MetalCanvas: MTKView, MTKViewDelegate {
 
   init(viewport: GraphViewport) {
     self.viewport = viewport
-    let device = MTLCreateSystemDefaultDevice()
-    renderer = MetalRenderer(device: device)
-    super.init(frame: .zero, device: device)
-    colorPixelFormat = MetalRenderer.pixelFormat
+    let metal = MetalContext()
+    renderer = metal.map(Renderer2D.init)
+    super.init(frame: .zero, device: metal?.device)
+    colorPixelFormat = MetalContext.pixelFormat
     isPaused = true
     enableSetNeedsDisplay = true
     delegate = self
@@ -264,7 +171,7 @@ final class MetalCanvas: MTKView, MTKViewDelegate {
   private func frame(in size: CGSize) {
     guard !framed, size.width > 0, size.height > 0 else { return }
     framed = true
-    viewport.view = View2D(cx: 0, cy: 0, upp: 12 / min(size.width, size.height))
+    viewport.view = .opening(width: size.width, height: size.height)
   }
 
   // MARK: Drawing
@@ -278,11 +185,13 @@ final class MetalCanvas: MTKView, MTKViewDelegate {
     let size = drawableSize
     frame(in: size)
     guard let renderer, size.width > 0, size.height > 0, let pass = currentRenderPassDescriptor,
-      let drawable = currentDrawable,
-      let buffer = renderer.draw(
-        pass: pass, size: SIMD2(Float(size.width), Float(size.height)), view: viewport.view, curves: curves,
-        time: Float(CACurrentMediaTime() - opened), theme: theme)
+      let drawable = currentDrawable, let buffer = renderer.metal.queue.makeCommandBuffer(),
+      let encoder = buffer.makeRenderCommandEncoder(descriptor: pass)
     else { return }
+    renderer.render(
+      encoder, target: (Int(size.width), Int(size.height)), view: viewport.view, layers: layers,
+      time: CACurrentMediaTime() - opened, theme: theme)
+    encoder.endEncoding()
     buffer.present(drawable)
     buffer.commit()
   }
@@ -314,6 +223,45 @@ final class MetalCanvas: MTKView, MTKViewDelegate {
     view.cy = my - py * view.upp
     viewport.view = view
     redraw()
+  }
+
+  /// The visible window, in math units.
+  var visible: (x: [Double], y: [Double]) {
+    let view = viewport.view
+    let halfX = Double(drawableSize.width) / 2 * view.upp
+    let halfY = Double(drawableSize.height) / 2 * view.uppY
+    return ([view.cx - halfX, view.cx + halfX], [view.cy - halfY, view.cy + halfY])
+  }
+
+  /// Ease the window to show the given ranges (one alone keeps the other
+  /// axis's center, at the same scale), arriving after `seconds`.
+  func glide(x: (Double, Double)?, y: (Double, Double)?, seconds: Double) async {
+    glide?.cancel()
+    let size = drawableSize
+    guard size.width > 0, size.height > 0 else { return }
+    let from = viewport.view
+    var to = from
+    if let x { to.cx = (x.0 + x.1) / 2 }
+    if let y { to.cy = (y.0 + y.1) / 2 }
+    // The scale that shows every range asked for.
+    to.upp = max(x.map { ($0.1 - $0.0) / size.width } ?? 0, y.map { ($0.1 - $0.0) / size.height } ?? 0)
+    let start = CACurrentMediaTime()
+    let task = Task { @MainActor [weak self] in
+      while !Task.isCancelled {
+        let k = seconds > 0 ? min((CACurrentMediaTime() - start) / seconds, 1) : 1
+        let eased = k * k * (3 - 2 * k)
+        var view = from
+        view.cx = from.cx + (to.cx - from.cx) * eased
+        view.cy = from.cy + (to.cy - from.cy) * eased
+        view.upp = from.upp * pow(to.upp / from.upp, eased)
+        self?.viewport.view = view
+        self?.redraw()
+        if k >= 1 { break }
+        try? await Task.sleep(for: .milliseconds(8))
+      }
+    }
+    glide = task
+    await task.value
   }
 
   /// Glide the zoom about the graph's center: below 1 zooms in, above 1 out.

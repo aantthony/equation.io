@@ -20,6 +20,9 @@ targets:
       - path: Sources
     dependencies:
       - package: EquationCore
+        product: EquationCore
+      - package: EquationCore
+        product: EquationRender
     info:
       path: Sources/Info.plist
       properties:

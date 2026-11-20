@@ -3,10 +3,6 @@ import SwiftUI
 @main
 enum Main {
   static func main() {
-    // The Metal renderer, for a launch from a script or a scheme.
-    if ProcessInfo.processInfo.environment["EQUATION_RENDERER"] == "metal" {
-      UserDefaults.standard.register(defaults: [metalRendererKey: true])
-    }
     #if DEBUG
       // A scratch window straight onto a graph, skipping the document
       // browser: how a simulator or UI test opens the editor directly.

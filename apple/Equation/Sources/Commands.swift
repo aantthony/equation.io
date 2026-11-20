@@ -10,11 +10,9 @@ extension FocusedValues {
 }
 
 /// View ▸ Zoom In / Zoom Out, as in Maps. In the menu, so the shortcuts work
-/// while the caret is in the equations. And Draw with Metal, while the Metal
-/// renderer is being built (MetalGraphView.swift).
+/// while the caret is in the equations.
 struct ZoomCommands: Commands {
   @FocusedValue(\.graphModel) private var graph
-  @AppStorage(metalRendererKey) private var metal = false
 
   var body: some Commands {
     CommandGroup(before: .toolbar) {
@@ -25,8 +23,6 @@ struct ZoomCommands: Commands {
       Button("Zoom Out") { graph?.zoom(by: 2) }
         .keyboardShortcut("-")
         .disabled(graph == nil)
-      Divider()
-      Toggle("Draw with Metal", isOn: $metal)
       Divider()
     }
   }

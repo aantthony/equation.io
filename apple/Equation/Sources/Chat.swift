@@ -3,63 +3,74 @@ import SwiftUI
 
 // MARK: - The graph, as the chat sees it
 
-/// The open graph, for the chat's tools: the renderer, through its bridge.
+/// The open graph, for the chat's tools.
 @MainActor final class GraphAccess: GraphTools {
   var rows: () -> [String] = { [] }
   var apply: ([String]) -> Void = { _ in }
   weak var model: GraphModel?
 
-  /// The voice prototype's get_graph: every row's status and meaning, and the window or camera.
+  /// What the renderer no longer answers and the app doesn't yet: the
+  /// lookups and sliders arrive with the language's port.
+  private static let notYet = #"{"error":"not available in this build of the app yet"}"#
+
+  /// The voice prototype's get_graph: every row's status, and the window.
   func graph() async -> String {
-    await model?.ask("return window.equationApp.graph()") ?? #"{"error":"the graph isn't ready"}"#
+    guard let model else { return #"{"error":"the graph isn't ready"}"# }
+    return Self.state(rows: rows(), status: await model.status(after: rows()), window: model.metal?.visible)
   }
 
-  /// Change the graph, wait for the renderer to draw it, and read it back.
+  /// Change the graph, and read it back.
   func set(_ rows: [String]) async -> String {
     apply(rows)
-    _ = await model?.status(after: rows)
-    return await graph()
+    guard let model else { return #"{"error":"the graph isn't ready"}"# }
+    return Self.state(rows: rows, status: await model.status(after: rows), window: model.metal?.visible)
   }
 
   func moveView(_ target: [String: Any], seconds: Double) async -> String {
-    return await model?.ask(
-      "return window.equationApp.moveView(target, seconds)", ["target": target, "seconds": seconds])
-      ?? #"{"error":"the graph isn't ready"}"#
+    guard let canvas = model?.metal else { return #"{"error":"the graph isn't ready"}"# }
+    let range = { (key: String) -> (Double, Double)? in
+      guard let pair = (target[key] as? [Any])?.compactMap({ ($0 as? NSNumber)?.doubleValue }), pair.count == 2,
+        pair[0].isFinite, pair[1].isFinite, pair[0] != pair[1]
+      else { return nil }
+      return (min(pair[0], pair[1]), max(pair[0], pair[1]))
+    }
+    guard range("x") != nil || range("y") != nil else {
+      return #"{"error":"give the window as x: [min, max] and y: [min, max]"}"#
+    }
+    await canvas.glide(x: range("x"), y: range("y"), seconds: seconds)
+    return Self.state(rows: rows(), status: model?.status ?? [], window: canvas.visible)
   }
 
-  func animateSlider(_ name: String, to: Double, from: Double?, seconds: Double) async -> String {
-    var arguments: [String: Any] = ["name": name, "to": to, "seconds": seconds]
-    if let from { arguments["from"] = from }
-    let body =
-      from == nil
-      ? "return window.equationApp.animateSlider(name, to, seconds)"
-      : "return window.equationApp.animateSlider(name, to, seconds, from)"
-    return await model?.ask(body, arguments) ?? #"{"error":"the graph isn't ready"}"#
-  }
+  func animateSlider(_ name: String, to: Double, from: Double?, seconds: Double) async -> String { Self.notYet }
 
   func check(_ rows: [String]) async -> String {
-    return await model?.ask("return window.equationApp.check(rows)", ["rows": rows])
-      ?? #"{"error":"the graph isn't ready"}"#
+    guard let model else { return #"{"error":"the graph isn't ready"}"# }
+    return Self.state(rows: rows, status: await model.status(after: rows), window: nil)
   }
 
-  func listKinds() async -> String { await text("return window.equationApp.listKinds()") }
-  func kindExamples(_ kind: String) async -> String {
-    await text("return window.equationApp.kindExamples(kind)", ["kind": kind])
-  }
-  func shape(_ name: String) async -> String {
-    await text("return window.equationApp.shape(name)", ["name": name])
-  }
-  func searchFunctions(_ query: String) async -> String {
-    await text("return window.equationApp.searchFunctions(query)", ["query": query])
-  }
-  func functionDoc(_ name: String) async -> String {
-    await text("return window.equationApp.functionDoc(name)", ["name": name])
-  }
+  func listKinds() async -> String { Self.notYet }
+  func kindExamples(_ kind: String) async -> String { Self.notYet }
+  func shape(_ name: String) async -> String { Self.notYet }
+  func searchFunctions(_ query: String) async -> String { Self.notYet }
+  func functionDoc(_ name: String) async -> String { Self.notYet }
 
-  /// A tool whose answer is text: the page's string, which ask() hands back as JSON.
-  private func text(_ body: String, _ arguments: [String: Any] = [:]) async -> String {
-    guard let json = await model?.ask(body, arguments) else { return #"{"error":"the graph isn't ready"}"# }
-    return (try? JSONDecoder().decode(String.self, from: Data(json.utf8))) ?? json
+  /// The graph as the tools report it (web/voice.ts `GraphState`).
+  private static func state(rows: [String], status: [RowStatus], window: (x: [Double], y: [Double])?) -> String {
+    var state: [String: Any] = [
+      "mode": "2d",
+      "rows": rows.enumerated().map { k, text in
+        var row: [String: Any] = ["row": text]
+        if k < status.count {
+          if let error = status[k].error { row["error"] = error }
+          if let info = status[k].info { row["info"] = info }
+        }
+        return row
+      },
+    ]
+    if let window { state["window"] = ["x": window.x, "y": window.y] }
+    guard let data = try? JSONSerialization.data(withJSONObject: state), let text = String(data: data, encoding: .utf8)
+    else { return #"{"error":"the graph isn't ready"}"# }
+    return text
   }
 }
 
