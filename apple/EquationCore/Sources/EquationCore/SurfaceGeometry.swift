@@ -5,8 +5,7 @@
 /// coloured by it (lib/analysis.ts `curvaturePaint`, lib/plot.ts
 /// `paintedSurface`).
 ///
-/// Not ported: the surface of a panel's on(…) row (`gaussian(x, y)`),
-/// geodesics, and the rest of lib/surface-geometry.ts.
+/// Geodesics are Geodesic.swift.
 
 /// `[paint](S, f)`: the surface S coloured by f, a scalar in the same u and
 /// v — gaussian(S) alone on a row, which classify unwraps (lib/geom.ts).
@@ -23,29 +22,33 @@ private func cross(_ a: [Expr], _ b: [Expr]) -> [Expr] {
   (0..<3).map { k in sub(mul(a[(k + 1) % 3], b[(k + 2) % 3]), mul(a[(k + 2) % 3], b[(k + 1) % 3])) }
 }
 
-/// The fundamental forms of r at a general point of (u, v) (`forms`); `d` is
-/// ∂/∂v as the resolver takes it (symbolic, with its fallbacks).
-private func forms(_ r: [Expr], _ d: (Expr, String) throws -> Expr) throws
+/// The fundamental forms of r at a general point of its parameters (`forms`:
+/// u and v, or x and y on a surface panel); `d` is ∂/∂v as the resolver
+/// takes it (symbolic, with its fallbacks).
+private func forms(_ r: [Expr], _ d: (Expr, String) throws -> Expr, _ params: [String]) throws
   -> (E: Expr, F: Expr, G: Expr, W2: Expr, L: Expr, M: Expr, N: Expr)
 {
-  let ru = try r.map { try d($0, "u") }
-  let rv = try r.map { try d($0, "v") }
-  let ruu = try ru.map { try d($0, "u") }
-  let ruv = try ru.map { try d($0, "v") }
-  let rvv = try rv.map { try d($0, "v") }
+  let (a, b) = (params[0], params[1])
+  let ru = try r.map { try d($0, a) }
+  let rv = try r.map { try d($0, b) }
+  let ruu = try ru.map { try d($0, a) }
+  let ruv = try ru.map { try d($0, b) }
+  let rvv = try rv.map { try d($0, b) }
   let n = cross(ru, rv)
   return (dot(ru, ru), dot(ru, rv), dot(rv, rv), dot(n, n), dot(ruu, n), dot(ruv, n), dot(rvv, n))
 }
 
-/// K = (LN − M²)/(EG − F²), an expression in u and v.
-func gaussianOf(_ r: [Expr], _ d: (Expr, String) throws -> Expr) throws -> Expr {
-  let f = try forms(r, d)
+/// K = (LN − M²)/(EG − F²), an expression in the parameters.
+func gaussianOf(_ r: [Expr], _ d: (Expr, String) throws -> Expr, _ params: [String] = ["u", "v"]) throws -> Expr {
+  let f = try forms(r, d, params)
   return div(sub(mul(f.L, f.N), pow(f.M, .num(2))), pow(f.W2, .num(2)))
 }
 
 /// H = (EN − 2FM + GL)/(2(EG − F²)), with the normal r_u × r_v.
-func meanCurvatureOf(_ r: [Expr], _ d: (Expr, String) throws -> Expr) throws -> Expr {
-  let f = try forms(r, d)
+func meanCurvatureOf(_ r: [Expr], _ d: (Expr, String) throws -> Expr, _ params: [String] = ["u", "v"]) throws
+  -> Expr
+{
+  let f = try forms(r, d, params)
   let top = add(sub(mul(f.E, f.N), mul(.num(2), mul(f.F, f.M))), mul(f.G, f.L))
   return div(top, mul(.num(2), pow(f.W2, .num(1.5))))
 }
@@ -111,10 +114,29 @@ extension Resolver {
     throw LanguageError("\(name): where on the surface is two numbers, a point or a tuple: \(example).")
   }
 
+  /// Whether a surface operator's first argument names or writes a surface,
+  /// rather than a point of the panel's surface (`surfaceLike`).
+  private func surfaceLike(_ arg: Expr) throws -> Bool {
+    if case .vec(let items) = arg { return items.count == 3 }
+    guard case .var(let name) = arg else { return false }
+    if let fn = try getFn(name) { return fn.params.count == 2 }
+    return opts.documentNames?.contains(name) == true && (opts.comps(name)?.count ?? 0) != 2
+      && opts.consts(name) == nil && !opts.isList(name)
+  }
+
   /// gaussian(S) and meancurvature(S): K and H of the surface, functions of
-  /// u and v, or read at a point of it, gaussian(S, u0, v0)
-  /// (`surfaceGeometry`, for a panel with no surface).
+  /// u and v, or read at a point of it, gaussian(S, u0, v0). On a panel drawn
+  /// on a surface (on(…)) the surface is the panel's, in its x and y:
+  /// gaussian(x, y) is K over it, a field the panel paints on the surface
+  /// (`surfaceGeometry`).
   func surfaceGeometry(_ name: String, _ args: [Expr]) throws -> Expr {
+    func d(_ e: Expr, _ v: String) throws -> Expr { try applyDiff(e, v, 1) }
+    if let panel = opts.surface, !args.isEmpty, try !surfaceLike(args[0]) {
+      let point = try pointArgs(name, args, "\(name)(x, y) or \(name)(P)")
+      let params = ["x", "y"]
+      let field = name == "gaussian" ? try gaussianOf(panel, d, params) : try meanCurvatureOf(panel, d, params)
+      return substVars(field, ["x": point.0, "y": point.1])
+    }
     let example = "\(name)(S) or \(name)(S, 0.5, 0.25)"
     if args.isEmpty || args.count > 3 {
       throw LanguageError("\(name) takes a surface, and optionally where on it: \(example).")
@@ -129,14 +151,13 @@ extension Resolver {
     if args.count == 2, !named, !args.contains(where: { if case .vec = $0 { true } else { false } }) {
       pointOnly = true
     }
-    if pointOnly {
+    if pointOnly && opts.surface == nil {
       throw LanguageError(
         "\(name)(x, y) reads the surface of its panel's on(…) row, and this panel has none: write \(name)(S) "
           + "with S = (u, v, u^2 - v^2).")
     }
     let (r, over) = try surfaceOperand(name, args[0])
     let point = args.count > 1 ? try pointArgs(name, Array(args.dropFirst()), example) : nil
-    func d(_ e: Expr, _ v: String) throws -> Expr { try applyDiff(e, v, 1) }
     let field = name == "gaussian" ? try gaussianOf(r, d) : try meanCurvatureOf(r, d)
     if let point { return substVars(field, ["u": point.0, "v": point.1]) }
     var back: [String: Expr] = [:]
@@ -189,38 +210,4 @@ func paintedSurface(_ args: [Expr], defined: Set<String>, fields: [String: Expr]
   return Classified(
     object: .surfaceParametric(coordinates: coordinates, paint: paint),
     animated: cls.animated || vars.contains("t"), needs3D: cls.needs3D, params: jsSorted(params))
-}
-
-private let GEODESIC_USAGE =
-  "geodesic takes a surface, where to start on it and which way: geodesic(S, (0.5, 0.5), (1, 0)) with "
-  + "S = (u, v, u^2 - v^2), and optionally how far, geodesic(S, P, (1, 0), 4)."
-
-/// A geodesic row: geodesic(S, (u0, v0), (du, dv)[, L]), or on a panel drawn
-/// on a surface geodesic((x0, y0), (dx, dy)[, L]) (lib/analysis.ts
-/// `classifyGeodesic`). What the site refuses is refused in its words; a
-/// geodesic it would trace is not ported.
-func classifyGeodesic(_ args: [Expr], onSurface: Bool, surfaceOperand: (Expr) throws -> Void) throws -> Never {
-  var operand = false
-  var failure: Error?
-  if args.count >= 3 {
-    do {
-      try surfaceOperand(args[0])
-      operand = true
-    } catch let error as Unsupported {
-      throw error
-    } catch {
-      failure = error
-    }
-  }
-  let panelForm = !operand && (args.count == 2 || args.count == 3)
-  if !operand && !(panelForm && onSurface) {
-    if args.count == 2 {
-      throw LanguageError(
-        "geodesic(P, d) draws on its panel's surface (an on(…) row), and this panel has none. \(GEODESIC_USAGE)")
-    }
-    if let failure, args.count >= 3 { throw failure }
-    throw LanguageError(GEODESIC_USAGE)
-  }
-  if operand && args.count > 4 { throw LanguageError(GEODESIC_USAGE) }
-  throw Unsupported("geodesic(…)")
 }

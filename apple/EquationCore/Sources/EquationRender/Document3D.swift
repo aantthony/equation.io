@@ -137,6 +137,11 @@ public struct Document3D: Equatable, Sendable {
       else { continue }
       // A family draws member by member, each a shade lighter (web/scene.ts `renderMembers`).
       for (member, shade) in Graph2D.familyMembers(row, cpu, color) {
+        // A geodesic is traced onto its surface, a panel's included (Document3D+Geodesic.swift).
+        if case .geodesic(let spec)? = member.cpu {
+          drawGeodesic(spec, row: index, shade, env, camera, into: &scene)
+          continue
+        }
         if let surface,
           drawOnSurface(surface, member.cpu!, member, index, shade, env, time, camera, into: &scene)
         {

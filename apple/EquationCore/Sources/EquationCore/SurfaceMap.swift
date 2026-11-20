@@ -264,6 +264,8 @@ public func surfaceMapping(_ object: MathObject) -> SurfaceMapping? {
   case .vectorField(let components): return components.count == 2 ? .carry : .refused
   case .point(let coordinates): return coordinates.count == 2 ? .carry : .refused
   case .label: return .carry
+  // geodesic(P, d): traced in x and y, on this surface.
+  case .geodesic(let spec): return spec.dim == 2 ? .carry : .refused
   case .figure(_, let dimension, _, _): return dimension == 2 ? .carry : .refused
   case .list(.points(let dimension, _)), .list(.scatter(let dimension, _)): return dimension == 2 ? .carry : .refused
   case .family(let members, _):
@@ -315,11 +317,3 @@ func classifyOnSurface(_ cls: Classified) throws -> Classified {
   return try onSurface(cls)
 }
 
-/// Whether a row calls gaussian or meancurvature (not the document's own
-/// function of that name), which on a surface panel may read its surface.
-func readsPanelCurvature(_ e: Expr, _ fnNames: Set<String>) -> Bool {
-  if case .call(let name, _) = e, name == "gaussian" || name == "meancurvature", !fnNames.contains(name) {
-    return true
-  }
-  return childrenOf(e).contains { readsPanelCurvature($0, fnNames) }
-}

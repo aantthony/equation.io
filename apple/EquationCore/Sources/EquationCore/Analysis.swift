@@ -51,6 +51,9 @@ public struct RowAnalysis: Equatable, Sendable {
   /// The value a row of glyphs reads out (a multivector, a flat, the matrix
   /// of `action(M)`): the plan `plotReadout` takes in place of `cpu`.
   public var readout: CpuPlan?
+  /// A scalar field shaded to its own size where it is drawn: gaussian(x, y)
+  /// on a panel's surface (the site's `autoscale` on a scalar2d plan).
+  public var autoscale = false
 
   /// A `---` row, which starts a new panel.
   public var divider: Bool {
@@ -618,13 +621,21 @@ public func analyze(_ sources: [String]) -> DocumentAnalysis {
       }
       // geodesic(S, start, direction): traced as it is drawn.
       if case .call("geodesic", let args) = rawParsed, !fnNames.contains("geodesic") {
-        try classifyGeodesic(args, onSurface: panelSurfaces[panel] != nil) { arg in
-          var written = arg
-          if case .var(let name) = arg, try getFn(name) != nil {} else {
-            written = try Resolver(getFn: getFn, opts: ropts).resolve(arg)
-          }
-          _ = try Resolver(getFn: getFn, opts: ropts).surfaceOperand("geodesic", written)
-        }
+        // (Its surface may run over u's and v's intervals: Interval.swift.)
+        var surfaceOpts = ropts
+        surfaceOpts.intervals = true
+        rows[i].classified = try classifyGeodesic(
+          args, surface: panelSurfaces[panel],
+          surfaceOperand: { arg in
+            var written = arg
+            if case .var(let name) = arg, try getFn(name) != nil {} else {
+              written = try Resolver(getFn: getFn, opts: surfaceOpts).resolve(arg)
+            }
+            return try Resolver(getFn: getFn, opts: surfaceOpts).surfaceOperand("geodesic", written)
+          },
+          lower: { try lowerObjects(try Resolver(getFn: getFn, opts: ropts).resolve($0), built, ropts).e },
+          constNames: constNames, moving: animated.union(built.states.keys))
+        continue
       }
       // A row not drawn over the plane may test equality in a case: `f(2)`
       // with f(m) = {mod(m, 2) = 0: …}.
@@ -634,10 +645,8 @@ public func analyze(_ sources: [String]) -> DocumentAnalysis {
       rowOpts.exactConditions = exact
       // (A row's own expression may read an interval: Interval.swift.)
       rowOpts.intervals = true
-      // Port: on a panel drawn on a surface, gaussian(x, y) reads that surface.
-      if panelSurfaces[panel] != nil, readsPanelCurvature(rawParsed, fnNames) {
-        throw Unsupported("the curvature of a panel's surface")
-      }
+      // On a panel drawn on a surface, gaussian(x, y) reads that surface.
+      rowOpts.surface = panelSurfaces[panel]?.embed
       // gaussian(S) alone: S coloured by its curvature (SurfaceGeometry.swift).
       let painted = curvaturePaint(rawParsed, fnNames) { arg in
         if case .var(let name) = arg { return built.pointDims[name] == 2 }
@@ -691,7 +700,15 @@ public func analyze(_ sources: [String]) -> DocumentAnalysis {
       }
       // A panel on a surface paints or carries its 2D rows onto it; a row
       // in space draws as it would in any 3D panel.
-      if panelSurfaces[panel] != nil, !cls.needs3D { cls = try classifyOnSurface(cls) }
+      if panelSurfaces[panel] != nil, !cls.needs3D {
+        cls = try classifyOnSurface(cls)
+        // gaussian(x, y): the surface's curvature, shaded to its own size.
+        if case .scalarField = cls.object, case .call(let called, _) = rawParsed,
+          called == "gaussian" || called == "meancurvature", !fnNames.contains(called)
+        {
+          rows[i].autoscale = true
+        }
+      }
       // A solid whose shape reads sliders is checked for folds at their values.
       if let solid = cls.solid { try checkFolds(solid, ropts.consts) }
       rows[i].info = curveHint(cls.object, text)

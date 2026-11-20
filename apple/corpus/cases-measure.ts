@@ -56,4 +56,24 @@ export const MEASURE_CASES: string[] = [
   'g(a) = count({x^2 + y^2 < a}); g(1); count({x^2 + y^2 < 1: 2}); total({x^2 + y^2 < 1}); mean({x^2 + y^2 < 1}); count({u^2 + v^2 < 1})',
   'count({u < v}); total({u < v: u}); mean({u^2 < v: (u, v)}); count({u^2 = 0.25}); count({u = v}); count({0 < x < 1, u < x}); y = count({0<v<1, v<x})',
   'r = count(x^2 + y^2 < 1); r; r / pi; A = count(x^2 < y < 1); 3 A; (count(x^2 + y^2 < 1), 1); y = x count({x^2 + y^2 = 1})',
+  // Geodesics on a surface in u and v: a start, a direction, a length; sliders, points and t in them.
+  'S = (u, v, u^2 - v^2); S; geodesic(S, (0.5, 0.5), (1, 0)); geodesic(S, (0.5, 0.5), (1, 1), 2); P = (0.2, 0.3); geodesic(S, P, (0, 1))',
+  'S = (u, v, u^2 - v^2); a = 1; geodesic(S, (0.5, 0.5), (cos(a), sin(a)), a); geodesic(S, (0.5, 0.5), (cos(t), sin(t))); geodesic(S, (0.5, 0.5), (1, 0), -1)',
+  'f(u, v) = (cos(2 pi u) sin(pi v), sin(2 pi u) sin(pi v), cos(pi v)); geodesic(f, (0.1, 0.5), (1, 1)); geodesic((u, v, u v), (0.5, 0.5), (1, 0), 3)',
+  'b = 0.1; S = ((2 + 6u) cos(2pi v), (2 + 6u) sin(2pi v), 2sqrt(2(6u))); k = b ([0..8]/4 - 1); geodesic(S, (1, 0), (-1, k), 60)',
+  'S = (u, v, floor(3 u) v); geodesic(S, (0.5, 0.5), (1, 0)); T = (u, v, abs(u - v)); geodesic(T, (0.2, 0.5), (1, 0)); geodesic(T, (0.2, 0.5), (1, 0), inf)',
+  'u = interval(0, 2pi); v = interval(0, 2pi); S = ((3 + cos(v)) cos(u), (3 + cos(v)) sin(u), sin(v)); geodesic(S, (0, 0.5), (1, 1), 20); a = 1; u = interval(-a, a); geodesic((u, v, u v), (0, 1), (1, 0))',
+  // Families: a list of starts, directions or lengths.
+  'S = (u, v, u^2 - v^2); a = [0..7] pi/4; geodesic(S, (0.5, 0.5), (cos(a), sin(a))); geodesic(S, [(0.1, 0.1), (0.2, 0.2)], (1, 0), [1, 2])',
+  'S = (u, v, u v); geodesic(S, [(0.1, 0.1), (0.2, 0.2)], (1, 0), [1, 2, 3]); geodesic(S, (0.5, 0.5), (1, [0..70])); geodesic(S, [(0.1, 0.2)], (1, 0)); L = [1, 2]; geodesic(S, (0.1, 0.1), (1, 0), L)',
+  // What a geodesic row must be.
+  'S = (u, v, u v); geodesic((0, 0), (1, 0)); geodesic(S, 1, 2); geodesic(S, (u, 0), (1, 0)); geodesic(S, (0, 0), (q, 1)); geodesic(1, 2, 3, 4, 5); geodesic(S)',
+  'S = (u, v, u v); y = geodesic(S, (0, 0), (1, 0)); geodesic(S, (0, 0), (1, 0), (1, 2)); geodesic(S, (0, 0, 0), (1, 0)); geodesic(R, (0, 0), (1, 0)); geodesic(S, (0, 0), (x, 1))',
+  'geodesic((u, v), (0, 0), (1, 0)); geodesic((u, 1, u), (0, 0), (1, 0)); geodesic((u, v, x), (0, 0), (1, 0)); g(a) = (a, a, a); geodesic(g, (0, 0), (1, 0)); geodesic()',
+  // On a panel drawn on a surface: in the panel's x and y; the surface's own curvature as a field.
+  'on((X, Y, Z) = (x, y, x^2 - y^2), x = -1..1, y = -1..1); geodesic((0, 0.5), (1, 0)); P = (0.1, 0.2); geodesic(P, (1, 1), 6); geodesic(P, (x, 1)); geodesic(P, (1, 0), [1, 2])',
+  'on((X, Y, Z) = (x, y, x^2 - y^2), x = -1..1, y = -1..1); S = (u, v, u v); geodesic(S, (0.5, 0.5), (1, 0)); geodesic((0, 0)); geodesic((0, 0), (1, 0), 1, 2); geodesic(1, (1, 0))',
+  'on((X, Y, Z) = ((3 + cos(y)) cos(x), (3 + cos(y)) sin(x), sin(y)), x = -pi..pi, y = -pi..pi); gaussian(x, y); P = (-0.5, 0.3); a = [0..7] pi/4; geodesic(P, (cos(a), sin(a)), 10)',
+  'on((X, Y, Z) = (x, y, x y), x = -1..1, y = -2..2); gaussian(x, y); meancurvature(x, y); P = (0.5, 0.5); gaussian(P); gaussian(0.5, 0.25); y = gaussian(x, y); gaussian(x, y) > -0.5',
+  'on((X, Y, Z) = (x, y, x y), x = -1..1, y = -2..2); S = (u, v, u^2 + v^2); gaussian(S); gaussian(S, 0.5, 0.5); gaussian(); gaussian(x); gaussian(1, 2, 3); a = 2; a gaussian(x, y); k = gaussian(0, 0); k',
 ];
