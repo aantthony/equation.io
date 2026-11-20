@@ -13,8 +13,7 @@ public struct ShaderError: Error, Equatable, Sendable {
 }
 
 /// The shader spelling of a function, where it is not the function's own
-/// name (lib/glsl.ts `FN_GLSL`). The bracketed names are calls only lowering
-/// writes: lib/expr.ts ANGLE_FN, ANGLE_RATE_FN and the *_PDF_FN densities.
+/// name (lib/glsl.ts `FN_GLSL`).
 public let fnGLSL: [String: String] = [
   "ln": "log",
   "log": "eq_log10",
@@ -32,23 +31,18 @@ public let fnGLSL: [String: String] = [
   "sinc": "eq_sinc",
   "coth": "eq_coth",
   "tanh": "eq_tanh",
-  "[angle]": "eq_angle",
-  "[angle′]": "eq_angle_rate",
-  "[gammapdf]": "eq_gammapdf",
-  "[betapdf]": "eq_betapdf",
-  "[tpdf]": "eq_tpdf",
-  "[weibullpdf]": "eq_weibullpdf",
-]
-
-/// The probability mass functions of the discrete laws (lib/expr.ts `PMF_FNS`).
-private let pmfFns: Set<String> = [
-  "[binomialpmf]", "[poissonpmf]", "[negativebinomialpmf]", "[discreteuniformpmf]",
+  ANGLE_FN: "eq_angle",
+  ANGLE_RATE_FN: "eq_angle_rate",
+  GAMMA_PDF_FN: "eq_gammapdf",
+  BETA_PDF_FN: "eq_betapdf",
+  T_PDF_FN: "eq_tpdf",
+  WEIBULL_PDF_FN: "eq_weibullpdf",
 ]
 
 /// Compile a (possibly chained) inequality to a GLSL boolean via the given
 /// scalar emitter (lib/glsl.ts `condGLSL`).
 public func condGLSL(_ cond: Expr, _ emit: (Expr) throws(ShaderError) -> String) throws(ShaderError) -> String {
-  guard case .ineq = cond else { throw ShaderError(notACondition(cond)) }
+  guard case .ineq = cond else { throw ShaderError(notACondition(cond).message) }
   var parts: [String] = []
   for c in ineqComparisons(cond) {
     let l = try emit(c.l)
@@ -241,7 +235,7 @@ func fmt(_ value: Double) throws(ShaderError) -> String {
       "This row has an infinite constant (\(value > 0 ? "∞" : "−∞")) in it, so it cannot be drawn"
         + " — a count or total over an unbounded set is ∞.")
   }
-  let s = jsNumberString(value)
+  let s = JS.string(value)
   if let e = s.firstIndex(of: "e") { return "\(s[..<e])E\(s[s.index(after: e)...])" }
   return s.contains(".") ? s : "\(s).0"
 }
@@ -355,17 +349,15 @@ private func fourierLoop(_ e: Expr) throws(ShaderError) -> FourierLoop? {
 /// `glsl` is a vec4 in x and `reach` (in x units): the value, the slope in
 /// the position, and the band the curve stays in within reach of x.
 ///
-/// `diff` is lib/diff.ts `diff`, d(e)/d(v), which this file does not have:
-/// the caller passes it.
+/// `differentiate` is `diff` (Diff.swift) unless a caller has reason to
+/// watch what is asked of it, as the conformance test does.
 public func fourierGraphGLSL(
-  _ e: Expr, diff: (Expr, String) throws -> Expr
+  _ e: Expr, differentiate: (Expr, String) throws -> Expr = { e, v in try diff(e, v) }
 ) throws(ShaderError) -> (glsl: String, slopeScale: Double)? {
   guard let loop = try fourierLoop(e) else { return nil }
-  var names: Set<String> = []
-  freeVars(loop.count, into: &names)
-  if names.contains("x") { return nil }
+  if freeVars(loop.count).contains("x") { return nil }
   do {
-    if case .num(let slope) = try diff(loop.position, "x"), slope.isFinite {
+    if case .num(let slope) = try differentiate(loop.position, "x"), slope.isFinite {
       return (try loop.call("\(try fmt(abs(slope))) * reach"), slope)
     }
   } catch {
@@ -395,7 +387,7 @@ public func uniformName(_ p: String) -> String {
 /// parameters, say).
 public func toGLSL(_ e: Expr) throws(ShaderError) -> String {
   switch e {
-  case .index, .range, .eqtest:
+  case .index, .range, .eqtest, .comp, .figure, .lazy, .trail, .label, .hist, .family:
     throw ShaderError(structuralDiagnostic(e))
   case .num(let value):
     return try fmt(value)
@@ -424,7 +416,7 @@ public func toGLSL(_ e: Expr) throws(ShaderError) -> String {
   case .call(let name, let arguments):
     // No float32 twin, on purpose: a pmf is nonzero only AT the integers, a
     // set of measure zero no fragment ever lands on. Rows draw it as stems.
-    if pmfFns.contains(name) {
+    if PMF_FNS.contains(name) {
       throw ShaderError("A probability mass function is drawn as stems, not as a curve.")
     }
     // A Σ/Π is either expanded away or evaluated on the CPU (a sequence
@@ -442,86 +434,15 @@ public func toGLSL(_ e: Expr) throws(ShaderError) -> String {
     throw ShaderError("Inequality in scalar context.")
   case .vec:
     throw ShaderError("Vector in scalar context.")
-  case .list:
+  case .list, .data:
     throw ShaderError("A list can only be plotted as its own row.")
-  case .str:
+  case .str, .text:
     throw ShaderError("Text cannot be plotted — it can only be compared, inside a filter.")
   case .piecewise(let cases, let otherwise):
     return try piecewiseGLSL(cases, otherwise: otherwise, toGLSL)
-  }
-}
-
-// MARK: - The interim row classifier
-
-/// What a row draws, as far as the Swift port classifies rows (lib/plot.ts).
-public enum RowPlot: Equatable, Sendable {
-  /// A blank row or a `# comment`.
-  case nothing
-  /// `l = r` in x and y: the zero set of `field`, GLSL for F in floats x, y
-  /// and t. `animated` when it reads t, seconds since the graph opened.
-  case curve(field: String, animated: Bool)
-}
-
-/// Classify a row on its own, or nil when it is not a kind the Metal
-/// renderer draws yet: anything but an equation in x and y (a definition, a
-/// slider's constant, z, a list, a point, …), and anything that doesn't parse.
-public func plotRow(_ text: String) -> RowPlot? {
-  guard let first = text.first(where: { !$0.isWhitespace }) else { return .nothing }
-  if first == "#" { return .nothing }
-  guard let parsed = try? parseExpr(text), case .eq = parsed, let expr = scalarCalls(parsed) else { return nil }
-  var names: Set<String> = []
-  freeVars(expr, into: &names)
-  guard names.isSubset(of: ["x", "y", "t"]), names.contains("x") || names.contains("y") else { return nil }
-  guard let field = try? toGLSL(expr) else { return nil }
-  return .curve(field: field, animated: names.contains("t"))
-}
-
-/// The builtins a shader can call as they are parsed, with how many
-/// arguments each takes. The resolver and lowering decide this on the site;
-/// until they are ported, `plotRow` draws only rows that need neither.
-private let scalarFunctions: [String: Int] = [
-  "sin": 1, "cos": 1, "tan": 1, "asin": 1, "acos": 1, "atan": 1, "sinh": 1, "cosh": 1, "tanh": 1, "sech": 1,
-  "coth": 1, "asinh": 1, "acosh": 1, "atanh": 1, "sqrt": 1, "abs": 1, "exp": 1, "ln": 1, "log": 1, "floor": 1,
-  "ceil": 1, "round": 1, "sign": 1, "fract": 1, "sinc": 1, "erf": 1, "gamma": 1, "factorial": 1, "isprime": 1,
-  "atan2": 2, "mod": 2, "gcd": 2, "min": 2, "max": 2,
-]
-
-/// `e` with min and max of several arguments nested in pairs, as GLSL's
-/// take two; nil when it calls anything a shader cannot.
-private func scalarCalls(_ e: Expr) -> Expr? {
-  func all(_ items: [Expr]) -> [Expr]? {
-    let mapped = items.compactMap(scalarCalls)
-    return mapped.count == items.count ? mapped : nil
-  }
-  switch e {
-  case .num, .var, .str:
-    return e
-  case .neg(let a):
-    return scalarCalls(a).map { .neg($0) }
-  case .bin(let op, let a, let b, let glyph):
-    guard let a = scalarCalls(a), let b = scalarCalls(b) else { return nil }
-    return .bin(op, a, b, glyph: glyph)
-  case .eq(let l, let r):
-    guard let l = scalarCalls(l), let r = scalarCalls(r) else { return nil }
-    return .eq(l, r)
-  case .ineq(let op, let l, let r, let grouped):
-    guard let l = scalarCalls(l), let r = scalarCalls(r) else { return nil }
-    return .ineq(op, l, r, grouped: grouped)
-  case .call(let name, let arguments):
-    guard let arity = scalarFunctions[name], let args = all(arguments) else { return nil }
-    if name == "min" || name == "max", args.count >= 2 {
-      return args.dropFirst().reduce(args[0]) { .call(name, [$0, $1]) }
-    }
-    return args.count == arity ? .call(name, args) : nil
-  case .piecewise(let cases, let otherwise):
-    var mapped: [Expr.Case] = []
-    for c in cases {
-      guard let cond = scalarCalls(c.cond), let value = scalarCalls(c.value) else { return nil }
-      mapped.append(Expr.Case(cond: cond, value: value, bare: c.bare))
-    }
-    guard let otherwise else { return .piecewise(mapped, otherwise: nil) }
-    return scalarCalls(otherwise).map { .piecewise(mapped, otherwise: $0) }
-  case .index, .range, .eqtest, .vec, .list:
-    return nil
+  case .loop:
+    // Port: compileTyped (lib/complex.ts) emits loops, since it types the
+    // params; this is what lib/glsl.ts `toGLSL` itself says of one.
+    throw ShaderError("A recursive function cannot be used here yet.")
   }
 }

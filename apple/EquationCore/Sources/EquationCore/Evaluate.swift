@@ -16,187 +16,16 @@ public struct LanguageError: Error, Equatable, Sendable {
   public init(_ message: String) { self.message = message }
 }
 
-/// Names in the order they were first met, as a JavaScript `Set` keeps them:
-/// "found b" in an error names the first stray variable the TypeScript walks
-/// into, so the order is part of the answer.
-public struct NameSet: Equatable, Sendable, Sequence {
-  public private(set) var list: [String] = []
-  private var members: Set<String> = []
-
-  public init() {}
-
-  public init<S: Sequence>(_ names: S) where S.Element == String {
-    for name in names { insert(name) }
+/// What a row reports of an error: the message of one of the language's, and
+/// anything else as it prints.
+func errorMessage(_ error: Error) -> String {
+  switch error {
+  case let error as LanguageError: error.message
+  case let error as ParseError: error.message
+  case let error as ShaderError: error.message
+  case let error as DiffError: error.message
+  default: "\(error)"
   }
-
-  public var isEmpty: Bool { list.isEmpty }
-  public var count: Int { list.count }
-  public func contains(_ name: String) -> Bool { members.contains(name) }
-  public func makeIterator() -> IndexingIterator<[String]> { list.makeIterator() }
-
-  public mutating func insert(_ name: String) {
-    if members.insert(name).inserted { list.append(name) }
-  }
-
-  /// Whether the name was there (JavaScript's `Set.delete`).
-  @discardableResult public mutating func remove(_ name: String) -> Bool {
-    guard members.remove(name) != nil else { return false }
-    list.removeAll { $0 == name }
-    return true
-  }
-}
-
-// MARK: - Structure (lib/expr.ts childrenOf, mapChildren, substVars, freeVars)
-
-/// A node's direct children, in the order the TypeScript lists them.
-public func childrenOf(_ e: Expr) -> [Expr] {
-  switch e {
-  case .num, .var, .str: return []
-  case .neg(let a): return [a]
-  case .bin(_, let a, let b, _), .index(let a, let b), .range(let a, let b), .eqtest(_, let a, let b),
-    .eq(let a, let b), .ineq(_, let a, let b, _):
-    return [a, b]
-  case .call(_, let items), .vec(let items), .list(let items): return items
-  case .piecewise(let cases, let otherwise):
-    return cases.flatMap { [$0.cond, $0.value] } + (otherwise.map { [$0] } ?? [])
-  }
-}
-
-/// Map one level of children, keeping everything else about the node.
-public func mapChildren(_ e: Expr, _ map: (Expr) throws -> Expr) rethrows -> Expr {
-  switch e {
-  case .num, .var, .str: return e
-  case .neg(let a): return .neg(try map(a))
-  case .bin(let op, let a, let b, let glyph): return .bin(op, try map(a), try map(b), glyph: glyph)
-  case .index(let a, let b): return .index(try map(a), try map(b))
-  case .range(let a, let b): return .range(try map(a), try map(b))
-  case .eqtest(let op, let a, let b): return .eqtest(op, try map(a), try map(b))
-  case .eq(let l, let r): return .eq(try map(l), try map(r))
-  case .ineq(let op, let l, let r, let grouped): return .ineq(op, try map(l), try map(r), grouped: grouped)
-  case .call(let name, let args): return .call(name, try args.map(map))
-  case .vec(let items): return .vec(try items.map(map))
-  case .list(let items): return .list(try items.map(map))
-  case .piecewise(let cases, let otherwise):
-    return .piecewise(
-      try cases.map { Expr.Case(cond: try map($0.cond), value: try map($0.value), bare: $0.bare) },
-      otherwise: try otherwise.map(map))
-  }
-}
-
-/// A Σ/Π that survived resolve: args are [index, lo, hi, body]. Its index is bound.
-private func boundSumIndex(_ e: Expr) -> String? {
-  guard case .call(let name, let args) = e, name == "sum" || name == "prod", args.count >= 4,
-    case .var(let index) = args[0]
-  else { return nil }
-  return index
-}
-
-/// Replace free variables by expressions. A surviving Σ/Π binds its index.
-public func substVars(_ e: Expr, _ env: [String: Expr]) -> Expr {
-  if case .var(let name) = e { return env[name] ?? e }
-  if let index = boundSumIndex(e), env[index] != nil, case .call(let name, let args) = e {
-    var bodyEnv = env
-    bodyEnv[index] = nil
-    return .call(name, args.enumerated().map { k, a in substVars(a, k == 0 || k == 3 ? bodyEnv : env) })
-  }
-  return mapChildren(e) { substVars($0, env) }
-}
-
-/// The free variable names (not function names or constants), in the order
-/// the TypeScript's `freeVars` meets them.
-public func freeVarNames(_ e: Expr) -> NameSet {
-  var out = NameSet()
-  collectFreeVars(e, &out)
-  return out
-}
-
-private func collectFreeVars(_ e: Expr, _ out: inout NameSet) {
-  switch e {
-  case .num, .str:
-    break
-  case .var(let name):
-    out.insert(name)
-  case .call(_, let args):
-    if let index = boundSumIndex(e) {
-      collectFreeVars(args[1], &out)
-      collectFreeVars(args[2], &out)
-      var inner = freeVarNames(args[3])
-      inner.remove(index)
-      for v in inner { out.insert(v) }
-    } else {
-      for a in args { collectFreeVars(a, &out) }
-    }
-  default:
-    for child in childrenOf(e) { collectFreeVars(child, &out) }
-  }
-}
-
-// MARK: - exprKey
-
-/// `JSON.stringify` of the TypeScript's node (lib/expr.ts `exprKey`): the
-/// stable spelling the compiler interns and compares expressions by.
-public func exprKey(_ e: Expr) -> String {
-  func list(_ items: [Expr]) -> String { "[" + items.map(exprKey).joined(separator: ",") + "]" }
-  switch e {
-  case .num(let value):
-    return "{\"kind\":\"num\",\"value\":\(value.isFinite ? JS.string(value) : "null")}"
-  case .var(let name):
-    return "{\"kind\":\"var\",\"name\":\(jsonString(name))}"
-  case .bin(let op, let a, let b, let glyph):
-    let tail = glyph.map { ",\"glyph\":\"\($0.rawValue)\"" } ?? ""
-    return "{\"kind\":\"bin\",\"op\":\"\(op.rawValue)\",\"a\":\(exprKey(a)),\"b\":\(exprKey(b))\(tail)}"
-  case .neg(let a):
-    return "{\"kind\":\"neg\",\"a\":\(exprKey(a))}"
-  case .call(let name, let args):
-    return "{\"kind\":\"call\",\"name\":\(jsonString(name)),\"args\":\(list(args))}"
-  case .index(let a, let b):
-    return "{\"kind\":\"index\",\"args\":\(list([a, b]))}"
-  case .range(let a, let b):
-    return "{\"kind\":\"range\",\"args\":\(list([a, b]))}"
-  case .eqtest(let op, let a, let b):
-    return "{\"kind\":\"eqtest\",\"op\":\"\(op.rawValue)\",\"args\":\(list([a, b]))}"
-  case .eq(let l, let r):
-    return "{\"kind\":\"eq\",\"l\":\(exprKey(l)),\"r\":\(exprKey(r))}"
-  case .ineq(let op, let l, let r, let grouped):
-    return "{\"kind\":\"ineq\",\"op\":\"\(op.rawValue)\",\"l\":\(exprKey(l)),\"r\":\(exprKey(r))"
-      + (grouped ? ",\"grouped\":true}" : "}")
-  case .vec(let items):
-    return "{\"kind\":\"vec\",\"items\":\(list(items))}"
-  case .list(let items):
-    return "{\"kind\":\"list\",\"items\":\(list(items))}"
-  case .str(let value):
-    return "{\"kind\":\"str\",\"value\":\(jsonString(value))}"
-  case .piecewise(let cases, let otherwise):
-    let parts = cases.map {
-      "{\"cond\":\(exprKey($0.cond)),\"value\":\(exprKey($0.value))" + ($0.bare ? ",\"bare\":true}" : "}")
-    }
-    return "{\"kind\":\"piecewise\",\"cases\":[\(parts.joined(separator: ","))]"
-      + (otherwise.map { ",\"otherwise\":\(exprKey($0))}" } ?? "}")
-  }
-}
-
-/// `JSON.stringify` of a string.
-func jsonString(_ s: String) -> String {
-  var out = "\""
-  for u in s.unicodeScalars {
-    switch u {
-    case "\"": out += "\\\""
-    case "\\": out += "\\\\"
-    case "\u{08}": out += "\\b"
-    case "\u{0C}": out += "\\f"
-    case "\n": out += "\\n"
-    case "\r": out += "\\r"
-    case "\t": out += "\\t"
-    default:
-      if u.value < 0x20 {
-        let hex = String(u.value, radix: 16)
-        out += "\\u" + String(repeating: "0", count: 4 - hex.count) + hex
-      } else {
-        out.unicodeScalars.append(u)
-      }
-    }
-  }
-  return out + "\""
 }
 
 // MARK: - Special functions (lib/expr.ts, lib/specfn.ts)
@@ -325,11 +154,6 @@ func angleRateFn(_ v0: Double, _ v1: Double, _ w0: Double, _ w1: Double) -> Doub
   return (a0 * (w1 / s) - a1 * (w0 / s)) / (a0 * a0 + a1 * a1)
 }
 
-let angleFnName = "[angle]"
-let angleRateFnName = "[angle′]"
-/// The member a guard leaves where no case holds: evaluates to NaN.
-let noneFnName = "[none]"
-
 /// The builtins `evaluate` runs (lib/expr.ts `EVAL_FNS`), for the elementary
 /// set. A missing argument is JavaScript's `undefined`, which is NaN to
 /// arithmetic; extra arguments are ignored.
@@ -360,7 +184,7 @@ let evalFunctions: [String: @Sendable ([Double]) -> Double] = {
     "sinc": one { $0 == 0 ? 1 : sin($0) / $0 },
     "coth": one { 1 / tanh($0) },
   ]
-  fns[noneFnName] = { _ in .nan }
+  fns[NONE] = { _ in .nan }
   fns["normalpdf"] = { xs in normalpdf(arg(xs, 0), arg(xs, 1), arg(xs, 2)) }
   fns["normalcdf"] = { xs in normalcdf(arg(xs, 0), arg(xs, 1), arg(xs, 2)) }
   fns["gcd"] = two { a, b in
@@ -385,8 +209,8 @@ let evalFunctions: [String: @Sendable ([Double]) -> Double] = {
     }
     return 1
   }
-  fns[angleFnName] = { xs in angleFn(arg(xs, 0), arg(xs, 1), arg(xs, 2), arg(xs, 3)) }
-  fns[angleRateFnName] = { xs in angleRateFn(arg(xs, 0), arg(xs, 1), arg(xs, 2), arg(xs, 3)) }
+  fns[ANGLE_FN] = { xs in angleFn(arg(xs, 0), arg(xs, 1), arg(xs, 2), arg(xs, 3)) }
+  fns[ANGLE_RATE_FN] = { xs in angleRateFn(arg(xs, 0), arg(xs, 1), arg(xs, 2), arg(xs, 3)) }
   return fns
 }()
 
@@ -395,7 +219,8 @@ let evalFunctions: [String: @Sendable ([Double]) -> Double] = {
 /// How many terms one Σ/Π may run.
 let sumMaxTerms = 500
 
-/// A piecewise condition that is not one, by name when it has one.
+/// A piecewise condition that is not one, by name when it has one
+/// (lib/expr.ts `notACondition`).
 func notACondition(_ cond: Expr) -> LanguageError {
   let named: String? =
     switch cond {
@@ -462,8 +287,15 @@ func evaluate(_ e: Expr, _ env: inout [String: Double]) throws -> Double {
     }
   case .call(let name, let args):
     if let index = boundSumIndex(e) { return try evalReduce(name, args, index, &env) }
+    if name == TERM_AT_FN {
+      // Term k of a recurrence, from the chain of constants that computes it:
+      // NaN past the chain or off the whole numbers.
+      let k = try evaluate(args.count > 1 ? args[1] : .num(.nan), &env)
+      guard case .str(let chain)? = args.first, JS.isInteger(k) else { return .nan }
+      return env["\(chain)\(JS.string(k))"] ?? .nan
+    }
     guard let fn = evalFunctions[name] else {
-      if name == intervalFnName {
+      if name == INTERVAL {
         throw LanguageError(
           "An interval is a range of numbers, not one value: "
             + "draw it in a row of its own, in a tuple, or beside x and y."
@@ -476,40 +308,73 @@ func evaluate(_ e: Expr, _ env: inout [String: Double]) throws -> Double {
     return fn(values)
   case .eq(let l, let r):
     return try evaluate(l, &env) - evaluate(r, &env)
-  case .index, .range, .eqtest:
+  case .index, .range, .eqtest, .comp, .figure, .lazy, .trail, .label, .hist, .family:
     throw LanguageError(structuralDiagnostic(e))
   case .ineq:
     throw LanguageError("Cannot evaluate an inequality.")
   case .vec:
     throw LanguageError("Vector in scalar context.")
-  case .list:
+  case .list, .data:
     throw LanguageError("List in scalar context.")
-  case .str:
+  case .str, .text:
     throw LanguageError("Text has no numeric value — it can only be compared, inside a filter.")
   case .piecewise(let cases, let otherwise):
-    for c in cases {
-      guard case .ineq = c.cond else { throw notACondition(c.cond) }
-      var holds = true
-      for (op, l, r) in ineqComparisons(c.cond) {
-        let a = try evaluate(l, &env)
-        let b = try evaluate(r, &env)
-        let ok =
-          switch op {
-          case .lt: a < b
-          case .le: a <= b
-          case .gt: a > b
-          case .ge: a >= b
-          }
-        if !ok {
-          holds = false
-          break
-        }
-      }
-      if holds { return try evaluate(c.value, &env) }
-    }
+    for c in cases where try conditionHolds(c.cond, &env) { return try evaluate(c.value, &env) }
     return try otherwise.map { try evaluate($0, &env) } ?? .nan
+  case .loop(let params, let seeds, let body, let limit):
+    return try evalLoop(params, seeds, body, limit, &env)
   }
 }
 
-/// A continuous interval's hidden parameter (lib/interval.ts): not an identifier.
-let intervalFnName = "[interval]"
+/// Whether a piecewise case's condition holds: every comparison of its chain,
+/// stopping at the first that does not.
+private func conditionHolds(_ cond: Expr, _ env: inout [String: Double]) throws -> Bool {
+  guard case .ineq = cond else { throw notACondition(cond) }
+  for (op, l, r) in ineqComparisons(cond) {
+    let a = try evaluate(l, &env)
+    let b = try evaluate(r, &env)
+    let holds =
+      switch op {
+      case .lt: a < b
+      case .le: a <= b
+      case .gt: a > b
+      case .ge: a >= b
+      }
+    if !holds { return false }
+  }
+  return true
+}
+
+/// Run a loop (lib/expr.ts `evalLoop`): like Σ, the params shadow env entries
+/// for the duration.
+private func evalLoop(
+  _ params: [String], _ seeds: [Expr], _ body: Expr, _ limit: Int, _ env: inout [String: Double]
+) throws -> Double {
+  let saved = params.map { env[$0] }
+  var state: [Double] = []
+  for seed in seeds { state.append(try evaluate(seed, &env)) }
+  defer {
+    for (p, value) in zip(params, saved) { env[p] = value }
+  }
+  var pass = 0
+  while pass < limit {
+    if !state.allSatisfy(\.isFinite) { return .nan }
+    // (A param with no value is JavaScript's undefined: NaN to arithmetic.)
+    for (k, p) in params.enumerated() { env[p] = k < state.count ? state[k] : .nan }
+    // The taken leaf: the piecewise selects it; no case holding is "no leaf".
+    guard let leaf = try pickLeaf(body, &env) else { return .nan }
+    guard let next = recurArgs(leaf) else { return try evaluate(leaf, &env) }
+    state = []
+    for a in next { state.append(try evaluate(a, &env)) }
+    pass += 1
+  }
+  return .nan
+}
+
+/// The leaf of a loop body the bindings select (lib/expr.ts `pickLeaf`).
+private func pickLeaf(_ body: Expr, _ env: inout [String: Double]) throws -> Expr? {
+  guard case .piecewise(let cases, let otherwise) = body else { return body }
+  for c in cases where try conditionHolds(c.cond, &env) { return try pickLeaf(c.value, &env) }
+  guard let otherwise else { return nil }
+  return try pickLeaf(otherwise, &env)
+}

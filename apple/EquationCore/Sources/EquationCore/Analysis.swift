@@ -60,6 +60,9 @@ public struct DocumentAnalysis: Equatable, Sendable {
   /// Constants that move with t: their values need evaluating each frame
   /// (`environment(at:)`).
   public var animated: Set<String>
+  /// The names the document binds, which the highlighter colors rows by
+  /// (`highlightRows(_:names:)`).
+  public var names: BoundNames
   /// The document's own functions (a slider's `clamp` is not one of these).
   var userFns: Set<String>
   /// Each constant's expression, in the order the rows define them.
@@ -122,9 +125,10 @@ private func touches(_ name: String, _ names: Set<String>) -> Bool {
   return false
 }
 
-/// The index as a standalone identifier in the term (lib/seq.ts `usesIndex`).
-private func usesIndex(_ rhs: String, _ index: String) -> Bool {
-  let u = Array(rhs.utf16)
+/// The index as a standalone identifier in the term (lib/seq.ts `usesIndex`):
+/// `a_j = 1/j^2` is a sequence, but `T_c = 300` and `k_B = 1.38` are
+/// subscripted constants.
+func usesIndex(_ u: Units, _ index: String) -> Bool {
   let w = Array(index.utf16)
   guard !w.isEmpty, u.count >= w.count else { return false }
   for start in 0...(u.count - w.count) where Array(u[start..<(start + w.count)]) == w {
@@ -142,7 +146,7 @@ private func usesIndex(_ rhs: String, _ index: String) -> Bool {
 private func sequenceLetter(_ text: String) -> String? {
   var s = RowScanner(text)
   s.space()
-  guard let c = s.peek, isASCIILetter(c) || greekNameChars.contains(c) else { return nil }
+  guard let c = s.peek, isNameLetter(c) else { return nil }
   let letter = String(s.u[s.i...s.i])
   s.i += 1
   func assigns(_ s: RowScanner) -> String? {
@@ -150,10 +154,7 @@ private func sequenceLetter(_ text: String) -> String? {
     t.space()
     return t.assignment()
   }
-  func isLetter(_ c: UInt16?) -> Bool {
-    guard let c else { return false }
-    return isASCIILetter(c) || greekNameChars.contains(c)
-  }
+  func isLetter(_ c: UInt16?) -> Bool { c.map(isNameLetter) ?? false }
   // T[i, j] = …
   var table = s
   table.space()
@@ -161,7 +162,7 @@ private func sequenceLetter(_ text: String) -> String? {
   guard s.eat("_") else { return nil }
   let conventional: Set<String> = ["n", "k", "m"]
   func isSequence(_ index: String, _ rhs: String) -> Bool {
-    conventional.contains(index) || (!reservedNames.contains(index) && usesIndex(rhs, index))
+    conventional.contains(index) || (!reservedNames.contains(index) && usesIndex(Array(rhs.utf16), index))
   }
   if s.eat("{") || s.eat("(") {
     s.space()
@@ -232,16 +233,11 @@ private func isMetricRow(_ text: String) -> Bool {
   return s.peek == unit("=")
 }
 
-private func message(_ error: Error) -> String {
-  (error as? LanguageError)?.message ?? (error as? ParseError)?.message ?? (error as? ShaderError)?.message
-    ?? "\(error)"
-}
-
 /// A scalar field in x alone (or y alone) is most often a curve meant as
 /// `y = …`: the row says how to write that, since it now draws a field.
 private func curveHint(_ object: MathObject, _ text: String) -> String? {
   guard case .scalarField(let expr) = object else { return nil }
-  let vars = freeVarNames(expr)
+  let vars = freeVars(expr)
   let (free, other) = vars.contains("x") ? ("x", "y") : ("y", "x")
   if !vars.contains(free) || vars.contains(other) { return nil }
   return "scalar field — for the curve write \(other) = \(text)"
@@ -251,14 +247,37 @@ private func notSupported(_ what: String) -> String {
   "Not supported in the app yet: \(what)."
 }
 
-// MARK: - analyze
+// MARK: - Definitions
 
-/// Analyze a document: one result per row, and the constants' values.
-public func analyze(_ sources: [String]) -> DocumentAnalysis {
+/// A document's rows as far as its definitions (lib/analysis.ts
+/// `prepareDocument`): what each row is by its text, and what the names it
+/// defines come to. The highlighter colors names by this; `analyze` goes on
+/// from it to what each row draws.
+struct PreparedDocument {
+  /// Each row's math: its text without a trailing `# note`, trimmed.
+  var texts: [String]
+  /// The `# heading` rows.
+  var comments: Set<Int> = []
+  /// The definition each row scans as, whether or not it is the one that owns the name.
+  var scanned: [Definition?]
+  /// The rows the port leaves alone, with what stopped it: such a row's
+  /// definition is not in `built`.
+  var blocked: [Int: String] = [:]
+  /// Every name a `~` row writes: a random variable, or a fit and its coefficients.
+  var tildeNames: Set<String> = []
+  /// The definitions in row order, one per key, and the row that owns each.
+  var raw: [Definition] = []
+  var owner: [String: Int] = [:]
+  /// Rows that define a name a row above already has.
+  var duplicates: [Int] = []
+  var built = BuiltDefs()
+}
+
+func prepareDocument(_ sources: [String]) -> PreparedDocument {
   // A trailing `# note` is prose for the reader; the math is what precedes it.
   let texts = sources.map { jsTrimmed(stripNote($0)) }
-  var rows = zip(sources, texts).map { RowAnalysis(text: $1, noteStart: noteStart($0)) }
-  let count = rows.count
+  let count = texts.count
+  var document = PreparedDocument(texts: texts, scanned: Array(repeating: nil, count: count))
 
   // What each row is by its text alone, and the rows the port leaves alone:
   // random variables and regressions (`~`), sequences and lattices.
@@ -268,7 +287,7 @@ public func analyze(_ sources: [String]) -> DocumentAnalysis {
   var scanned: [Definition?] = Array(repeating: nil, count: count)
   for (i, text) in texts.enumerated() where !text.isEmpty {
     if text.hasPrefix("#") {
-      rows[i].comment = true
+      document.comments.insert(i)
     } else if text.contains("~") {
       blocked[i] = "random variables and regressions (~)"
       // A fit defines its coefficients too: every name in the row is its.
@@ -288,7 +307,6 @@ public func analyze(_ sources: [String]) -> DocumentAnalysis {
   var duplicates: [Int] = []
   for i in 0..<count {
     guard let d = scanned[i] else { continue }
-    rows[i].definition = d
     if owner[d.key] != nil {
       duplicates.append(i)
     } else {
@@ -304,7 +322,7 @@ public func analyze(_ sources: [String]) -> DocumentAnalysis {
     var grew = true
     while grew {
       grew = false
-      for i in 0..<count where blocked[i] == nil && !rows[i].comment {
+      for i in 0..<count where blocked[i] == nil && !document.comments.contains(i) {
         guard let name = writtenNames(texts[i]).first(where: { touches($0, poison) }) else { continue }
         blocked[i] = "it uses \(name), which is not supported yet"
         if let d = scanned[i], poison.insert(d.name).inserted { grew = true }
@@ -321,6 +339,29 @@ public func analyze(_ sources: [String]) -> DocumentAnalysis {
     }
     if !found { break }
   }
+  document.scanned = scanned
+  document.blocked = blocked
+  document.tildeNames = tildeNames
+  document.raw = raw
+  document.owner = owner
+  document.duplicates = duplicates
+  document.built = built
+  return document
+}
+
+// MARK: - analyze
+
+/// Analyze a document: one result per row, and the constants' values.
+public func analyze(_ sources: [String]) -> DocumentAnalysis {
+  let document = prepareDocument(sources)
+  let (texts, blocked, tildeNames) = (document.texts, document.blocked, document.tildeNames)
+  let (raw, owner, duplicates, built) = (document.raw, document.owner, document.duplicates, document.built)
+  var rows = zip(sources, texts).map { RowAnalysis(text: $1, noteStart: noteStart($0)) }
+  let count = rows.count
+  for i in 0..<count {
+    rows[i].comment = document.comments.contains(i)
+    rows[i].definition = document.scanned[i]
+  }
 
   for (key, text) in built.errors.entries {
     if let i = owner[key], blocked[i] == nil { rows[i].error = text }
@@ -332,7 +373,7 @@ public func analyze(_ sources: [String]) -> DocumentAnalysis {
     let levelSet = d.kind == "fn" && built.fns[d.name] != nil && texts[i] != texts[first]
     var planar = false
     if let field = built.fields[d.name] {
-      let vars = freeVarNames(field)
+      let vars = freeVars(field)
       planar = !vars.contains("u") && !vars.contains("v")
     }
     if planar || levelSet {
@@ -457,7 +498,7 @@ public func analyze(_ sources: [String]) -> DocumentAnalysis {
       if case .bin(.mul, _, .range, _) = rawParsed { throw Unsupported("orbits") }
       // A row not drawn over the plane may test equality in a case: `f(2)`
       // with f(m) = {mod(m, 2) = 0: …}.
-      func plane(_ e: Expr) -> Bool { freeVarNames(e).contains(where: ["x", "y", "z"].contains) }
+      func plane(_ e: Expr) -> Bool { freeVars(e).contains(where: ["x", "y", "z"].contains) }
       let exact = !plane(rawParsed)
       var rowOpts = ropts
       rowOpts.exactConditions = exact
@@ -477,7 +518,7 @@ public func analyze(_ sources: [String]) -> DocumentAnalysis {
       switch resolved {
       case .eq, .ineq: break
       default:
-        let free = freeVarNames(resolved).list.filter { !constNames.contains($0) }
+        let free = freeVars(resolved).list.filter { !constNames.contains($0) }
         if free.contains(where: { $0 == "u" || $0 == "v" }),
           !free.contains(where: ["x", "y", "z", "w"].contains)
         {
@@ -495,7 +536,7 @@ public func analyze(_ sources: [String]) -> DocumentAnalysis {
       rows[i].unsupported = notSupported(error.what)
       if viewHead(text) != nil { viewsUnknown = true }
     } catch {
-      var text = message(error)
+      var text = errorMessage(error)
       // `i = 3` fails as a claim about i; the author meant a definition, so
       // say why it is not one.
       if let taken = takenDefinitionName(texts[i]), taken != "d" {
@@ -531,7 +572,7 @@ public func analyze(_ sources: [String]) -> DocumentAnalysis {
       rows[i].classified = nil
       rows[i].info = nil
     } catch {
-      rows[i].error = message(error)
+      rows[i].error = errorMessage(error)
       rows[i].cpu = nil
       rows[i].gpu = nil
     }
@@ -606,11 +647,12 @@ public func analyze(_ sources: [String]) -> DocumentAnalysis {
       }
       // Whole-number sliders step one at a time; otherwise a round step
       // (1, 2 or 5 × 10^k), so round values sit on it.
-      row.slider = Slider(min: lo, max: hi, step: form.whole ? 1 : niceSpacing((hi - lo) / 400, 1), value: value)
+      row.slider = Slider(min: lo, max: hi, step: form.whole ? 1 : niceSpacing((hi - lo) / 400, 1).major, value: value)
     }
   }
   return DocumentAnalysis(
-    rows: rows, env: constEnv, animated: animated, userFns: userFns, constNames: built.consts.keys,
+    rows: rows, env: constEnv, animated: animated, names: boundNames(document), userFns: userFns,
+    constNames: built.consts.keys,
     constExprs: built.consts.entries.map(\.value))
 }
 

@@ -13,7 +13,7 @@
 /// corners of `Math` that C's libm answers differently. Readouts and slider
 /// write-backs are text the site produces with these, so the port has to
 /// spell them the same way.
-enum JS {
+public enum JS {
   // MARK: Math
 
   /// `Math.round`: halves go up (-0.5 is -0, 2.5 is 3).
@@ -62,9 +62,11 @@ enum JS {
 
   // MARK: Writing numbers
 
-  /// `String(v)`: the shortest digits that read back as `v`, as a plain
-  /// decimal from 1e-7 up to 1e21 and in exponent form outside it.
-  static func string(_ v: Double) -> String {
+  /// `String(v)` (ECMAScript Number::toString, radix 10): the shortest
+  /// digits that read back as `v`, written plainly from 1e-6 up to 1e21 and
+  /// with an exponent (`1e+21`, `1.5e-7`) outside. Swift's description finds
+  /// the same digits; only the layout differs.
+  public static func string(_ v: Double) -> String {
     if v.isNaN { return "NaN" }
     if v == 0 { return "0" }
     if v.isInfinite { return v < 0 ? "-Infinity" : "Infinity" }

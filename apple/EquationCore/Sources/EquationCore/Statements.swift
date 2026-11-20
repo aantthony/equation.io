@@ -29,10 +29,15 @@ func jsTrimEnd(_ u: ArraySlice<UInt16>) -> ArraySlice<UInt16> {
   return s
 }
 
+func jsTrim(_ u: ArraySlice<UInt16>) -> ArraySlice<UInt16> { jsTrimEnd(jsTrimStart(u)) }
+
 func jsTrimmed(_ text: String) -> String {
   let u = Array(text.utf16)
-  return String(jsTrimEnd(jsTrimStart(u[...])))
+  return String(jsTrim(u[...]))
 }
+
+/// Whether the row is a `#` comment row: a group heading, not a row with a note.
+func isCommentRow(_ u: Units) -> Bool { jsTrimStart(u[...]).first == 0x23 }
 
 /// Characters a value can end with, so a following `'` is a prime mark:
 /// written name characters, constant/operator glyphs, superscript exponents,
@@ -100,7 +105,7 @@ public func noteStart(_ text: String) -> Int? {
 }
 
 func noteStart(_ u: Units) -> Int? {
-  if jsTrimStart(u[...]).first == 0x23 { return nil }
+  if isCommentRow(u) { return nil }
   var quote: UInt16?
   for (k, c) in u.enumerated() {
     if let q = quote {
@@ -123,9 +128,11 @@ public func stripNote(_ text: String) -> String {
   return String(jsTrimEnd(u[..<at]))
 }
 
-/// A row's color, when its note opens with a hex color glued to the `#`
-/// (`y = x^2 #e24`), as channels in 0–1; nil for no (or a malformed) color.
-public func noteColor(_ text: String) -> [Double]? {
+/// A row's color, when its note opens with a hex color glued to the `#`:
+/// `y = x^2 #e24` or `y = x^2 #1f77b4 parabola`. The glue is what makes it a
+/// color: `# fed` and `# 100 samples` stay plain notes. Channels in 0–1, as
+/// the palette's are; nil for no (or a malformed) color.
+public func noteColor(_ text: String) -> SIMD3<Float>? {
   let u = Array(text.utf16)
   guard let at = noteStart(u) else { return nil }
   func hexValue(_ c: UInt16) -> Int? {
@@ -144,7 +151,8 @@ public func noteColor(_ text: String) -> [Double]? {
     let digits = u[(at + 1)..<end].compactMap(hexValue)
     guard digits.count == length, !(end < u.count && word(u[end])) else { continue }
     let wide = length == 3 ? digits.flatMap { [$0, $0] } : digits
-    return [0, 2, 4].map { Double(wide[$0] * 16 + wide[$0 + 1]) / 255 }
+    let channels = [0, 2, 4].map { Float(Double(wide[$0] * 16 + wide[$0 + 1]) / 255) }
+    return SIMD3(channels[0], channels[1], channels[2])
   }
   return nil
 }

@@ -6,7 +6,7 @@
 /// separator. A payload with a literal `%` carries the `~2~` marker and
 /// escapes those as well.
 public func encodePayload(_ texts: [String]) -> String {
-  let rows = texts.map(jsTrim).filter { !$0.isEmpty }
+  let rows = texts.map(jsTrimmed).filter { !$0.isEmpty }
   let escapePercent = rows.contains { $0.contains("%") }
   let encoded = rows.map { row in
     encodeRow(escapePercent ? row.replacing("%", with: "%25") : row)
@@ -45,14 +45,4 @@ private func isUnreserved(_ b: UInt8) -> Bool {
 private func hex(_ b: UInt8) -> String {
   let digits = Array("0123456789ABCDEF".unicodeScalars)
   return String(String.UnicodeScalarView([digits[Int(b >> 4)], digits[Int(b & 0xF)]]))
-}
-
-/// JavaScript's String.prototype.trim: its whitespace and line terminators.
-private func jsTrim(_ s: String) -> String {
-  let units = Array(s.utf16)
-  var start = 0
-  var end = units.count
-  while start < end && isJSWhitespace(units[start]) { start += 1 }
-  while end > start && isJSWhitespace(units[end - 1]) { end -= 1 }
-  return String(decoding: units[start..<end], as: UTF16.self)
 }

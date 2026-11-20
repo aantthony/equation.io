@@ -16,13 +16,13 @@ import Testing
     var failures: [String] = []
     for entry in entries {
       let variable = entry["variable"] as! String
-      let input = try decode(exactNumbers(entry["input"]!))
+      let input = try decode(entry["input"]!)
       let got: Result<Expr, DiffError> = Result { () throws(DiffError) in try diff(input, variable) }
       let want: Result<Expr, DiffError> =
         if let message = entry["error"] as? String {
           .failure(DiffError(message, nonSmooth: entry["errorType"] as? String == "NonSmoothError"))
         } else {
-          .success(try decode(exactNumbers(entry["expr"]!)))
+          .success(try decode(entry["expr"]!))
         }
       // Compared as printed, so a NaN matches a NaN (and -0 still differs from 0).
       let (g, w) = ("\(got)", "\(want)")
@@ -38,24 +38,4 @@ import Testing
     let shown = failures.prefix(10).joined(separator: "\n")
     #expect(failures.isEmpty, "\(failures.count) of \(entries.count) differ:\n\(shown)")
   }
-}
-
-/// The fixture writes every number as text, since JSONSerialization reads
-/// some doubles an ulp off; this puts the exact doubles back, for `decode`.
-func exactNumbers(_ json: Any) -> Any {
-  if let list = json as? [Any] { return list.map(exactNumbers) }
-  guard var object = json as? [String: Any] else { return json }
-  if object["kind"] as? String == "num", let text = object["value"] as? String {
-    let value: Double =
-      switch text {
-      case "Infinity": .infinity
-      case "-Infinity": -.infinity
-      case "NaN": .nan
-      default: Double(text)!
-      }
-    object["value"] = NSNumber(value: value)
-    return object
-  }
-  for (key, value) in object { object[key] = exactNumbers(value) }
-  return object
 }

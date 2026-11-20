@@ -16,12 +16,18 @@ const file = new URL(`glsl-${process.pid}-${process.env.VITEST_POOL_ID ?? 0}.jso
 
 // JSON has no spelling for a non-finite number or for -0; the fixture writes
 // them as text. A packed column (a `data` or `lazy` node's typed array) is
-// only marked: the Swift Expr has no such node yet.
+// written as the list of its numbers when it is short, and only marked when
+// it is long: a test's 100,000-row column says nothing more to an emitter
+// that refuses the node.
+const PACKED_LIMIT = 64;
 const replacer = (key: string, value: unknown): unknown => {
   if (key === 'axes' || key === 'origin') return undefined;
   if (typeof value === 'number' && !Number.isFinite(value)) return String(value);
   if (Object.is(value, -0)) return '-0';
-  if (ArrayBuffer.isView(value)) return '[packed]';
+  if (ArrayBuffer.isView(value)) {
+    const values = value as unknown as ArrayLike<number>;
+    return values.length <= PACKED_LIMIT ? Array.from(values) : '[packed]';
+  }
   return value;
 };
 
@@ -46,7 +52,7 @@ function recorded<T>(input: object, call: () => T): T {
 }
 
 /** The derivatives fourierGraphGLSL asks for while it runs: the Swift port
- *  is handed lib/diff.ts's answers, which it does not have yet. */
+ *  must ask its own differentiator for the same ones, and get these answers. */
 let graphDiffs: object[] | null = null;
 
 vi.mock(import('../../lib/diff.ts'), async load => {

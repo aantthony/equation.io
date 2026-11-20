@@ -1,5 +1,6 @@
 import CoreGraphics
 import CoreText
+import EquationCore
 import Foundation
 
 // What is drawn over the shader passes with a 2D context: web/render2d.ts
@@ -476,14 +477,14 @@ private func drawLatticeLabels(
       let i = left + Double(n) * major
       let sx = s.x(i)
       if !(sx < w) { break }
-      if sx > 24 { label(jsNumber(i), sx, 13, .center) }
+      if sx > 24 { label(JS.string(i), sx, 13, .center) }
     }
     let top = (-(s.view.cy + h / 2 * s.uppY) / majorY).rounded(.up) * majorY
     for n in 0..<1000 {
       let k = top + Double(n) * majorY
       let sy = s.y(-k)
       if !(sy < h) { break }
-      if sy > 24, sy < h - 24 { label(jsNumber(k), 4, sy + 4) }
+      if sy > 24, sy < h - 24 { label(JS.string(k), 4, sy + 4) }
     }
   }
   // The corner note sits bottom left, clear of the equation panel.

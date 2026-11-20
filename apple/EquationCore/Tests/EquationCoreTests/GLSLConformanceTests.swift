@@ -9,8 +9,8 @@ import Testing
 /// every magnitude, awkward uniform names, and shaders to link. Regenerate
 /// it with `pnpm swift:corpus`.
 ///
-/// An input holding a node the Swift Expr does not have yet (figure, data,
-/// lazy, loop, …) is passed over; a failure says how many were.
+/// An input holding a packed column too long for the fixture to carry is
+/// passed over; a failure says how many were.
 ///
 /// Serialized: linking reads the helpers the process has declared.
 @Suite(.serialized) struct GLSLConformance {
@@ -60,7 +60,7 @@ import Testing
     let entries = cases("numbers")
     for entry in entries {
       let value = Double(bitPattern: UInt64(entry["bits"] as! String, radix: 16)!)
-      let text = jsNumberString(value)
+      let text = JS.string(value)
       if text != entry["text"] as! String { failures.append("\(entry["bits"]!): want \(entry["text"]!), got \(text)") }
       let got = Result { () throws(ShaderError) in try toGLSL(.num(value)) }
       var want = entry
@@ -91,7 +91,8 @@ import Testing
     report(failures, of: checked, entries.count)
   }
 
-  /// fourierGraphGLSL, handed the derivatives lib/diff.ts gave the TypeScript.
+  /// fourierGraphGLSL: the same text, having asked for the derivatives the
+  /// TypeScript asked lib/diff.ts for and been given the same answers.
   @Test func fourierGraphs() {
     var failures: [String] = []
     var checked = 0
@@ -110,8 +111,17 @@ import Testing
             throw DecodeError(description: "a derivative the TypeScript did not ask for")
           }
           next += 1
-          if let message = diffs[next - 1]["error"] { throw DecodeError(description: "\(message)") }
-          return try decode(diffs[next - 1]["out"]!)
+          let derivative = Result { () throws(DiffError) in try diff(e, v) }
+          // Compared as printed, so a NaN matches a NaN.
+          let have =
+            switch derivative {
+            case .success(let d): "\(d)"
+            case .failure(let error): "error: \(error.message)"
+            }
+          let want =
+            try (diffs[next - 1]["error"] as? String).map { "error: \($0)" } ?? "\(decode(diffs[next - 1]["out"]!))"
+          if have != want { stray = true }
+          return try derivative.get()
         }
       }
       var want = entry
@@ -121,7 +131,9 @@ import Testing
       } else if entry["error"] == nil {
         want["out"] = "none"
       }
-      if stray || next != asked.count { have = .success("asked for \(next) of \(asked.count) derivatives") }
+      if stray || next != asked.count {
+        have = .success("asked for \(next) of \(asked.count) derivatives, or got others")
+      }
       if let failure = differs(want, have, "\(expr)") { failures.append(failure) }
     }
     report(failures, of: checked, entries.count)

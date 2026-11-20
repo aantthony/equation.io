@@ -60,6 +60,61 @@ import Testing
     #expect(failures.isEmpty, "\(failures.count) differences:\n\(shown)")
   }
 
+  /// The kinds only lowering writes, built by hand where the fixture is
+  /// recorded: everything the language reads of a tree, as the TypeScript
+  /// reads it.
+  @Test func builtTrees() throws {
+    let root = try #require(try fixture("evaluate") as? [String: Any])
+    let substitution = try (root["substitution"] as! [String: Any]).mapValues(decode)
+    let envs = (root["structureEnvs"] as! [[String: Any]]).map { $0.mapValues(number) }
+    let structures = root["structures"] as! [[String: Any]]
+    var kinds: Set<String> = []
+    for s in structures {
+      let name = s["name"] as! String
+      let expr = try decode(s["expr"]!)
+      kinds.insert(expr.kind)
+      /// What the TypeScript returned or threw, beside what the Swift did.
+      func same(_ key: String, _ got: Result<String, any Error>, at index: Int? = nil) {
+        var recorded: Any = s[key]!
+        if let index { recorded = (recorded as! [Any])[index] }
+        let entry = recorded as! [String: Any]
+        let want = entry["error"].map { "error: \($0)" } ?? "\(entry["out"]!)"
+        let have =
+          switch got {
+          case .success(let text): text
+          case .failure(let error): "error: \(errorMessage(error))"
+          }
+        #expect(have == want, "\(name): \(key)")
+      }
+      #expect(expr.kind == s["kind"] as? String, "\(name)")
+      #expect(exprKey(expr) == s["key"] as? String, "\(name): key")
+      #expect(childrenOf(expr).map(exprKey) == s["children"] as? [String], "\(name): children")
+      #expect(exprKey(mapChildren(expr) { .neg($0) }) == s["mapped"] as? String, "\(name): mapChildren")
+      #expect(freeVars(expr).list == s["free"] as? [String], "\(name): freeVars")
+      #expect(exprKey(substVars(expr, substitution)) == s["substituted"] as? String, "\(name): substVars")
+      #expect(structuralDiagnostic(expr) == s["diagnostic"] as? String, "\(name): diagnostic")
+      for (k, env) in envs.enumerated() {
+        let value = Result { try evaluate(expr, env) }
+        // (A value is compared as the fixture writes one: its text, or a whole number.)
+        let recorded = ((s["values"] as! [[String: Any]])[k])["out"]
+        if case .success(let got) = value, let recorded {
+          #expect(close(got, number(recorded)), "\(name) in env \(k): \(got), want \(recorded)")
+        } else {
+          same("values", value.map { "\($0)" }, at: k)
+        }
+      }
+      let derivative = Result { () throws(DiffError) in exprKey(try diff(expr, "x")) }
+      same("derivative", derivative.mapError { $0 })
+      if case .failure(let error) = derivative {
+        let type = (s["derivative"] as! [String: Any])["errorType"] as? String
+        #expect(error.nonSmooth == (type == "NonSmoothError"), "\(name): which error")
+      }
+      same("glsl", Result { () throws(ShaderError) in try toGLSL(expr) }.mapError { $0 })
+    }
+    let lowered = ["comp", "figure", "trail", "label", "hist", "family", "data", "lazy", "text", "loop"]
+    #expect(kinds.isSuperset(of: lowered))
+  }
+
   @Test func powers() throws {
     let root = try #require(try fixture("evaluate") as? [String: Any])
     for c in root["pow"] as! [[String: Any]] {
@@ -90,7 +145,7 @@ import Testing
 
   @Test func structure() throws {
     let e = try parseExpr("a x^2 + f(b, {x > 0: a})", userFns: ["f"])
-    #expect(freeVarNames(e).list == ["a", "x", "b"])
+    #expect(freeVars(e).list == ["a", "x", "b"])
     let env: [String: Expr] = ["a": .num(2), "x": try parseExpr("t + 1")]
     let substituted = try parseExpr("2 (t + 1)^2 + f(b, {t + 1 > 0: 2})", userFns: ["f"])
     #expect(substVars(e, env) == substituted)
@@ -98,7 +153,7 @@ import Testing
     #expect(mapped == Expr.neg(.num(1)))
     let piecewise = try parseExpr("{x > 0: 1, 2}")
     #expect(childrenOf(piecewise).count == 3)
-    let derivative = try Sym.diff(try parseExpr("x^3 + sin(2 x)"), "x")
+    let derivative = try diff(try parseExpr("x^3 + sin(2 x)"), "x")
     let expected = try parseExpr("3 x^2 + cos(2 x) 2")
     #expect(derivative == expected)
   }
@@ -111,8 +166,8 @@ import Testing
     #expect(noteStart("# heading") == nil)
     #expect(noteStart("p = open(\"a#b\")") == nil)
     #expect(stripNote("y = x^2  # parabola") == "y = x^2")
-    let short: [Double] = [238.0 / 255, 34.0 / 255, 68.0 / 255]
-    let long: [Double] = [31.0 / 255, 119.0 / 255, 180.0 / 255]
+    let short = SIMD3<Float>(238, 34, 68) / 255
+    let long = SIMD3<Float>(31, 119, 180) / 255
     #expect(noteColor("y = x #e24") == short)
     #expect(noteColor("y = x #1f77b4 blue") == long)
     #expect(noteColor("y = x # fed") == nil)

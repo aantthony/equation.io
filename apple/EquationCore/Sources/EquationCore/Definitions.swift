@@ -83,51 +83,90 @@ func pointComps(_ name: String, _ dim: Int = 2) -> [String] {
 
 // MARK: - Scanning rows (the regular expressions of lib/defs.ts, by hand)
 
-/// A cursor over a row's UTF-16 text, for the anchored patterns that decide
-/// what a row defines before anything is parsed.
+/// A cursor over a row's UTF-16 text, or a stretch of it, with the pieces the
+/// TypeScript's regular expressions are made of: the anchored patterns that
+/// decide what a row defines before anything is parsed, and the highlighter's.
 struct RowScanner {
   let u: Units
-  var i = 0
+  var i: Int
+  /// Where the scan stops: the end of the text, or of the stretch being read.
+  let end: Int
 
-  init(_ text: String) { u = Array(text.utf16) }
-  init(_ units: Units) { u = units }
+  init(_ text: String) { self.init(Array(text.utf16)) }
+  init(_ units: Units, _ range: Range<Int>? = nil) {
+    u = units
+    i = range?.lowerBound ?? 0
+    end = range?.upperBound ?? units.count
+  }
 
-  var atEnd: Bool { i >= u.count }
-  var peek: UInt16? { i < u.count ? u[i] : nil }
+  var atEnd: Bool { i >= end }
+  var peek: UInt16? { i < end ? u[i] : nil }
 
   /// `\s*`
   mutating func space() {
-    while i < u.count, isJSWhitespace(u[i]) { i += 1 }
+    while i < end, isJSWhitespace(u[i]) { i += 1 }
   }
 
-  /// A name as written: a name-start character, then name characters.
-  mutating func name() -> String? {
-    guard i < u.count, isNameStart(u[i]) else { return nil }
+  /// A name as written (lib/expr.ts `NAME_SRC`): a name-start character,
+  /// then name characters.
+  mutating func nameRange() -> Range<Int>? {
+    guard i < end, isNameStart(u[i]) else { return nil }
     let start = i
     i += 1
-    while i < u.count, isWrittenName(u[i]) { i += 1 }
-    return String(u[start..<i])
+    while i < end, isWrittenName(u[i]) { i += 1 }
+    return start..<i
   }
 
-  mutating func eat(_ c: Unicode.Scalar) -> Bool {
-    guard i < u.count, u[i] == unit(c) else { return false }
+  mutating func name() -> String? { nameRange().map { String(u[$0]) } }
+
+  mutating func eat(_ c: UInt16) -> Bool {
+    guard i < end, u[i] == c else { return false }
     i += 1
     return true
   }
+
+  mutating func eat(_ c: Unicode.Scalar) -> Bool { eat(unit(c)) }
 
   /// Literal ASCII text.
   mutating func eat(word: String) -> Bool {
     let w = Array(word.utf16)
-    guard i + w.count <= u.count, Array(u[i..<(i + w.count)]) == w else { return false }
+    guard i + w.count <= end, Array(u[i..<(i + w.count)]) == w else { return false }
     i += w.count
     return true
   }
 
-  /// `=(?!=)([\s\S]+)$`: the text after a single `=`, which must not be empty.
-  mutating func assignment() -> String? {
-    guard i + 1 < u.count, u[i] == unit("="), u[i + 1] != unit("=") else { return nil }
-    return String(u[(i + 1)...])
+  /// An ASCII word, whatever its case: the `/i` of the row-shape patterns.
+  mutating func eat(wordIgnoringCase lower: String) -> Bool {
+    var k = i
+    for c in lower.utf16 {
+      guard k < end, u[k] | 0x20 == c, isASCIILetter(u[k]) else { return false }
+      k += 1
+    }
+    i = k
+    return true
   }
+
+  /// `=(?!=)`
+  mutating func assign() -> Bool {
+    guard i < end, u[i] == unit("="), !(i + 1 < end && u[i + 1] == unit("=")) else { return false }
+    i += 1
+    return true
+  }
+
+  /// `=(?!=)([\s\S]+)$`: the text after a single `=`, which must not be empty.
+  func assignment() -> String? {
+    guard i + 1 < end, u[i] == unit("="), u[i + 1] != unit("=") else { return nil }
+    return String(u[(i + 1)..<end])
+  }
+
+  /// `\d+`
+  mutating func digits() -> Range<Int>? {
+    let start = i
+    while i < end, isDigit(u[i]) { i += 1 }
+    return i > start ? start..<i : nil
+  }
+
+  func text(_ range: Range<Int>) -> String { String(u[range]) }
 }
 
 /// `^\s*(NAME)\s*=(?!=)(…)$`
@@ -184,9 +223,14 @@ private func scanDraw(_ text: Units) -> (name: String, rhs: String)? {
   return (name, String(s.u[s.i...]))
 }
 
-/// A row that means to open a file, whether or not it succeeds at saying so:
-/// `^\s*(NAME)\s*=\s*open\s*\(\s*["']`.
-func scanOpenHead(_ text: String) -> String? {
+/// A data file's hash, as a row pins it, is at least this many hex digits
+/// (lib/hash.ts `HASH_TOKEN_LEN`).
+private let hashTokenLength = 12
+
+/// A row that means to open a file, `name = open("file.csv", hash)`: the name
+/// as written, and whether the row says so well enough to be one
+/// (lib/defs.ts `OPEN_HEAD_RE`, and the whole of `TABLE_RE`).
+private func scanOpen(_ text: Units) -> (name: String, wellFormed: Bool)? {
   var s = RowScanner(text)
   s.space()
   guard let name = s.name() else { return nil }
@@ -197,8 +241,27 @@ func scanOpenHead(_ text: String) -> String? {
   s.space()
   guard s.eat("(") else { return nil }
   s.space()
-  guard s.eat("\"") || s.eat("'") else { return nil }
-  return name
+  guard let quote = s.peek, quote == unit("\"") || quote == unit("'") else { return nil }
+  s.i += 1
+  while let c = s.peek, c != quote { s.i += 1 }
+  guard s.eat(quote) else { return (name, false) }
+  s.space()
+  if s.eat(",") {
+    s.space()
+    let start = s.i
+    while let c = s.peek, isDigit(c) || (0x61...0x66).contains(c | 0x20) { s.i += 1 }
+    guard (hashTokenLength...64).contains(s.i - start) else { return (name, false) }
+    s.space()
+  }
+  guard s.eat(")") else { return (name, false) }
+  s.space()
+  return (name, s.atEnd)
+}
+
+/// The name of a row that means to open a file, whether or not it succeeds
+/// at saying so: `^\s*(NAME)\s*=\s*open\s*\(\s*["']`.
+func scanOpenHead(_ text: String) -> String? {
+  scanOpen(Array(text.utf16))?.name
 }
 
 /// A subscript written in braces, as a recurrence row is: `a_{0} = 1`
@@ -206,7 +269,7 @@ func scanOpenHead(_ text: String) -> String? {
 private func unbraceTerm(_ text: Units) -> Units {
   var s = RowScanner(text)
   s.space()
-  guard let letter = s.peek, isASCIILetter(letter) || greekNameChars.contains(letter) else { return text }
+  guard let letter = s.peek, isNameLetter(letter) else { return text }
   s.i += 1
   let head = s.i
   guard s.eat("_") else { return text }
@@ -216,7 +279,7 @@ private func unbraceTerm(_ text: Units) -> Units {
     let start = s.i
     if let c = s.peek, isDigit(c) {
       while let c = s.peek, isDigit(c) { s.i += 1 }
-    } else if let c = s.peek, isASCIILetter(c) || greekNameChars.contains(c) {
+    } else if let c = s.peek, isNameLetter(c) {
       s.i += 1
       while let c = s.peek, isASCIILetter(c) || isDigit(c) || c == unit("_") { s.i += 1 }
     } else {
@@ -287,11 +350,11 @@ public func scanDefinition(_ source: String) -> Definition? {
     }
   }
   // Before the function form: `open(…)` takes a file name, not parameters.
-  // (Whether the row is a well-formed one is not decided here: either way it
-  // is not a constant, and the port does not read data files yet.)
-  if let written = scanOpenHead(String(text)) {
-    let name = canonicalName(written)
-    return nameable(name) ? .table(name: name) : nil
+  // A row that plainly means to open a file but does not read as one is not
+  // a constant either: its own row explains what is wrong with it.
+  if let open = scanOpen(text) {
+    let name = canonicalName(open.name)
+    return open.wellFormed && nameable(name) ? .table(name: name) : nil
   }
   if let m = scanFn(text), nameable(canonicalName(m.name)) {
     return .function(name: canonicalName(m.name), params: m.params.map(canonicalName), rhs: m.rhs)
@@ -492,7 +555,7 @@ func buildDefs(_ raw: [Definition], skip: Set<String>) -> BuiltDefs {
         defs.conditions[name] = nil
         // u and v take only an interval: the range they run over.
         if paramVars.contains(name) { throw Unsupported("intervals") }
-        let free = freeVarNames(resolved)
+        let free = freeVars(resolved)
         if free.contains("i") || free.contains("w") { throw Unsupported("complex numbers") }
         // Lowering expands point arithmetic; a pair result names a point.
         // Point-ness flows in definition order, so `C = B + D` needs B and D
@@ -527,7 +590,7 @@ func buildDefs(_ raw: [Definition], skip: Set<String>) -> BuiltDefs {
           // Its value now, when everything it reads has one.
           var env: [String: Double] = [:]
           var known = true
-          for fv in freeVarNames(expr) {
+          for fv in freeVars(expr) {
             guard let v = numEnv[fv] else {
               known = false
               break
@@ -563,7 +626,7 @@ func buildDefs(_ raw: [Definition], skip: Set<String>) -> BuiltDefs {
   // A bare point name surviving in a resolved expression means the point was
   // defined below its use, so lowering saw it as a scalar: report and drop.
   for (name, e) in defs.consts.entries {
-    for fv in freeVarNames(e) where defs.points.contains(fv) {
+    for fv in freeVars(e) where defs.points.contains(fv) {
       let owner = compOwner[name] ?? name
       defs.errors[owner] = "\(fv) is a point — move its definition above \(owner)."
       if defs.points.contains(owner) {
@@ -585,7 +648,7 @@ func buildDefs(_ raw: [Definition], skip: Set<String>) -> BuiltDefs {
   while changed {
     changed = false
     for (name, e) in defs.consts.entries {
-      for fv in freeVarNames(e) {
+      for fv in freeVars(e) {
         if !fieldNames.contains(name), positionVars.contains(fv) || paramVars.contains(fv) || fieldNames.contains(fv) {
           fieldNames.insert(name)
           changed = true
@@ -634,10 +697,10 @@ func buildDefs(_ raw: [Definition], skip: Set<String>) -> BuiltDefs {
     defer { fieldVisiting.remove(name) }
     var e = pendingFields[name]!
     var sub: [String: Expr] = [:]
-    for fv in freeVarNames(e) where pendingFields.has(fv) { sub[fv] = try resolveField(fv) }
+    for fv in freeVars(e) where pendingFields.has(fv) { sub[fv] = try resolveField(fv) }
     if !sub.isEmpty { e = substVars(e, sub) }
     // A field lives over the plane or space, or over the parameters.
-    let vars = freeVarNames(e).list
+    let vars = freeVars(e).list
     let param = vars.first(where: paramVars.contains)
     if let param, vars.contains(where: positionVars.contains) {
       throw LanguageError(
@@ -682,7 +745,7 @@ func buildDefs(_ raw: [Definition], skip: Set<String>) -> BuiltDefs {
     let names = pointComps(p, defs.pointDims[p] ?? 2)
     let values = names.compactMap { defs.fields[$0] }
     guard values.count == names.count else { continue }
-    let vars = values.flatMap { freeVarNames($0).list }
+    let vars = values.flatMap { freeVars($0).list }
     guard let param = vars.first(where: paramVars.contains), vars.contains(where: positionVars.contains) else {
       continue
     }
@@ -704,11 +767,11 @@ func buildDefs(_ raw: [Definition], skip: Set<String>) -> BuiltDefs {
   for (name, written) in defs.conditions.entries {
     do {
       var sub: [String: Expr] = [:]
-      for v in freeVarNames(written) {
+      for v in freeVars(written) {
         if let field = defs.fields[v] { sub[v] = field }
       }
       let c = sub.isEmpty ? written : substVars(written, sub)
-      let vars = freeVarNames(c).list
+      let vars = freeVars(c).list
       for fv in vars {
         if positionVars.contains(fv) || paramVars.contains(fv) || fv == "t" || fv == "i" || constNames.contains(fv) {
           continue
@@ -735,7 +798,7 @@ func buildDefs(_ raw: [Definition], skip: Set<String>) -> BuiltDefs {
 
   // Constants may only depend on other constants and time.
   for (name, e) in defs.consts.entries {
-    for fv in freeVarNames(e) where fv != "t" && !constNames.contains(fv) {
+    for fv in freeVars(e) where fv != "t" && !constNames.contains(fv) {
       defs.errors[name] =
         fv == "inf"
         ? "inf only works as an ∫ bound — write it inline: int[-inf..x] f(x) dx."
@@ -755,7 +818,7 @@ func buildDefs(_ raw: [Definition], skip: Set<String>) -> BuiltDefs {
     if visiting.contains(name) { throw LanguageError("\(name) is defined in terms of itself.") }
     visiting.insert(name)
     var env: [String: Double] = ["t": 0]
-    for fv in freeVarNames(e) where fv != "t" {
+    for fv in freeVars(e) where fv != "t" {
       try check(fv, &visiting)
       env[fv] = 0
     }
@@ -807,7 +870,7 @@ func buildDefs(_ raw: [Definition], skip: Set<String>) -> BuiltDefs {
         || defs.fns[name] != nil || defs.unsupported[name] != nil
     }
     func references(_ expr: Expr) -> NameSet {
-      var names = freeVarNames(expr)
+      var names = freeVars(expr)
       func calls(_ node: Expr) {
         if case .call(let name, _) = node, fnNames.contains(name) { names.insert(name) }
         for child in childrenOf(node) { calls(child) }
@@ -877,7 +940,7 @@ func animatedConstNames(_ defs: BuiltDefs) -> Set<String> {
   while changed {
     changed = false
     for (name, e) in defs.consts.entries where !out.contains(name) {
-      if freeVarNames(e).contains(where: { $0 == "t" || out.contains($0) }) {
+      if freeVars(e).contains(where: { $0 == "t" || out.contains($0) }) {
         out.insert(name)
         changed = true
       }
@@ -897,7 +960,7 @@ func evaluateFrame(_ defs: BuiltDefs, time: Double) throws -> [String: Double] {
     visiting.insert(name)
     defer { visiting.remove(name) }
     var vars: [String: Double] = ["t": time]
-    for fv in freeVarNames(expr) where fv != "t" { vars[fv] = try get(fv) }
+    for fv in freeVars(expr) where fv != "t" { vars[fv] = try get(fv) }
     let value = try evaluate(expr, vars)
     out[name] = value
     return value

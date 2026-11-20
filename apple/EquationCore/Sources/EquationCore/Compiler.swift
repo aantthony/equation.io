@@ -80,7 +80,7 @@ public struct GpuPlan: Equatable, Sendable {
 /// Whether an expression reads an angle: atan2, or the angle(…) measurement.
 private func hasAtan2(_ e: Expr) -> Bool {
   if case .call(let name, let args) = e,
-    name == "atan2" || name == angleFnName || (name == "atan" && args.count == 2)
+    name == "atan2" || name == ANGLE_FN || (name == "atan" && args.count == 2)
   {
     return true
   }
@@ -89,7 +89,7 @@ private func hasAtan2(_ e: Expr) -> Bool {
 
 private func compileGridCpu(_ spec: LevelSetSpec) -> CpuGrid {
   // (No gradient: the renderer takes finite differences.)
-  let gradient = try? [Sym.diff(spec.expr, "x"), Sym.diff(spec.expr, "y")]
+  let gradient = try? [diff(spec.expr, "x"), diff(spec.expr, "y")]
   return CpuGrid(
     name: spec.name, expr: spec.expr, grad: gradient, params: spec.params, angular: hasAtan2(spec.expr),
     level: spec.level)
@@ -113,7 +113,7 @@ public func compileCpu(_ classified: Classified) -> CpuPlan {
   case .curveParametric(let coordinates):
     func derivatives(_ exprs: [Expr]?) -> [Expr]? {
       guard let exprs else { return nil }
-      return try? exprs.map { try Sym.diff($0, "u") }
+      return try? exprs.map { try diff($0, "u") }
     }
     let d1 = derivatives(coordinates)
     let d2 = derivatives(d1)
@@ -147,7 +147,7 @@ private func uniformSub(_ params: [String]) -> (Expr) -> Expr {
 private func compileGridGpu(_ spec: LevelSetSpec) throws -> GpuGrid {
   let sub = uniformSub(spec.params)
   var gradGlsl: [String]?
-  if let dx = try? Sym.diff(spec.expr, "x"), let dy = try? Sym.diff(spec.expr, "y") {
+  if let dx = try? diff(spec.expr, "x"), let dy = try? diff(spec.expr, "y") {
     do {
       gradGlsl = [try glsl(sub(dx)), try glsl(sub(dy))]
     } catch is LanguageError {

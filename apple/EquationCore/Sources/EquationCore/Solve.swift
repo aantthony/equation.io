@@ -29,7 +29,7 @@
 #endif
 
 /// lib/expr.ts `evaluate`: a scalar expression's value under the bindings.
-/// The solvers take it as an argument, where the TypeScript imports it.
+/// The solvers use the core's (Evaluate.swift) unless they are handed another.
 public typealias Evaluator = (Expr, [String: Double]) throws -> Double
 
 /// Newton iterations per seed. Converging seeds take well under 20.
@@ -105,7 +105,7 @@ func stableSorted<T>(_ items: [T], _ before: (T, T) -> Bool) -> [T] {
 /// tuples in the order of `vars`. `lo`/`hi` are per-unknown bounds.
 public func solveSystem(
   _ residuals: [Expr], _ vars: [String], _ lo: [Double], _ hi: [Double], _ opts: SolveOptions = SolveOptions(),
-  evaluate: Evaluator
+  evaluate: Evaluator = evaluate
 ) -> [[Double]] {
   let n = residuals.count
   if n != vars.count || (n != 2 && n != 3) { return [] }
@@ -316,24 +316,11 @@ private func hash(_ i: Int) -> Double {
   return Double(h) / 4294967296
 }
 
-/// Flatten a (possibly chained) inequality into its comparisons (lib/expr.ts
-/// `ineqComparisons`); comparison k compares the previous comparison's right
-/// side, so 0 < y < x yields [0 < y, y < x].
-private func chainComparisons(_ e: Expr) -> [(op: IneqOp, l: Expr, r: Expr)] {
-  var chain: [(op: IneqOp, l: Expr, r: Expr)] = []
-  var node = e
-  while case .ineq(let op, let l, let r, _) = node {
-    chain.insert((op, l, r), at: 0)
-    node = l
-  }
-  return chain.indices.map { k in (chain[k].op, k == 0 ? chain[k].l : chain[k - 1].r, chain[k].r) }
-}
-
 /// Trace moving constraints with warm starts and periodic branch discovery.
 /// Unmatched or discontinuous branches start a new polyline, never a chord.
 public func traceSystem(
   _ residuals: [Expr], _ vars: [String], _ lo: [Double], _ hi: [Double], _ env: [String: Double] = [:],
-  _ samples: Int = 256, _ angular: [Bool] = [], evaluate: Evaluator
+  _ samples: Int = 256, _ angular: [Bool] = [], evaluate: Evaluator = evaluate
 ) -> [[[Double]]] {
   var paths: [[[Double]]] = []
   /// The paths still being followed, as indices into `paths`.
@@ -372,7 +359,10 @@ public func traceSystem(
         collectDiscrete(c.value)
       }
       if let otherwise { collectDiscrete(otherwise) }
-    case .num, .var, .index, .range, .eqtest, .str:
+    case .loop(_, let seeds, _, _):
+      seeds.forEach(collectDiscrete)
+    case .num, .var, .index, .range, .eqtest, .str, .comp, .figure, .trail, .label, .hist, .family, .data, .lazy,
+      .text:
       break
     }
   }
@@ -386,7 +376,7 @@ public func traceSystem(
     case .piecewise(let cases, _):
       for (i, c) in cases.enumerated() {
         guard case .ineq = c.cond else { return .nan }
-        let holds = chainComparisons(c.cond).allSatisfy { comparison in
+        let holds = ineqComparisons(c.cond).allSatisfy { comparison in
           let a = at(comparison.l)
           let b = at(comparison.r)
           switch comparison.op {

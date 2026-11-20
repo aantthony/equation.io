@@ -53,20 +53,6 @@ let elementaryFunctions: Set<String> = [
   "normalpdf", "normalcdf", "gcd", "isprime", "gamma", "factorial", "sinc", "coth",
 ]
 
-/// Calls whose arguments stay grouped (lib/expr.ts `legacyCallArgs`); of the
-/// elementary set only exp is one (e^M of a matrix).
-private let groupedCalls: Set<String> = ["exp"]
-
-/// Historical tuple-call spelling: a tuple written as an argument spreads
-/// into arguments, f((a, b)) ≡ f(a, b).
-private func legacyCallArgs(_ name: String, _ args: [Expr]) -> [Expr] {
-  if groupedCalls.contains(name) { return args }
-  return args.flatMap { (x: Expr) -> [Expr] in
-    if case .vec(let items) = x { return items }
-    return [x]
-  }
-}
-
 private let spaceVars: Set<String> = ["x", "y", "z"]
 private let coordNames = ["x", "y", "z"]
 
@@ -80,7 +66,7 @@ struct Resolver {
   private func dVarName(_ n: Expr) -> String? {
     guard case .var(let name) = n else { return nil }
     let u = Array(name.utf16)
-    guard u.count == 2, u[0] == unit("d"), isASCIILetter(u[1]) || greekNameChars.contains(u[1]) else { return nil }
+    guard u.count == 2, u[0] == unit("d"), isNameLetter(u[1]) else { return nil }
     return String(u[1...])
   }
 
@@ -106,8 +92,8 @@ struct Resolver {
   /// Numerator forms: d(^k), -d(^k), C·d(^k).
   private func numeratorWrap(_ n: Expr) -> (order: Int, wrap: (Expr) -> Expr)? {
     if let order = dOrder(n) { return (order, { $0 }) }
-    if case .neg(let a) = n, let order = dOrder(a) { return (order, Sym.neg) }
-    if case .bin(.mul, let c, let b, _) = n, let order = dOrder(b) { return (order, { Sym.mul(c, $0) }) }
+    if case .neg(let a) = n, let order = dOrder(a) { return (order, neg) }
+    if case .bin(.mul, let c, let b, _) = n, let order = dOrder(b) { return (order, { mul(c, $0) }) }
     return nil
   }
 
@@ -121,14 +107,14 @@ struct Resolver {
       if case .list = value { return nil }
       let inner = seen.union([name])
       var sub: [String: Expr] = [:]
-      for v in freeVarNames(value) {
+      for v in freeVars(value) {
         if let c = closed(v, inner) { sub[v] = c }
       }
       let out = sub.isEmpty ? value : substVars(value, sub)
-      return freeVarNames(out).contains(where: spaceVars.contains) ? out : nil
+      return freeVars(out).contains(where: spaceVars.contains) ? out : nil
     }
     var sub: [String: Expr] = [:]
-    for v in freeVarNames(e) {
+    for v in freeVars(e) {
       if let c = closed(v, []) { sub[v] = c }
     }
     return sub.isEmpty ? e : substVars(e, sub)
@@ -141,7 +127,7 @@ struct Resolver {
     var e = throughFields(operand)
     // A component that does not exist — F_1 of a function F, G_1 of a point
     // whose components are G_x, G_y — would differentiate to 0.
-    for name in freeVarNames(e) {
+    for name in freeVars(e) {
       let u = Array(name.utf16)
       // /^(.+)_[^_]+$/: the base before the last underscore.
       guard let cut = u.lastIndex(of: unit("_")), cut > 0, cut < u.count - 1 else { continue }
@@ -161,13 +147,15 @@ struct Resolver {
     }
     for _ in 0..<order {
       do {
-        e = try Sym.diff(e, v)
-      } catch is Sym.NonSmoothError {
+        e = try diff(e, v)
+      } catch {
+        // (Any other error is the row's own: an inequality, a tuple.)
+        guard error.nonSmooth else { throw LanguageError(error.message) }
         // factorial, gamma, floor, …: expand a symbolic central difference.
         let vv = Expr.var(v)
         let h = Expr.num(Resolver.fdH)
-        e = Sym.div(
-          Sym.sub(substVars(e, [v: Sym.add(vv, h)]), substVars(e, [v: Sym.sub(vv, h)])), .num(2 * Resolver.fdH))
+        e = div(
+          sub(substVars(e, [v: add(vv, h)]), substVars(e, [v: sub(vv, h)])), .num(2 * Resolver.fdH))
       }
     }
     return e
@@ -279,6 +267,11 @@ struct Resolver {
       throw Unsupported("lists")
     case .str:
       throw Unsupported("text")
+    case .data, .text:
+      // Packed columns hold nothing to resolve.
+      return e
+    case .comp, .figure, .lazy, .trail, .label, .hist, .family, .loop:
+      return try mapChildren(e, resolve)
     case .piecewise(let cases, let otherwise):
       for c in cases {
         guard case .eq = c.cond else { continue }
@@ -331,7 +324,7 @@ struct Resolver {
       for (p, arg) in zip(fn.params, args) { env[p] = arg }
       // The coordinates of point parameters the body reads, `p.x`, as the
       // argument's own (`coordParams`).
-      let used = freeVarNames(fn.body)
+      let used = freeVars(fn.body)
       for (p, arg) in zip(fn.params, args) {
         for (k, c) in coordNames.enumerated() where used.contains("\(p).\(c)") {
           if case .var(let argName) = arg, let own = pointCoord("\(argName).\(c)") {
@@ -481,16 +474,35 @@ private func plainNodes(_ e: Expr) -> Expr {
 private func lowerPoints(_ e: Expr, _ comps: (String) -> [String]?) throws -> Lowered {
   func lo(_ n: Expr) throws -> Lowered { try lowerPoints(n, comps) }
   switch e {
-  case .num, .str:
+  case .num, .str, .data, .text:
+    // (Data and text lists hold no geometry: they pass straight through.)
     return .scalar(e)
   case .index, .range, .eqtest, .list:
     throw Unsupported("lists")
+  case .figure, .lazy, .trail, .label, .hist, .family:
+    // A point among a structural node's children is written out as a tuple.
+    return .scalar(
+      try mapChildren(e) { n in
+        switch try lo(n) {
+        case .vec(let items): .vec(items)
+        case .scalar(let a): a
+        }
+      })
+  case .comp:
+    // Port: lib/geom.ts `lower` (case 'comp') settles f(P) once P is known
+    // to be a point, a matrix's rows or a list of points; the last two need
+    // matrices and lists.
+    throw Unsupported("a point passed to a function")
+  case .loop:
+    // Port: lib/geom.ts `lower` (case 'loop') spreads a self-call's points
+    // and quaternions into consecutive params (lowerMv, quaternionParts).
+    throw Unsupported("recursive functions")
   case .var(let name):
     guard let names = comps(name) else { return .scalar(e) }
     return .vec(names.map { .var($0) })
   case .neg(let inner):
     switch try lo(inner) {
-    case .vec(let items): return .vec(items.map(Sym.neg))
+    case .vec(let items): return .vec(items.map(neg))
     case .scalar(let a): return .scalar(.neg(a))
     }
   case .bin(let op, let lhs, let rhs, let glyph):
@@ -509,7 +521,7 @@ private func lowerPoints(_ e: Expr, _ comps: (String) -> [String]?) throws -> Lo
           throw LanguageError(
             "Cannot \(op == .add ? "add" : "subtract") a \(x.count)-component and a \(y.count)-component vector.")
         }
-        return .vec(zip(x, y).map { op == .add ? Sym.add($0, $1) : Sym.sub($0, $1) })
+        return .vec(zip(x, y).map { op == .add ? add($0, $1) : sub($0, $1) })
       case .mul:
         if glyph != nil { throw Unsupported("dot and cross products") }
         throw LanguageError("Use A · B or A × B (or dot(A, B), cross(A, B)) to multiply points.")
@@ -519,14 +531,14 @@ private func lowerPoints(_ e: Expr, _ comps: (String) -> [String]?) throws -> Lo
     case (.vec(let x), .scalar(let y)):
       switch op {
       case .add, .sub: throw LanguageError("Cannot \(op == .add ? "add" : "subtract") a point and a number.")
-      case .mul: return .vec(x.map { Sym.mul($0, y) })
-      case .div: return .vec(x.map { Sym.div($0, y) })
+      case .mul: return .vec(x.map { mul($0, y) })
+      case .div: return .vec(x.map { div($0, y) })
       case .pow: throw LanguageError("Cannot raise a point to a power — |A| is its length.")
       }
     case (.scalar(let x), .vec(let y)):
       switch op {
       case .add, .sub: throw LanguageError("Cannot \(op == .add ? "add" : "subtract") a point and a number.")
-      case .mul: return .vec(y.map { Sym.mul(x, $0) })
+      case .mul: return .vec(y.map { mul(x, $0) })
       case .div: throw LanguageError("Cannot divide by a point.")
       case .pow: throw LanguageError("Cannot raise a point to a power — |A| is its length.")
       }

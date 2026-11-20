@@ -150,7 +150,7 @@ extension Graph2D {
       // color; a row with an error does (it is usually a curve being typed).
       if row.unsupported != nil {
         return !row.comment && row.view == nil && row.definition == nil
-          && row.text.contains { !$0.isWhitespace } && noteColorRGB(row.text) == nil
+          && row.text.contains { !$0.isWhitespace } && noteColor(row.text) == nil
       }
       return row.takesColor
     }
@@ -161,7 +161,7 @@ extension Graph2D {
     for (k, row) in analysis.rows.enumerated() {
       let slot = k < index.count ? index[k] : -1
       if slot >= 0, k < ids.count { slots[ids[k]] = slot }
-      colors.append(noteColorRGB(row.text) ?? (slot >= 0 ? theme.palette[slot] : nil))
+      colors.append(noteColor(row.text) ?? (slot >= 0 ? theme.palette[slot] : nil))
     }
     return (colors, slots)
   }

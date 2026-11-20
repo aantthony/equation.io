@@ -32,22 +32,4 @@ import Testing
     #expect(try field("{0 < x < 1: x, 2}") == "(((0.0 < x) && (x < 1.0)) ? x : 2.0)")
     #expect(try field("{x > 0: x}") == "(((x > 0.0)) ? x : EQ_NAN)")
   }
-
-  @Test func rowsTheMetalRendererDraws() {
-    #expect(plotRow("") == .nothing)
-    #expect(plotRow("  # a heading") == .nothing)
-    #expect(plotRow("y = sin(x)") == .curve(field: "(y - (sin(x)))", animated: false))
-    #expect(plotRow("y = sin(x - t)") == .curve(field: "(y - (sin((x - t))))", animated: true))
-    #expect(plotRow("x = 2") == .curve(field: "(x - (2.0))", animated: false))
-    #expect(plotRow("y = max(x, 1, -x)") == .curve(field: "(y - (max(max(x, 1.0), (-x))))", animated: false))
-    let wide = plotRow("y = 1000000000000000000000 x + 0.0000001")
-    #expect(wide == .curve(field: "(y - (((1E+21 * x) + 1E-7)))", animated: false))
-  }
-
-  @Test func rowsLeftToTheWebRenderer() {
-    // A slider's constant, a definition, a surface, a field, a point, a list, a list's reduction.
-    for row in ["a = 2", "y = a x", "z = x y", "sin(x)", "(1, 2)", "y = [1, 2] x", "y < x", "y = (", "y = mean(x)"] {
-      #expect(plotRow(row) == nil, "\(row)")
-    }
-  }
 }

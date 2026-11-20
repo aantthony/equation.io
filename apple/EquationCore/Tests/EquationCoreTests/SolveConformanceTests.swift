@@ -33,8 +33,7 @@ import Testing
         lattice: o["lattice"] as? Bool ?? true,
         angular: o["angular"] as? [Bool] ?? [])
       let got = solveSystem(
-        try exprs(c["residuals"]!), c["vars"] as! [String], numbers(c["lo"]!), numbers(c["hi"]!), opts,
-        evaluate: evaluateForTests)
+        try exprs(c["residuals"]!), c["vars"] as! [String], numbers(c["lo"]!), numbers(c["hi"]!), opts)
       let want = (c["result"] as! [[Any]]).map(numbers)
       if !same([got], [want], exact: c["exact"] as! Bool) {
         failures.append("\(c["src"]!)\n  want \(want)\n  got  \(got)")
@@ -59,8 +58,7 @@ import Testing
     for c in cases {
       let got = traceSystem(
         try exprs(c["residuals"]!), c["vars"] as! [String], numbers(c["lo"]!), numbers(c["hi"]!),
-        (c["env"] as! [String: Any]).mapValues(number), Int(solveNumber(c["samples"]!)), c["angular"] as! [Bool],
-        evaluate: evaluateForTests)
+        (c["env"] as! [String: Any]).mapValues(number), Int(solveNumber(c["samples"]!)), c["angular"] as! [Bool])
       let want = (c["result"] as! [[[Any]]]).map { $0.map(numbers) }
       if !same(got, want, exact: c["exact"] as! Bool) {
         failures.append(
@@ -74,8 +72,8 @@ import Testing
     var failures: [String] = []
     let cases = fixture["roots"] as! [[String: Any]]
     for c in cases {
-      let f = try decode(exactNumbers(c["f"]!))
-      let got = findRoots(f, c["v"] as! String, solveNumber(c["lo"]!), solveNumber(c["hi"]!), evaluate: evaluateForTests)
+      let f = try decode(c["f"]!)
+      let got = findRoots(f, c["v"] as! String, solveNumber(c["lo"]!), solveNumber(c["hi"]!))
       let want: FoundRoots =
         if let list = c["result"] as? [[String: Any]] {
           .roots(
@@ -97,7 +95,7 @@ import Testing
   }
 }
 
-/// The fixture's numbers are text (see exactNumbers).
+/// The fixture's numbers are text: JSONSerialization reads some doubles an ulp off.
 private func solveNumber(_ json: Any) -> Double {
   switch json as! String {
   case "Infinity": .infinity
@@ -107,7 +105,7 @@ private func solveNumber(_ json: Any) -> Double {
   }
 }
 private func numbers(_ json: Any) -> [Double] { (json as! [Any]).map(solveNumber) }
-private func exprs(_ json: Any) throws -> [Expr] { try (json as! [Any]).map { try decode(exactNumbers($0)) } }
+private func exprs(_ json: Any) throws -> [Expr] { try (json as! [Any]).map(decode) }
 
 /// Paths of points: the same doubles, or (not `exact`) the same shape with
 /// each coordinate within rounding of the TypeScript's.
@@ -123,99 +121,4 @@ private func same(_ a: [[[Double]]], _ b: [[[Double]]], exact: Bool) -> Bool {
     }
   }
   return true
-}
-
-private struct EvaluationError: Error {
-  var message: String
-}
-
-/// lib/expr.ts `evaluate`, as far as the corpus goes: the core's own
-/// evaluator is being ported separately, and the solvers take theirs as an
-/// argument. Arithmetic, comparisons and piecewise as the TypeScript has
-/// them; the functions are Foundation's.
-private func evaluateForTests(_ e: Expr, _ env: [String: Double]) throws -> Double {
-  switch e {
-  case .num(let value):
-    return value
-  case .var(let name):
-    guard let value = env[name] else { throw EvaluationError(message: "Unbound variable: \(name)") }
-    return value
-  case .neg(let a):
-    return -(try evaluateForTests(a, env))
-  case .bin(let op, let l, let r, _):
-    let a = try evaluateForTests(l, env)
-    let b = try evaluateForTests(r, env)
-    switch op {
-    case .add: return a + b
-    case .sub: return a - b
-    case .mul: return a * b
-    case .div: return a / b
-    case .pow: return realPow(a, b)
-    }
-  case .call(let name, let arguments):
-    let x = try arguments.map { try evaluateForTests($0, env) }
-    switch (name, x.count) {
-    case ("sqrt", 1): return x[0].squareRoot()
-    case ("abs", 1): return abs(x[0])
-    case ("floor", 1): return x[0].rounded(.down)
-    case ("ceil", 1): return x[0].rounded(.up)
-    case ("sign", 1): return x[0] > 0 ? 1 : x[0] < 0 ? -1 : x[0]
-    case ("mod", 2): return x[0] - (x[0] / x[1]).rounded(.down) * x[1]
-    case ("fract", 1): return x[0] - x[0].rounded(.down)
-    // Math.min and Math.max: NaN if any argument is.
-    case ("min", _): return x.contains(where: \.isNaN) ? .nan : x.min() ?? .infinity
-    case ("max", _): return x.contains(where: \.isNaN) ? .nan : x.max() ?? -.infinity
-    case ("sin", 1): return sin(x[0])
-    case ("cos", 1): return cos(x[0])
-    case ("tan", 1): return tan(x[0])
-    case ("exp", 1): return exp(x[0])
-    case ("ln", 1): return log(x[0])
-    default: throw EvaluationError(message: "Unknown function: \(name)")
-    }
-  case .eq(let l, let r):
-    return try evaluateForTests(l, env) - evaluateForTests(r, env)
-  case .piecewise(let cases, let otherwise):
-    for c in cases {
-      // Chains nest left: 0 < y < x is ((0 < y) < x), and compares y with x.
-      var chain: [(IneqOp, Expr, Expr)] = []
-      var node = c.cond
-      while case .ineq(let op, let l, let r, _) = node {
-        chain.insert((op, l, r), at: 0)
-        node = l
-      }
-      guard !chain.isEmpty else { throw EvaluationError(message: "Not a condition.") }
-      var holds = true
-      for (k, link) in chain.enumerated() where holds {
-        let a = try evaluateForTests(k == 0 ? link.1 : chain[k - 1].2, env)
-        let b = try evaluateForTests(link.2, env)
-        switch link.0 {
-        case .lt: holds = a < b
-        case .le: holds = a <= b
-        case .gt: holds = a > b
-        case .ge: holds = a >= b
-        }
-      }
-      if holds { return try evaluateForTests(c.value, env) }
-    }
-    return try otherwise.map { try evaluateForTests($0, env) } ?? .nan
-  default:
-    throw EvaluationError(message: "Not a scalar.")
-  }
-}
-
-/// lib/expr.ts `realPow`: a negative base to a rational power of small odd denominator is real.
-private func realPow(_ a: Double, _ b: Double) -> Double {
-  if a >= 0 { return pow(a, b) }
-  for q in 1...12 {
-    let p = (b * Double(q) + 0.5).rounded(.down)
-    var (x, y) = (abs(p), Double(q))
-    while y != 0 { (x, y) = (y, x.truncatingRemainder(dividingBy: y)) }
-    let g = x != 0 && !x.isNaN ? x : 1
-    let (pr, qr) = (p / g, Double(q) / g)
-    if abs(b - pr / qr) < 1e-6 {
-      if qr.truncatingRemainder(dividingBy: 2) == 0 { return .nan }
-      return (abs(pr).truncatingRemainder(dividingBy: 2) == 1 ? -1 : 1) * pow(-a, b)
-    }
-  }
-  return .nan
 }
