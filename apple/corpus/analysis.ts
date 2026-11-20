@@ -705,7 +705,8 @@ function randomDocs(count: number): string[] {
  *  defined, then rows that combine, reduce, index and draw them. Seeded, and
  *  apart from randomDocs so each corpus stays the one it was. */
 function randomListDocs(count: number): string[] {
-  let seed = 0x51ed27;
+  // (RANDOM_LIST_SEED and RANDOM_LIST_DOCS widen the search when hunting for a difference.)
+  let seed = Number(process.env.RANDOM_LIST_SEED ?? 0x51ed27);
   const random = (): number => {
     seed = (Math.imul(seed, 1664525) + 1013904223) | 0;
     return (seed >>> 0) / 4294967296;
