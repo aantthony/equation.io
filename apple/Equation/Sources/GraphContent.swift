@@ -113,7 +113,7 @@ struct GraphContent: Equatable {
   }
 
   init(
-    _ analysis: DocumentAnalysis, colors: [RGB?], toggles: RowToggles = RowToggles(),
+    _ analysis: DocumentAnalysis, colors: [RGB?], toggles: RowToggles = RowToggles(), theme: GraphTheme = .light,
     space fixture: SpaceGraph? = SpaceGraph.fixture
   ) {
     var panels = GraphPanels(analysis, colors: colors)
@@ -136,6 +136,8 @@ struct GraphContent: Equatable {
       } else if panels.panels[k].needs3D {
         // The panel's own rows: the others neither draw in it nor frame it.
         var document = Document3D(analysis.panel(k), colors: colors)
+        // The theme shades a panel's bare surface (an on(…) row).
+        document.theme = theme
         document.streamlines = toggles.streamlines
         document.arrows = toggles.arrows
         out.space = SpaceGraph(document: document)

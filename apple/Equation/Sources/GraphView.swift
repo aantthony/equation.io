@@ -205,7 +205,7 @@ struct GraphAnalysis: Equatable {
         }
       }
     }
-    content = GraphContent(analysis, colors: colored.colors, toggles: shown)
+    content = GraphContent(analysis, colors: colored.colors, toggles: shown, theme: theme)
     slots = colored.slots
     // An orbit that cannot be integrated says so on its row, as the site sets it when it draws.
     var orbitErrors: [Int: String] = [:]
