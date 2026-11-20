@@ -1,11 +1,12 @@
+import EquationCore
 import EquationRender
 import Foundation
 
-// A 3D scene for metal-shot: --scene with a Graph3D
-// (EquationRender/Scene3D.swift), which is told from a Scene2D by its
-// "scene" key. The language's Swift port doesn't compile 3D rows yet, so
-// the JSON comes from the TypeScript: its shader strings and sampled
-// geometry for the rows, with the camera their camera(…) row sets.
+// 3D graphs for metal-shot. Rows that draw in space go through the Swift
+// pipeline as the app's do (analyze, then Document3D); --scene with a
+// Graph3D (EquationRender/Scene3D.swift), which is told from a Scene2D by
+// its "scene" key, draws a scene written down — one apple/tools/scene3d.ts
+// builds with the TypeScript, to set beside the Swift builder's.
 
 /// The graph in the file at `path`, or nil if what is there is not a 3D one.
 func graph3D(_ path: String) -> Graph3D? {
@@ -17,4 +18,36 @@ func graph3D(_ path: String) -> Graph3D? {
   } catch {
     fail("Can't read the scene: \(error)")
   }
+}
+
+/// The rows' graph when they draw in space, at --time, from the camera
+/// their camera(…) row sets; nil for a document in the plane. A vector
+/// field draws as streamlines when its note says `# streamlines` and as
+/// arrows for `# arrows` (the site keeps those toggles outside the text;
+/// apple/tools/scene3d.ts reads the same notes).
+func spaceGraph(_ rows: [String], theme: GraphTheme, time: Double, explain: Bool) -> Graph3D? {
+  let analysis = analyze(rows)
+  guard Graph.kind(of: analysis) == .space else { return nil }
+  for (row, text) in zip(analysis.rows, rows) {
+    if let problem = row.error ?? row.unsupported {
+      FileHandle.standardError.write(Data("not drawn: \(text): \(problem)\n".utf8))
+    }
+  }
+  let colors = Graph2D.colors(analysis, ids: Array(rows.indices), previous: [:], theme: theme).colors
+  var document = Document3D(analysis, colors: colors)
+  for (k, text) in rows.enumerated() {
+    guard let at = noteStart(text) else { continue }
+    let note = String(decoding: Array(text.utf16.dropFirst(at)), as: UTF16.self)
+    if note.contains("streamlines") { document.streamlines.insert(k) }
+    if note.contains("arrows") { document.arrows.insert(k) }
+  }
+  if explain {
+    for (k, row) in analysis.rows.enumerated() {
+      print(
+        "\(rows[k])\n    kind \(row.kind ?? "-"), cpu \(row.cpu?.type ?? "-"), gpu \(row.gpu?.type ?? "-"), "
+          + "color \(colors[k].map { "\($0)" } ?? "-")\(row.info.map { ", reads \($0)" } ?? "")")
+    }
+    print("in space, \(document.animated ? "moves with t" : "still"), camera \(document.camera)")
+  }
+  return document.graph(at: time)
 }
