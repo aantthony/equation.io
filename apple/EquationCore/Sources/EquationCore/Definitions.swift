@@ -27,11 +27,13 @@ public enum Definition: Equatable, Sendable {
   case initial(name: String, rhs: String)
   /// `person = open("people.csv", 3a7f…)` — a local data file.
   case table(name: String)
+  /// `Y ~ m X + b` — a fit, which defines its coefficients (RegressionRows.swift).
+  case regression(name: String, lhs: String, rhs: String)
 
   public var name: String {
     switch self {
     case .constant(let name, _, _), .function(let name, _, _), .state(let name, _), .initial(let name, _),
-      .table(let name):
+      .table(let name), .regression(let name, _, _):
       name
     }
   }
@@ -51,13 +53,14 @@ public enum Definition: Equatable, Sendable {
     case .state: "state"
     case .initial: "init"
     case .table: "table"
+    case .regression: "regression"
     }
   }
 
   var rhs: String? {
     switch self {
     case .constant(_, let rhs, _), .function(_, _, let rhs), .state(_, let rhs), .initial(_, let rhs): rhs
-    case .table: nil
+    case .table, .regression: nil
     }
   }
 }
@@ -465,6 +468,8 @@ struct BuiltDefs {
   var states = OrderedMap<StateDef>()
   /// Vector states and how many components each has.
   var vecStates: [String: Int] = [:]
+  /// The fits by their rows' keys (RegressionRows.swift).
+  var fits: [String: FitResult] = [:]
 }
 
 private let positionVars: Set<String> = ["x", "y", "z", "w"]
@@ -499,6 +504,8 @@ func buildDefs(_ raw: [Definition], skip: Set<String>, sequences: [SeqScan] = []
   // States (States.swift): their derivatives and starting values as they resolve.
   var states = StateDraft()
   states.names = Set(raw.compactMap { if case .state(let name, _) = $0 { name } else { nil } })
+  /// Fitted coefficient → the fit's row.
+  var fitOwner = OrderedMap<String>()
 
   func comps(_ name: String) -> [String]? {
     defs.points.contains(name)
@@ -629,6 +636,21 @@ func buildDefs(_ raw: [Definition], skip: Set<String>, sequences: [SeqScan] = []
         _ = try getFn(name)
       case .table:
         throw Unsupported("data files")
+      case .regression(_, let lhs, let rhs):
+        let source = try parseFit(
+          lhs, rhs, userFns: fnNames, valueNames: valueNames,
+          listNames: Set(defs.pointDims.keys).union(defs.mats.keys).union(defs.tensors.keys).union(seqIndexNames)
+            .union(defs.lists.keys))
+        parsed[d.key] = .eq(source.lhs, source.rhs)
+        let fit = try fitRow(
+          source, defs, numEnv, getFn: getFn, opts: options(), isRow: { byName[$0] != nil },
+          stateNames: states.names)
+        defs.fits[d.name] = fit
+        for (name, value) in fit.coefficients {
+          defs.consts[name] = .num(value)
+          numEnv[name] = value
+          fitOwner[name] = d.name
+        }
       case .state(let name, _):
         let opts = options()
         states.derivs[name] = try withoutStateFamily(
@@ -824,6 +846,7 @@ func buildDefs(_ raw: [Definition], skip: Set<String>, sequences: [SeqScan] = []
   }
   // A named value's hidden coefficients (M#3) are constants by construction.
   for name in defs.consts.keys where name.utf16.contains(unit("#")) { constNames.insert(name) }
+  for name in fitOwner.keys { constNames.insert(name) }
   // (A recurrence's chain of terms.)
   for name in defs.consts.keys where name.hasPrefix(seq.prefix + "_") { constNames.insert(name) }
   // Constant point rows resolve to their component constants; a vector
@@ -1059,8 +1082,11 @@ func buildDefs(_ raw: [Definition], skip: Set<String>, sequences: [SeqScan] = []
   // definition failed. Retain source dependencies, so no binding can outlive
   // a failed one merely because its lowered expression hid that reference.
   if !defs.errors.isEmpty {
-    func ownerOf(_ name: String) -> String { compOwner[name] ?? states.vecOwnerKey[name] ?? name }
+    func ownerOf(_ name: String) -> String {
+      compOwner[name] ?? states.vecOwnerKey[name] ?? fitOwner[name] ?? name
+    }
     let known = Set(byName.keys).union(compOwner.keys).union(states.vecOwnerKey.keys).union(defs.consts.keys)
+      .union(fitOwner.keys)
     func present(_ name: String) -> Bool {
       defs.consts.has(name) || defs.fields.has(name) || defs.conditions.has(name) || defs.points.contains(name)
         || defs.complexes.has(name)
@@ -1082,6 +1108,9 @@ func buildDefs(_ raw: [Definition], skip: Set<String>, sequences: [SeqScan] = []
       var names = parsed[owner].map(references) ?? NameSet()
       if case .function(_, let params, _)? = byName[owner] {
         for param in params { names.remove(param) }
+      }
+      if case .regression? = byName[owner] {
+        for (parameter, fit) in fitOwner.entries where fit == owner { names.remove(parameter) }
       }
       return names
     }
@@ -1113,6 +1142,9 @@ func buildDefs(_ raw: [Definition], skip: Set<String>, sequences: [SeqScan] = []
         // The dimension map may have been removed by earlier validation.
         for (alias, state) in states.vecOwnerKey.entries where state == owner { defs.states[alias] = nil }
         defs.vecStates[owner] = nil
+      } else if fitOwner.has(name) {
+        for (parameter, fit) in fitOwner.entries where fit == owner { defs.consts[parameter] = nil }
+        defs.fits[owner] = nil
       } else {
         forget(name)
       }

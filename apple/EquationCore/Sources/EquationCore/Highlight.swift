@@ -386,6 +386,7 @@ private func scanBoundNames(_ texts: [[UInt16]], rows: Set<Int>, into names: ino
       if vector && !draw { names.values.formUnion(pointComps(name, dim)) }
     case .table(let name):
       names.values.insert(name)
+    case .regression: break
     case .initial(let name, _):
       // a(0) = … is the other half of the state a' = … binds; a tuple makes it a vector state.
       if vector { vectorStates[name] = dim }

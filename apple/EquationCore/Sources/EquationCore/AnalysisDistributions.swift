@@ -34,7 +34,7 @@ func distributionKind(_ dist: RowDistribution, _ cpu: CpuPlan?) -> String {
 struct RandomRows {
   var scan = RandomScan()
   /// The rows that fit a model to data (`Y ~ m X + b`).
-  var regressions: Set<Int> = []
+  var regressions: [Int: TildeRow] = [:]
   /// The variable each declaring row names.
   var declares: [Int: String] = [:]
   var built = BuiltRVs()
@@ -45,7 +45,7 @@ struct RandomRows {
   /// `claimed` rows — comments, sequences — are not looked at.
   init(_ texts: [String], claimed: (Int) -> Bool) {
     let fits = scanRegressions(texts)
-    regressions = Set(fits.keys)
+    regressions = fits
     scan = scanRandomRows(
       texts.enumerated().map { i, text in fits[i] != nil || text.isEmpty || claimed(i) ? nil : text })
     for (row, name, _) in scan.base + scan.derived { declares[row] = name }
@@ -74,7 +74,7 @@ func buildRandomVariables(_ scan: RandomScan, _ built: BuiltDefs, _ raw: [Defini
     taken: { name in
       built.consts.has(name) || built.fields.has(name) || built.conditions.has(name) || built.fns.has(name)
         || built.points.contains(name) || built.complexes.has(name) || built.mats.has(name)
-        || built.tensors.has(name)
+        || built.tensors.has(name) || built.lists.has(name)
     })
 }
 
