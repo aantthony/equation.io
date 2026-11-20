@@ -87,6 +87,8 @@ public indirect enum MathObject: Equatable, Sendable {
   /// Where states go over [from, to], integrated ahead of time (Orbit.swift):
   /// each path a point's coordinates, or with `series` one value drawn against t.
   case orbit(paths: [[Expr]], series: Bool, from: Expr, to: Expr)
+  /// `trail(A)`: where a moving point has been (Trail.swift).
+  case trail(coordinates: [Expr])
 
   /// The kind as the site's tools name it (`publicKind`).
   public var publicKind: String {
@@ -121,6 +123,7 @@ public indirect enum MathObject: Equatable, Sendable {
     case .distribution(let form, _, _): form.rawValue
     case .probability: "prob"
     case .orbit: "orbit"
+    case .trail: "trail"
     }
   }
 }
@@ -403,6 +406,10 @@ func classify(_ lowered: Expr, defined: Set<String>, fields: [String: Expr]) thr
   // claim, and it holds.
   if case .eq(let l, let r) = expr, !isVec(l), !isVec(r), hasSpace, !hasParam, !complexRow, holdsEverywhere(l, r) {
     return done(.note(expr: expr, variable: false, constant: nil, identity: true))
+  }
+
+  if case .trail(let coordinates) = expr {
+    return done(try classifyTrail(coordinates, off: hasSpace || hasParam || complexRow))
   }
 
   if let figure = try classifyFigure(expr, hasSpace: hasSpace, hasParam: hasParam, complex: complexRow) {

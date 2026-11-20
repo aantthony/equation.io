@@ -33,6 +33,29 @@ import Testing
     #expect(run.values["a"]!.isFinite && run.values["a"]! > 100)
   }
 
+  @Test func aTrailIsWhatTheRunSaw() {
+    let rows = ["A = (cos(t), sin(t))", "trail(A)", "trail((t, 1/(t - 1)))"]
+    var run = StateStepper(analyze(rows))
+    for frame in 0...120 { run.advance(to: Double(frame) / 60) }
+    let trail = run.trails[1]!
+    // At most 60 samples a second, from t = 0; the head is where the point is now.
+    #expect(trail.coordinates.count >= 2 * 60 && trail.coordinates.count <= 2 * 121)
+    #expect(trail.coordinates[0] == 1 && trail.coordinates[1] == 0)
+    #expect(trail.head == [cos(2), sin(2)])
+    // An edit elsewhere keeps the line; a change to the math starts it again.
+    run.adopt(analyze(rows + ["view(x = -2..2)"]))
+    #expect(run.trails[1] == trail)
+    run.adopt(analyze(rows + ["y = x"]))
+    #expect(run.trails.isEmpty)
+    // A long pause lifts the pen rather than joining what was not seen.
+    run.advance(to: 2)
+    run.advance(to: 5)
+    #expect(run.trails[1]!.coordinates.filter(\.isNaN).count == 2)
+    // No more than the last 30 seconds are kept.
+    for frame in 0...(60 * 40) { run.advance(to: 5 + Double(frame) / 60) }
+    #expect(run.trails[1]!.coordinates.count <= 2 * 60 * 30 + 4)
+  }
+
   @Test func vectorStatesSplit() {
     let analysis = analyze(["r' = (r_2, -r_1)", "r(0) = (1, 0)", "r", "th' = om", "om' = r"])
     #expect(analysis.rows.allSatisfy { $0.error == nil && $0.unsupported == nil })

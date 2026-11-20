@@ -22,6 +22,9 @@
 /// system integrated at whatever dt the display happened to deliver is not
 /// reproducible even on the same machine.
 ///
+/// The run also holds what was observed of it: each `trail(…)` row's past
+/// positions (Trail.swift).
+///
 /// Not ported: a family of runs (`th(0) = [1..12]/4`: lists).
 
 /// A scalar state: da/dt and where it starts, both resolved (`StateDef`).
@@ -349,6 +352,9 @@ public struct StateStepper: Equatable, Sendable {
   public private(set) var values: [String: Double]
   /// The graph time the states have reached, in seconds.
   public private(set) var time: Double
+  /// Where each `trail(…)` row's point has been, by row (Trail.swift):
+  /// sampled as the run is advanced, a frame at a time.
+  public internal(set) var trails: [Int: PointTrail] = [:]
 
   /// A fresh run: every state at its `a(0)`, the clock at `time`.
   public init(_ analysis: DocumentAnalysis, time: Double = 0) {
@@ -361,6 +367,7 @@ public struct StateStepper: Equatable, Sendable {
   /// a reset clock) restarts the run from there, as ↻ does; within a step
   /// behind is only the whole steps' float dust, and nothing to do.
   public mutating func advance(to time: Double) {
+    defer { sampleTrails(at: time) }
     guard let sys = analysis.stateSystem else {
       self.time = time
       return
@@ -377,6 +384,10 @@ public struct StateStepper: Equatable, Sendable {
   /// any other starts again from its `a(0)`s.
   public mutating func adopt(_ next: DocumentAnalysis) {
     let same = next.stateSystem?.key == analysis.stateSystem?.key
+    // A trail is of the math as it was written: any other document's starts again
+    // (framing rows aside, which a pan rewrites).
+    func math(_ a: DocumentAnalysis) -> [String] { a.rows.filter { $0.view == nil && !$0.comment }.map(\.text) }
+    if !same || math(next) != math(analysis) { trails = [:] }
     analysis = next
     if !same { values = next.initialState }
   }

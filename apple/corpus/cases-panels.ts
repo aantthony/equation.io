@@ -121,4 +121,9 @@ export const PANEL_CASES: string[] = [
   "u1' = -u1; u1(0) = 1; view(x = 0..u1); grid(u1); ---; view(x = 10^X); (u1 + 1, 1); y = u1 x",
   "th' = om; om' = -sin(th); th(0) = [1..12]/4; (th, om); y = x",
   "r' = vel; vel' = -9 r/|r|^3; r(0) = (2, 0); vel(0) = (0, 1.5); r; (0, 0)",
+  // Trails: where a moving point has been.
+  'A = (2cos(3t), 2sin(2t)); trail(A); trail((cos(t), sin(t))); trail(cos(t), t); a = 2; trail((a, t)); trail(A + (1, 1))',
+  "th' = om; om' = -sin(th); th(0) = 1; trail((th, om)); trail(th, om); view(x = 10^X); trail((th + 5, 1))",
+  'trail(1); trail((1, 2, 3)); trail((x, y)); trail((u, 1)); 1 + trail((1, 2)); trail((1, 2)) + 1; (trail((1, 2)), 1)',
+  'B = trail((t, 1)); trail(); trail(1, 2, 3, 4); trail((t, 1), (1, t)); trail((t, q)); y = trail((t, 1)); trail(t, t, t)',
 ];

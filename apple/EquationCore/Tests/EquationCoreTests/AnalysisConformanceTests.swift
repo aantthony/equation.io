@@ -387,6 +387,7 @@ import Testing
             hiStrict: s["hiStrict"] as? Bool, point: s["point"] as? Bool ?? false, not: s["not"] as? Bool ?? false))
       }
       return .prob(body: try expr("body"), shade: shade)
+    case "trail": return .trail(dim: (o["dim"] as! NSNumber).intValue, coords: try exprs("coords"))
     case "orbit":
       return .orbit(
         dim: (o["dim"] as! NSNumber).intValue, paths: try (o["paths"] as! [[Any]]).map { try $0.map(decode) },

@@ -401,7 +401,9 @@ struct Resolver {
       if args.count != 3 { throw LanguageError("clamp takes three arguments: clamp(x, lo, hi).") }
       return .call("min", [.call("max", [args[0], args[1]]), args[2]])
     }
-    if opts.inDefinition, name == "rgb" || name == "hsl" || name == "oklch" || name == "label" {
+    // trail(A): where A has been, lowered to a trail node with the points (Geom.swift).
+    if name == "trail", !opts.inDefinition { return .call("trail", args) }
+    if opts.inDefinition, ["trail", "rgb", "hsl", "oklch", "label"].contains(name) {
       throw LanguageError("\(name)(…) must be a whole row, not part of a definition.")
     }
     if name == "tube" || name == "revolve" { return try resolveSpaceForm(name, args) }

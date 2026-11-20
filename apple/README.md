@@ -78,9 +78,16 @@ for field, and `Renderer2D.render` draws them in the site's order. What is
 drawn with a 2D context over the shader passes (axis numbers, a lattice's
 labels, points, polylines, clouds, bars, regions, glyphs, a graph's vertices,
 text) is `Overlay2D.swift`, in CoreGraphics and CoreText; a `Scene2D` carries
-it as `overlay`. A mapped axis (`view(x = 10^X)`) is `AxisMap.swift`, its
-ticks `AxisTicks.swift`, and `MapOverlay.swift` carries a row's overlay
-through one.
+it as `overlay`. A mapped axis (`view(x = 10^X)`) is the core's
+`AxisMap.swift`, which also rewrites a row for one; its ticks are
+`AxisTicks.swift`, and `MapOverlay.swift` carries a row's overlay through one.
+
+`Graph2D` is one panel filling a frame; `GraphPanels` (EquationRender) is a
+document as its panels, split by `---` rows (the core's `Panels.swift`), each
+with its box, its window and the axes it shares. A document with states
+(`a' = …`) has a run, the core's `StateStepper`, which whoever draws frames
+owns, advances to each frame's time and hands to `scene(at:…run:)`; it holds
+the states' values and what `trail(…)` rows have seen.
 
 To see what the renderer draws without the app, and set it beside the site:
 

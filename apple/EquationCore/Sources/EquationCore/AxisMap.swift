@@ -347,7 +347,8 @@ func classifyMapped(
   case .substitute:
     var flow = false
     if case .vectorField = plain.object { flow = true }
-    return try classify(try mapRowExpr(try inlineFields(lowered, fields), maps, flow: flow), defined: defined, fields: fields)
+    let mapped = try mapRowExpr(try inlineFields(lowered, fields), maps, flow: flow)
+    return try classify(mapped, defined: defined, fields: fields)
   }
 }
 
@@ -372,7 +373,7 @@ public func axisMapping(_ object: MathObject) -> AxisMapping? {
   switch object {
   case .value, .note: return AxisMapping.none
   case .curveGraph, .curveImplicit, .region, .scalarField: return .substitute
-  case .curveParametric, .point: return .place
+  case .curveParametric, .point, .trail: return .place
   // Rewritten with the map's slope (`mapRowExpr`): a 2D flow only.
   case .vectorField(let components): return components.count == 2 ? .substitute : .refused
   default: return nil

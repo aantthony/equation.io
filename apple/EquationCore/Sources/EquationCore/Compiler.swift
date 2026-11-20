@@ -78,6 +78,8 @@ public enum CpuPlan: Equatable, Sendable {
   case prob(body: Expr, shade: ProbShade?)
   /// States' paths over a time range (Orbit.swift); `dim` 2 for a series against t.
   case orbit(dim: Int, paths: [[Expr]], series: Bool, from: Expr, to: Expr)
+  /// A moving point whose past positions are drawn (Trail.swift).
+  case trail(dim: Int, coords: [Expr])
 
   /// The plan's `type`, as the TypeScript spells it.
   public var type: String {
@@ -114,6 +116,7 @@ public enum CpuPlan: Equatable, Sendable {
     case .expect: "expect"
     case .prob: "prob"
     case .orbit: "orbit"
+    case .trail: "trail"
     }
   }
 }
@@ -279,6 +282,8 @@ public func compileCpu(_ classified: Classified) throws -> CpuPlan {
     return .prob(body: body, shade: shade)
   case .orbit(let paths, let series, let from, let to):
     return .orbit(dim: series ? 2 : paths.first?.count ?? 2, paths: paths, series: series, from: from, to: to)
+  case .trail(let coordinates):
+    return .trail(dim: coordinates.count, coords: try coordinates.map(real))
   }
 }
 
@@ -363,7 +368,7 @@ public func compileGpu(_ classified: Classified) throws -> GpuPlan {
   case .bifurcation(let expr, let variable, _):
     return plan(.bifurcation(field: try glsl(sub(substVars(expr, [variable: .var("a")])))))
   case .point, .complexPoint, .curveParametric, .complexPath, .value, .note, .label, .figure, .tuple, .sequence,
-    .automaton, .lattice, .curveTube, .intersection, .system, .distribution, .probability, .orbit:
+    .automaton, .lattice, .curveTube, .intersection, .system, .distribution, .probability, .orbit, .trail:
     return plan(.none)
   }
 }

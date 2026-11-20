@@ -192,6 +192,14 @@ public struct Graph2D: Equatable, Sendable {
           cpu, row: index, color: color, env: env, window: window, pointsPerUnit: pointsPerUnit, into: &overlay)
       case .orbit:
         if let pts = orbits[index] { overlay.polylines.append(.init(pts: pts, color: css)) }
+      case .trail(2, let coords):
+        // Where the point has been, as the run saw it, and where it is now.
+        if let trail = run?.trails[index] {
+          overlay.polylines.append(.init(pts: trail.coordinates, color: css))
+          if let p = trail.head { overlay.points.append(.init(x: p[0], y: p[1], color: css)) }
+        } else if let x = try? evaluate(coords[0], env), let y = try? evaluate(coords[1], env), x.isFinite, y.isFinite {
+          overlay.points.append(.init(x: x, y: y, color: css))
+        }
       default:
         break
       }

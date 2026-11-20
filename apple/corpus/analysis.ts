@@ -69,7 +69,7 @@ const fmtNum = (v: number) => String(parseFloat(v.toPrecision(6)));
 const PORTED = new Set([
   'implicit2d', 'ineq2d', 'scalar2d', 'point', 'pcurve', 'vfield2d', 'value', 'note', 'none',
   'complex2d', 'domain2d', 'conformal2d', 'fractal2d', 'rgb2d', 'hsl2d', 'oklch2d',
-  'orbit',
+  'orbit', 'trail',
 ]);
 // Geometry (lib/geom.ts): figures and labels; matrices and tensors read out, and matrix fields.
 for (const type of ['polygon', 'label', 'tuple', 'tfield2d']) PORTED.add(type);

@@ -538,7 +538,9 @@ public func analyze(_ sources: [String]) -> DocumentAnalysis {
           continue
         }
       }
-      if panelBlocked.contains(panel) { throw Unsupported("a panel with mapped axes, a surface or a metric") }
+      if panelBlocked.contains(panel) {
+        throw Unsupported("a panel with (x, y) mapped together, a surface or a metric")
+      }
       if isMetricRow(text) && !documentNames.contains("ds") { throw Unsupported("metrics (ds^2 = …)") }
       let trimmed = jsTrimmed(text)
       if (trimmed == "lightcones" || trimmed == "tidal") && !documentNames.contains(trimmed) {
