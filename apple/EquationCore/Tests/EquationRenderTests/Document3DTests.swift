@@ -19,7 +19,8 @@ import Testing
   }
 
   static func recorded() throws -> [Recorded] {
-    let url = try #require(Bundle.module.url(forResource: "documents", withExtension: "json", subdirectory: "Scenes/3D"))
+    let url = try #require(
+      Bundle.module.url(forResource: "documents", withExtension: "json", subdirectory: "Scenes/3D"))
     let docs = try #require(try JSONSerialization.jsonObject(with: Data(contentsOf: url)) as? [[String: Any]])
     return try docs.map { doc in
       Recorded(
@@ -81,13 +82,17 @@ import Testing
     #expect(animated(["a = t", "z = a x"]))
   }
 
-  /// A solve or a trace is kept while nothing it reads changes, and made
-  /// again when the camera's box or a constant does.
+  /// A solve or a trace is kept while the camera stays inside the box it
+  /// was made over and nothing it reads changes, and made again otherwise.
   @Test func tracesFollowTheCameraAndTheConstants() {
-    let (document, _) = Self.built(["a = 1", "(x + y + z, x - y, z) = (a, 0, 2)"], at: 0)
+    let (document, _) = Self.built(["a = 1", "(x + y + z, x - y, z) = (a, 0, 2)", "(y, -x, 0.2)"], at: 0)
     let near = document.scene(at: 0, camera: Camera3D())
     #expect(near.points.count == 1)
     #expect(document.scene(at: 0, camera: Camera3D()) == near)
+    // A small pan stays inside the padded box: the same streamlines, not ones traced anew.
+    let panned = document.scene(at: 0, camera: Camera3D(target: SIMD3(0.5, 0, 0)))
+    #expect(panned.curves == near.curves)
+    #expect(document.scene(at: 0, camera: Camera3D(target: SIMD3(40, 0, 0))).curves != near.curves)
     // The solution is outside a box far from it.
     #expect(document.scene(at: 0, camera: Camera3D(target: SIMD3(100, 0, 0), radius: 2)).points.isEmpty)
     let (moved, _) = Self.built(["a = 3", "(x + y + z, x - y, z) = (a, 0, 2)"], at: 0)
@@ -148,7 +153,11 @@ import Testing
       glsl("\(what) dv", x.dv, y.dv)
       glsl("\(what) paint", x.paint.map { [$0] }, y.paint.map { [$0] })
       check("\(what) params", x.params ?? [], y.params ?? [])
-      if let gain = y.gain { near("\(what) gain", x.gain ?? .nan, gain, 1e-6) } else { check("\(what) gain", x.gain, nil) }
+      if let gain = y.gain {
+        near("\(what) gain", x.gain ?? .nan, gain, 1e-6)
+      } else {
+        check("\(what) gain", x.gain, nil)
+      }
       color(what, x.color, y.color)
     }
     each("volume", a.volumes, b.volumes) { what, x, y in

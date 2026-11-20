@@ -15,8 +15,10 @@ public enum Graph {
   /// sets a panel's mode. Its 2D rows are then drawn in space too: a curve
   /// as the sheet it extrudes to, a point in the plane z = 0.
   ///
-  /// (The site decides this per panel; like `Graph2D`, the port draws a
-  /// document as one panel.)
+  /// The site decides this per panel. Rows in error or not supported are
+  /// not counted, so for one panel's answer pass the analysis with the other
+  /// panels' rows masked out, as for its `Graph2D`; `Document3D` skips the
+  /// same rows.
   public static func kind(of analysis: DocumentAnalysis) -> Kind {
     analysis.rows.contains { $0.error == nil && $0.unsupported == nil && $0.classified?.needs3D == true }
       ? .space : .plane
@@ -39,8 +41,9 @@ public enum Graph {
 ///
 /// A scene depends on the camera as well as the time: what is solved or
 /// traced on the CPU (intersections, systems, a field's streamlines, a
-/// cloud's scale) is found over the box the camera looks at. Those are kept
-/// from frame to frame while neither the box nor a value they read changes.
+/// cloud's scale) is found over the box the camera looks at, padded so that
+/// small pans and zooms stay inside it. Those are kept from frame to frame
+/// until the camera leaves that box or a value they read changes.
 public struct Document3D: Equatable, Sendable {
   public var analysis: DocumentAnalysis
   /// Each row's color, or nil for a row that takes none (`Graph2D.colors`).
@@ -127,13 +130,18 @@ public struct Document3D: Equatable, Sendable {
     let params = row.gpu?.params ?? []
     // The box the solvers search: the camera's, padded a quarter each way so
     // small pans and zooms stay inside it (web/main.ts solveFor).
+    let target = [camera.target.x, camera.target.y, camera.target.z]
+    let view = TraceCache.Box(lo: target.map { $0 - cameraBoxR(camera) }, hi: target.map { $0 + cameraBoxR(camera) })
     let r = cameraBoxR(camera) * 1.5
-    let lo = [camera.target.x - r, camera.target.y - r, camera.target.z - r]
-    let hi = [camera.target.x + r, camera.target.y + r, camera.target.z + r]
-    /// What a traced row is kept by: its box, and every value it reads.
+    let (lo, hi) = (target.map { $0 - r }, target.map { $0 + r })
+    /// What a traced row is kept by, besides its box: every value it reads.
     func key(_ what: String, _ moving: Bool = row.classified?.animated ?? false) -> String {
       let read = (row.classified?.params ?? []).map { "\(env[$0] ?? .nan)" }.joined(separator: ",")
-      return "\(index):\(what):\(lo):\(hi):\(read):\(moving ? "\(time)" : "")"
+      return "\(index):\(what):\(read):\(moving ? "\(time)" : "")"
+    }
+    /// A trace over the padded box, or the one kept from a box the view is still inside.
+    func traced(_ key: String, _ trace: () -> [[[Double]]]) -> [[[Double]]] {
+      traces.paths(key, view: view, box: TraceCache.Box(lo: lo, hi: hi), trace)
     }
     func value(_ e: Expr, _ scope: [String: Double]) -> Double { (try? evaluate(e, scope)) ?? .nan }
     /// A path's points as the floats the renderer takes, z = 0 for a point in the plane.
@@ -206,24 +214,22 @@ public struct Document3D: Equatable, Sendable {
       var scope = env
       scope["t"] = (time * 20).rounded(.down) / 20
       let moving = row.classified?.animated ?? false
-      let paths = traces.paths("\(key("flow", false)):\(moving ? scope["t"]! : 0)") {
-        traceField(comps, lo, hi, scope)
-      }
+      let paths = traced("\(key("flow", false)):\(moving ? scope["t"]! : 0)") { traceField(comps, lo, hi, scope) }
       for path in paths where path.count >= 2 {
         scene.curves.append(Scene3D.Curve(pts: floats(path), color: color, fade: true))
       }
     case .spacecurve(let residuals):
-      let paths = traces.paths(key("curve")) { traceIntersection(residuals, lo, hi, env) }
+      let paths = traced(key("curve")) { traceIntersection(residuals, lo, hi, env) }
       scene.curves.append(Scene3D.Curve(pts: lifted(paths), color: color))
     case .system(let dim, let residuals, let parametric, let angular):
       let vars = Array(["x", "y", "z"][..<dim])
       let (l, h) = (Array(lo[..<dim]), Array(hi[..<dim]))
       if parametric {
-        let paths = traces.paths(key("trace")) { traceSystem(residuals, vars, l, h, env, 256, angular) }
+        let paths = traced(key("trace")) { traceSystem(residuals, vars, l, h, env, 256, angular) }
         scene.curves.append(Scene3D.Curve(pts: lifted(paths), color: color))
         break
       }
-      let found = traces.paths(key("solve")) {
+      let found = traced(key("solve")) {
         [solveSystem(residuals, vars, l, h, SolveOptions(env: env, angular: angular))]
       }
       // Each solution its own group: discrete answers, solid and full size,
@@ -263,7 +269,13 @@ public struct Document3D: Equatable, Sendable {
 /// (web/main.ts keeps `sysCache` and its like on each row).
 final class TraceCache: @unchecked Sendable {
   private let lock = NSLock()
-  private var paths: [String: [[[Double]]]] = [:]
+  /// The box a trace was made over.
+  struct Box {
+    var lo: [Double]
+    var hi: [Double]
+  }
+
+  private var paths: [String: (box: Box, paths: [[[Double]]])] = [:]
   private var numbers: [String: Double] = [:]
   /// Oldest first.
   private var order: [String] = []
@@ -277,13 +289,23 @@ final class TraceCache: @unchecked Sendable {
     }
   }
 
-  func paths(_ key: String, _ trace: () -> [[[Double]]]) -> [[[Double]]] {
+  /// The paths kept under `key` while the box they were traced over still
+  /// holds `view` and is not more than six times as wide (web/main.ts
+  /// solveFor's bargain); else `trace`'s, made over `box` and kept.
+  func paths(_ key: String, view: Box, box: Box, _ trace: () -> [[[Double]]]) -> [[[Double]]] {
     lock.lock()
     defer { lock.unlock() }
-    if let hit = paths[key] { return hit }
+    if let kept = paths[key], kept.box.lo.count == view.lo.count,
+      view.lo.indices.allSatisfy({ k in
+        kept.box.lo[k] <= view.lo[k] && kept.box.hi[k] >= view.hi[k]
+          && kept.box.hi[k] - kept.box.lo[k] <= 6 * (view.hi[k] - view.lo[k])
+      })
+    {
+      return kept.paths
+    }
     let traced = trace()
-    paths[key] = traced
-    remember(key)
+    if paths[key] == nil { remember(key) }
+    paths[key] = (box, traced)
     return traced
   }
 
