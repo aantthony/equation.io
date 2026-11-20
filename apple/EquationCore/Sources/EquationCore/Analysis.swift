@@ -48,6 +48,9 @@ public struct RowAnalysis: Equatable, Sendable {
   public var classified: Classified?
   public var cpu: CpuPlan?
   public var gpu: GpuPlan?
+  /// The value a row of glyphs reads out (a multivector, a flat, the matrix
+  /// of `action(M)`): the plan `plotReadout` takes in place of `cpu`.
+  public var readout: CpuPlan?
 
   /// A `---` row, which starts a new panel.
   public var divider: Bool {
@@ -422,6 +425,7 @@ public func analyze(_ sources: [String]) -> DocumentAnalysis {
   ropts.documentNames = documentNames
   ropts.complex = { built.complexes[$0] }
   ropts.interval = { built.intervals[$0] }
+  ropts.multivector = { built.multivectors[$0] }
   // Σ/Π bounds in plot rows expand against the constants' values at t = 0.
   let boundConsts = NameBox()
   boundConsts.names = built.sumBoundConsts
@@ -488,6 +492,7 @@ public func analyze(_ sources: [String]) -> DocumentAnalysis {
     lowerBody: { try lowerBody($0, built, ropts) },
     userDefined: {
       constNames.contains($0) || built.fns[$0] != nil || built.mats.has($0) || built.tensors.has($0)
+        || built.multivectors.has($0)
     })
   for (i, name) in random.built.rowRV where blocked[i] == nil {
     do {
@@ -700,7 +705,8 @@ public func analyze(_ sources: [String]) -> DocumentAnalysis {
       let cpu = try compileCpu(cls)
       rows[i].gpu = try compileGpu(cls)
       rows[i].cpu = cpu
-      if let info = try? plotReadout(cpu, readoutEnv) { rows[i].info = info }
+      rows[i].readout = try compileReadout(cls)
+      if let info = try? plotReadout(rows[i].readout ?? cpu, readoutEnv) { rows[i].info = info }
       rows[i].info = withNote(rows[i].info, memberNotes[i])
     } catch let error as Unsupported {
       rows[i].unsupported = notSupported(error.what)
@@ -796,7 +802,9 @@ public func analyze(_ sources: [String]) -> DocumentAnalysis {
     if row.comment {
       row.kind = "comment (group heading)"
     } else if let d = row.definition {
-      let valued = built.mats.has(d.name) ? "matrix" : built.tensors.has(d.name) ? "tensor" : nil
+      let valued =
+        built.mats.has(d.name)
+        ? "matrix" : built.tensors.has(d.name) ? "tensor" : built.multivectors[d.name].map(algebraKind)
       let interval = built.intervals.has(d.name) ? "interval" : nil
       let constant = interval ?? valued ?? (named ? "point" : built.lists.has(d.name) ? "list" : "const")
       row.kind = "definition (\(d.kind == "const" ? constant : d.kind))"
@@ -810,7 +818,7 @@ public func analyze(_ sources: [String]) -> DocumentAnalysis {
     } else if let dist = row.dist {
       row.kind = distributionKind(dist, row.cpu)
     } else if let cls = row.classified {
-      row.kind = cls.object.publicKind
+      row.kind = cls.rowKind
     }
     // Blank rows, definitions (other than named points), comments and view
     // rows draw nothing, a value row shows only its readout, and a `#hex`

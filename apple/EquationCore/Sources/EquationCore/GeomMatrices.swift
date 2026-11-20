@@ -82,6 +82,8 @@ final class GeomContext {
   var isList: (String) -> Bool = { _ in false }
   private var matSeen: [Expr: MatValue?] = [:]
   private var tenSeen: [Expr: Tensor?] = [:]
+  /// Multivectors and flats (GeomAlgebra.swift).
+  var algebra = AlgebraSeen()
 
   init(comps: @escaping (String) -> [String]?, getMat: @escaping GetMat, getTensor: @escaping GetTensor, mats: Bool) {
     self.comps = comps
@@ -106,6 +108,7 @@ final class GeomContext {
   /// square is handed back to it as a matrix.)
   func lowerTensor(_ e: Expr) throws -> Tensor? {
     if !matsPossible { return nil }
+    if try lowerMv(e) != nil { return nil }
     if let hit = tenSeen[e] { return hit }
     // A cycle guard: a node under way is not a tensor to itself.
     tenSeen[e] = .some(nil)
@@ -248,6 +251,7 @@ final class GeomContext {
   /// or nil for anything else.
   func lowerMat(_ e: Expr) throws -> MatValue? {
     if !matsPossible { return nil }
+    if try lowerMv(e) != nil { return nil }
     if let hit = matSeen[e] { return hit }
     func scalar(_ n: Expr, _ what: String) throws -> Expr {
       guard case .scalar(let value) = try lo(n) else {

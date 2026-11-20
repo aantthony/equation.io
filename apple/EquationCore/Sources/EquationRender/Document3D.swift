@@ -165,6 +165,11 @@ public struct Document3D: Equatable, Sendable {
       scene.implicits.append(Surface3D(uniforms: uniforms, field: field, color: color, params: params))
     case .implicit3d:
       guard case .implicit3d(let field, let grad)? = row.gpu?.shader else { break }
+      // A plane of projective geometry draws translucent, as a plane.
+      if let plane = row.gpu?.plane {
+        scene.planes = (scene.planes ?? []) + [.init(coeffs: plane, color: color, params: params, uniforms: uniforms)]
+        break
+      }
       scene.implicits.append(Surface3D(uniforms: uniforms, field: field, color: color, params: params, grad: grad))
     case .scalar3d(let expr):
       guard case .scalar3d(let field)? = row.gpu?.shader else { break }

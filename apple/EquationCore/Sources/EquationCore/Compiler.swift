@@ -93,6 +93,10 @@ public enum CpuPlan: Equatable, Sendable {
   case histogram(centers: [Double], counts: [Double], width: Double)
   /// A multiset of `count` tuples or tensors of one `shape`, read out.
   case tuples(values: [Expr], shape: [Int], count: Int)
+  /// A multivector's coefficients, or a multiset's, read out by blade.
+  case blades(values: [Expr], dim: Int, quat: Bool, count: Int?)
+  /// A point's, line's, plane's or motor's coefficients, read out as what it is.
+  case flat(values: [Expr], dim: Int, grade: Int, count: Int?)
   /// One plan per list element.
   indirect case family(members: [FamilyMember])
 
@@ -137,7 +141,7 @@ public enum CpuPlan: Equatable, Sendable {
     case .dlist: "dlist"
     case .dscatter: "dscatter"
     case .histogram: "histogram"
-    case .tuples: "tuple"
+    case .tuples, .blades, .flat: "tuple"
     case .family: "family"
     }
   }
@@ -158,6 +162,9 @@ public struct GpuPlan: Equatable, Sendable {
   /// Values the plan sets itself, by constant name: a family member's index
   /// into the program its family shares.
   public var uniforms: [String: Double] = [:]
+  /// A plane's coefficients a, b, c, d, beside its implicit surface: drawn
+  /// translucent, as a plane (lib/compiler.ts, an implicit3d plan's `plane`).
+  public var plane: [String]? = nil
 
   public enum Shader: Equatable, Sendable {
     /// Nothing for the GPU: the row is drawn (or only read out) on the CPU.
@@ -314,6 +321,10 @@ public func compileCpu(_ classified: Classified) throws -> CpuPlan {
     return .orbit(dim: series ? 2 : paths.first?.count ?? 2, paths: paths, series: series, from: from, to: to)
   case .trail(let coordinates):
     return .trail(dim: coordinates.count, coords: try coordinates.map(real))
+  case .blades(let values, let dim, let quat, let count):
+    return .blades(values: try values.map(real), dim: dim, quat: quat, count: count)
+  case .flat(let values, let dim, let grade, let count):
+    return .flat(values: try values.map(real), dim: dim, grade: grade, count: count)
   case .list, .histogram, .tuples, .family:
     return try compileListCpu(classified.object)
   }
@@ -402,7 +413,7 @@ public func compileGpu(_ classified: Classified) throws -> GpuPlan {
   case .point, .complexPoint, .curveParametric, .complexPath, .value, .note, .label, .figure, .tuple, .sequence,
     .automaton, .lattice, .curveTube, .intersection, .system, .complexSystem, .distribution, .probability, .orbit,
     .trail,
-    .list, .histogram, .tuples:
+    .list, .histogram, .tuples, .blades, .flat:
     return plan(.none)
   case .family(let members, let shared):
     return try compileFamilyGpu(members, shared, params: params)
@@ -479,6 +490,8 @@ public func plotReadout(_ plan: CpuPlan, _ env: [String: Double]) throws -> Stri
     return try comparisonReadout(expr, variable: variable, constant: constant, identity: identity, env)
   case .tuple(let values, let shape, let length):
     return try tupleReadout(values, shape: shape, length: length, env)
+  case .blades, .flat:
+    return try algebraReadout(plan, env)
   case .vlist, .tuples, .family:
     return try listReadout(plan, env)
   default:
