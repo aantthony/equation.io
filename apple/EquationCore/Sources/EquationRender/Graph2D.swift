@@ -20,6 +20,9 @@ public struct Graph2D: Equatable, Sendable {
   public var window: Window?
   /// Something moves with t, so the graph redraws every frame.
   public var animated = false
+  /// The sequence rows that plot their partial sums S_N = Σ a_n instead of
+  /// their terms (the site's toggle on such a row).
+  public var partialSums: Set<Int> = []
 
   public struct Window: Equatable, Sendable {
     public var x: [Double]?
@@ -40,6 +43,7 @@ public struct Graph2D: Equatable, Sendable {
     var curves: [Curve2D] = []
     var complexLayers = ComplexLayers()
     var tfields: [TField2D] = []
+    var bifs: [Bif2D] = []
     for (index, row) in analysis.rows.enumerated() {
       switch row.view {
       case .grid(let mode)?: grid = Frame2D.Grid(rawValue: mode) ?? .on
@@ -66,8 +70,13 @@ public struct Graph2D: Equatable, Sendable {
         complexLayers.add(gpu, color: color)
       case .tfield2d(let entries, let streamlines):
         tfields.append(TField2D(entries: entries, color: color, params: gpu.params, streamlines: streamlines))
-      case .cobweb, .bifurcation:
-        break
+      case .cobweb(let curveField):
+        // The map's curve y = f(x); its path is the overlay's.
+        curves.append(Curve2D(field: curveField, color: color, params: gpu.params))
+      case .bifurcation(let field):
+        var seed = 0.5
+        if case .bifurcation(_, _, let a0Name)? = row.cpu { seed = Self.seed(a0Name, analysis.env) }
+        bifs.append(Bif2D(field: field, color: color, params: gpu.params, uniforms: ["uSeed": seed]))
       }
     }
     // A vector field's streamlines flow whether or not it reads t.
@@ -75,6 +84,7 @@ public struct Graph2D: Equatable, Sendable {
     layers = Layers2D(vfields: vfields, ineqs: ineqs, scalars: scalars, curves: curves)
     complexLayers.write(to: &layers)
     if !tfields.isEmpty { layers.tfields = tfields }
+    if !bifs.isEmpty { layers.bifs = bifs }
   }
 
   /// The constants' values `time` seconds after the graph opened: what the uniforms read.
@@ -83,8 +93,12 @@ public struct Graph2D: Equatable, Sendable {
   }
 
   /// What is drawn over the shader passes at a time: the rows the CPU
-  /// evaluates (points, parametric curves).
-  public func overlay(at time: Double) -> Overlay2D {
+  /// evaluates (points, parametric curves). `bounds` is the part of the
+  /// plane in view, which a sequence's dots, a cobweb and an integral's area
+  /// are drawn over (without it, over the window a 1000-pixel square frame
+  /// opens on); `theme` gives a cobweb's diagonal its color.
+  public func overlay(at time: Double, bounds: Bounds? = nil, theme: GraphTheme = .light) -> Overlay2D {
+    let bounds = bounds ?? Bounds(view: opening(width: 1000, height: 1000), width: 1000, height: 1000)
     var env = environment(at: time)
     env["t"] = time
     var overlay = Overlay2D()
@@ -119,6 +133,13 @@ public struct Graph2D: Equatable, Sendable {
         overlay.polylines.append(.init(pts: pts, color: css))
       case .polygon, .label:
         _ = drawGeometry(cpu, env, color: color, into: &overlay)
+      case .sequence(let term, let n):
+        overlay.points += Self.sequenceDots(
+          term: term, index: n, env: env, bounds: bounds, color: css, partialSum: partialSums.contains(index))
+      case .cobweb(let f, let recVar, let a0Name):
+        Self.cobweb(
+          f: f, recVar: recVar, seed: Self.seed(a0Name, env), env: env, bounds: bounds, color: css,
+          axis: theme.axis, into: &overlay)
       default:
         break
       }
@@ -143,10 +164,11 @@ public struct Graph2D: Equatable, Sendable {
   }
 
   /// The frame written down, for a picture of it (`MetalContext.image`).
-  public func scene(at time: Double, width: Double, height: Double) -> Scene2D {
+  public func scene(at time: Double, width: Double, height: Double, theme: GraphTheme = .light) -> Scene2D {
     var scene = Scene2D(layers: layers, env: environment(at: time), frame: Frame2D(grid: grid), time: time)
-    scene.view = opening(width: width, height: height)
-    scene.overlay = overlay(at: time)
+    let view = opening(width: width, height: height)
+    scene.view = view
+    scene.overlay = overlay(at: time, bounds: Bounds(view: view, width: width, height: height), theme: theme)
     return scene
   }
 }

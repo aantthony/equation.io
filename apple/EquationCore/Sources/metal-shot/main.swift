@@ -169,7 +169,7 @@ if let path = options["--scene"] {
   let graph = Graph2D(analysis, colors: colors)
   if flags.contains("--explain") { print(graph.animated ? "moves with t" : "still") }
   scene = graph.scene(
-    at: options["--time"].flatMap(Double.init) ?? 0, width: size[0] * scale, height: size[1] * scale)
+    at: options["--time"].flatMap(Double.init) ?? 0, width: size[0] * scale, height: size[1] * scale, theme: theme)
 }
 if let text = options["--view"] {
   let parts = text.split(separator: ",").compactMap { Double($0) }
