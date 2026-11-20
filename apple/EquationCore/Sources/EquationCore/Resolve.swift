@@ -408,11 +408,7 @@ struct Resolver {
     }
     if name == "tube" || name == "revolve" { return try resolveSpaceForm(name, args) }
     if name == "gaussian" || name == "meancurvature" { return try surfaceGeometry(name, args) }
-    if name == "geodesic" {
-      throw LanguageError(
-        "geodesic(S, (u0, v0), (du, dv)) draws a curve, so it must be the whole row — on a panel drawn on a "
-          + "surface, geodesic(P, (dx, dy)).")
-    }
+    if name == "geodesic" { throw geodesicInsideARow }
     if name == PAINT_CALL { return .call(name, args) }
     guard
       elementaryFunctions.contains(name) || complexFunctions.contains(name) || geometryFunctions.contains(name)

@@ -211,3 +211,11 @@ func paintedSurface(_ args: [Expr], defined: Set<String>, fields: [String: Expr]
     object: .surfaceParametric(coordinates: coordinates, paint: paint),
     animated: cls.animated || vars.contains("t"), needs3D: cls.needs3D, params: jsSorted(params))
 }
+
+/// Whether a row on a panel's surface is that surface's curvature,
+/// gaussian(x, y) or meancurvature(x, y), which is shaded to its own size
+/// (lib/analysis.ts, where it sets `autoscale`).
+func shadedToItsSize(_ object: MathObject, _ rawParsed: Expr, _ fnNames: Set<String>) -> Bool {
+  guard case .scalarField = object, case .call(let called, _) = rawParsed else { return false }
+  return (called == "gaussian" || called == "meancurvature") && !fnNames.contains(called)
+}

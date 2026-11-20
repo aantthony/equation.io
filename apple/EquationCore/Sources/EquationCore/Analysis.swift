@@ -621,20 +621,8 @@ public func analyze(_ sources: [String]) -> DocumentAnalysis {
       }
       // geodesic(S, start, direction): traced as it is drawn.
       if case .call("geodesic", let args) = rawParsed, !fnNames.contains("geodesic") {
-        // (Its surface may run over u's and v's intervals: Interval.swift.)
-        var surfaceOpts = ropts
-        surfaceOpts.intervals = true
-        rows[i].classified = try classifyGeodesic(
-          args, surface: panelSurfaces[panel],
-          surfaceOperand: { arg in
-            var written = arg
-            if case .var(let name) = arg, try getFn(name) != nil {} else {
-              written = try Resolver(getFn: getFn, opts: surfaceOpts).resolve(arg)
-            }
-            return try Resolver(getFn: getFn, opts: surfaceOpts).surfaceOperand("geodesic", written)
-          },
-          lower: { try lowerObjects(try Resolver(getFn: getFn, opts: ropts).resolve($0), built, ropts).e },
-          constNames: constNames, moving: animated.union(built.states.keys))
+        rows[i].classified = try geodesicRow(
+          args, panelSurfaces[panel], getFn, ropts, built, constNames, animated.union(built.states.keys))
         continue
       }
       // A row not drawn over the plane may test equality in a case: `f(2)`
@@ -702,12 +690,7 @@ public func analyze(_ sources: [String]) -> DocumentAnalysis {
       // in space draws as it would in any 3D panel.
       if panelSurfaces[panel] != nil, !cls.needs3D {
         cls = try classifyOnSurface(cls)
-        // gaussian(x, y): the surface's curvature, shaded to its own size.
-        if case .scalarField = cls.object, case .call(let called, _) = rawParsed,
-          called == "gaussian" || called == "meancurvature", !fnNames.contains(called)
-        {
-          rows[i].autoscale = true
-        }
+        rows[i].autoscale = shadedToItsSize(cls.object, rawParsed, fnNames)
       }
       // A solid whose shape reads sliders is checked for folds at their values.
       if let solid = cls.solid { try checkFolds(solid, ropts.consts) }

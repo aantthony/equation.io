@@ -602,6 +602,12 @@ public func geodesicPath(
   return pts
 }
 
+/// What a geodesic anywhere but as its whole row says (lib/defs.ts, the
+/// resolver's call case).
+let geodesicInsideARow = LanguageError(
+  "geodesic(S, (u0, v0), (du, dv)) draws a curve, so it must be the whole row — on a panel drawn on a "
+    + "surface, geodesic(P, (dx, dy)).")
+
 private let GEODESIC_USAGE =
   "geodesic takes a surface, where to start on it and which way: geodesic(S, (0.5, 0.5), (1, 0)) with "
   + "S = (u, v, u^2 - v^2), and optionally how far, geodesic(S, P, (1, 0), 4)."
@@ -721,4 +727,27 @@ func classifyGeodesic(
   return Classified(
     object: .family(members: members, shared: nil), animated: members.contains(where: \.animated),
     needs3D: operand != nil, params: jsSorted(params_))
+}
+
+/// A geodesic row as the analysis reads it: `classifyGeodesic` with the
+/// document's resolver. (Apart from `analyze`, whose frame the rows' deepest
+/// expressions are resolved under.)
+func geodesicRow(
+  _ args: [Expr], _ surface: SurfaceMap?, _ getFn: @escaping GetFn, _ ropts: ResolveOpts, _ built: BuiltDefs,
+  _ constNames: Set<String>, _ moving: Set<String>
+) throws -> Classified {
+  // (Its surface may run over u's and v's intervals: Interval.swift.)
+  var surfaceOpts = ropts
+  surfaceOpts.intervals = true
+  return try classifyGeodesic(
+    args, surface: surface,
+    surfaceOperand: { arg in
+      var written = arg
+      if case .var(let name) = arg, try getFn(name) != nil {} else {
+        written = try Resolver(getFn: getFn, opts: surfaceOpts).resolve(arg)
+      }
+      return try Resolver(getFn: getFn, opts: surfaceOpts).surfaceOperand("geodesic", written)
+    },
+    lower: { try lowerObjects(try Resolver(getFn: getFn, opts: ropts).resolve($0), built, ropts).e },
+    constNames: constNames, moving: moving)
 }
