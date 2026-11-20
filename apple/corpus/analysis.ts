@@ -58,6 +58,7 @@ import { PLANE_CASES, recordPlanes } from './cases-planes.ts';
 import { DATA_CASES, generated } from './cases-data.ts';
 import { parseCsv, type Table } from '../../lib/csv.ts';
 import { shortHash } from '../../lib/hash.ts';
+import { MEASURE_CASES } from './cases-measure.ts';
 
 const fixtures = new URL('../EquationCore/Tests/EquationCoreTests/Fixtures/', import.meta.url);
 
@@ -1154,6 +1155,7 @@ function cloudError(plot: import('../../lib/compiler.ts').CpuPlan | undefined): 
   );
 }
 
+MEASURE_CASES.forEach((text, k) => docs.push({ name: `case measure ${k + 1}`, rows: splitStatements(text) }));
 randomDocs(Number(process.env.RANDOM_DOCS ?? 600)).forEach((text, k) =>
   docs.push({ name: `case random ${k + 1}`, rows: splitStatements(text) }),
 );

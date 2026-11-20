@@ -102,6 +102,9 @@ public indirect enum MathObject: Equatable, Sendable {
   case orbit(paths: [[Expr]], series: Bool, from: Expr, to: Expr)
   /// `trail(A)`: where a moving point has been (Trail.swift).
   case trail(coordinates: [Expr])
+  /// A geodesic of a parametric surface from a start in a direction,
+  /// integrated as it is drawn (Geodesic.swift `geodesicPath`).
+  case geodesic(GeodesicSpec)
   /// A list of numbers or of points, as expressions (`values`: one per
   /// number, or one row of coordinates per point) or packed (ListPlans.swift).
   case list(ListObject)
@@ -156,6 +159,7 @@ public indirect enum MathObject: Equatable, Sendable {
     case .probability: "prob"
     case .orbit: "orbit"
     case .trail: "trail"
+    case .geodesic: "geodesic"
     case .list(let list): list.publicKind
     case .histogram: "histogram"
     case .tuples, .blades, .flat: "tuple"

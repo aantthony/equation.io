@@ -159,7 +159,13 @@ extension Document3D {
         switch row.gpu?.shader {
         case .implicit2d(let field, _)?: .init(kind: .curve, field: field)
         case .ineq2d(let field, let edges)?: .init(kind: .region, field: field, edges: edges)
-        case .scalar2d(let field)?: .init(kind: .scalar, field: field)
+        case .scalar2d(let field)?:
+          // gaussian(x, y): shaded to its own size on the surface.
+          if row.autoscale, case .scalar2d(let expr) = cpu {
+            .init(kind: .scalar, field: field, gain: surfaceFieldGain(mesh.map, expr, env))
+          } else {
+            .init(kind: .scalar, field: field)
+          }
         default: nil
         }
       guard let paint else { break }

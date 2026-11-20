@@ -7,21 +7,18 @@
 /// ratio. A filter keeps a subset and measures it with the geometric measure
 /// of its dimension.
 ///
-/// The site takes one of two routes, by the shape of the set, and the port
-/// has the first:
+/// The site takes one of two routes, by the shape of the set:
 ///
-/// - **Integrals** (ported). A product of ranges (`total(u^2)`,
+/// - **Integrals** (this file). A product of ranges (`total(u^2)`,
 ///   `{0 < x < 1: x^2}`), or a curve written as a graph over a bounded range
 ///   (`{y = x^2, 0 < x < 1}`, arc length ∫ √(1 + g'²)). An
 ///   everywhere-continuous integrand keeps its closed form, so sliders stay
 ///   symbolic; any other is integrated adaptively at the sliders' values,
 ///   finding its own singularities, so a divergent integral is ∞ or an error
 ///   rather than a finite number. `min` and `max` search the product.
-/// - **Numeric** (not ported: `numericReduction` and all it stands on, the
-///   quadtree over interval enclosures of lib/certify.ts, marching squares
-///   and certified root counting). Any other filter in one or two
+/// - **Numeric** (MeasureNumeric.swift). Any other filter in one or two
 ///   coordinates — a region (`x^2 + y^2 < 1`), an implicit curve, points —
-///   says it is not supported yet.
+///   is measured over interval enclosures (Certify.swift).
 
 private func num(_ value: Double) -> Expr { .num(value) }
 private func vr(_ name: String) -> Expr { .var(name) }
@@ -33,14 +30,14 @@ private let INF: Expr = .var("inf")
 private let NEG_INF: Expr = .neg(.var("inf"))
 
 /// A coordinate of the space a reduction runs over, with its natural range.
-private struct Coord: Equatable {
+struct Coord: Equatable {
   var name: String
   var lo: Expr
   var hi: Expr
   var geometric: Bool
 }
 
-private func isInf(_ e: Expr, _ sign: Int) -> Bool {
+func isInf(_ e: Expr, _ sign: Int) -> Bool {
   if sign == 1 {
     if case .var("inf") = e { return true }
     if case .num(let value) = e { return value == .infinity }
@@ -51,9 +48,9 @@ private func isInf(_ e: Expr, _ sign: Int) -> Bool {
   return false
 }
 
-private enum ComparisonOp { case lt, gt, eq }
+enum ComparisonOp { case lt, gt, eq }
 
-private struct Comparison {
+struct Comparison {
   var l: Expr
   var op: ComparisonOp
   var r: Expr
@@ -175,7 +172,7 @@ private let ENTIRE_CALLS: Set<String> = ["sin", "cos", "exp", "atan", "tanh", "s
 /// values: sums, products and whole powers of those functions. Such an
 /// integrand has no singularity to diverge at and no domain to leave, so its
 /// integral over a bounded range can stay symbolic.
-private func entire(_ e: Expr) -> Bool {
+func entire(_ e: Expr) -> Bool {
   switch e {
   case .num(let value): return value.isFinite
   case .var(let name): return name != "inf"
@@ -205,7 +202,7 @@ private func entire(_ e: Expr) -> Bool {
 }
 
 /// ∫ f diverges (∫|f| is infinite near `at`).
-private struct Diverges: Error {
+struct Diverges: Error {
   var at: Double
 }
 /// The integral did not settle, and no divergence was found to blame.
@@ -416,19 +413,6 @@ private func shellsAt(_ f: (Double) throws -> Double, _ w: (Double, Double), _ a
   return (false, tail.isNaN ? nil : tail)
 }
 
-/// An evaluator of `e` at points of `names`, the constants bound; NaN where
-/// it has no value (lib/measure.ts `pointFn`, by its tree-walking branch: the
-/// site compiles the tree for its stack machine first, which computes the
-/// same numbers faster).
-private func pointFn(_ e: Expr, _ names: [String], _ env: [String: Double]) -> ([Double]) -> Double {
-  let bound = substVars(e, env.mapValues { num($0) })
-  var scope: [String: Double] = [:]
-  return { p in
-    for (k, n) in names.enumerated() { scope[n] = p[k] }
-    return (try? evaluate(bound, &scope)) ?? .nan
-  }
-}
-
 extension Resolver {
   /// A name bound here (a function's parameter, a Σ index), so not the
   /// multiset x, u, … (`MeasureHost.bound`).
@@ -512,14 +496,12 @@ extension Resolver {
     if rest.count == 1, rest[0].op == .eq, let graph = try graphForm(rest[0], bounded) {
       return try productReduction(name, value, graph.others, graph)
     }
-    // Port: lib/measure.ts `numericReduction` (the quadtree over interval
-    // enclosures, marching squares, certified root counting).
-    throw Unsupported("\(name)(…) over a region, an implicit curve or a set of points")
+    return try numericReduction(name, rest.map(residualOf), value, bounded)
   }
 
   /// Numbers every free name of `es` needs beyond `coords`: sliders and
   /// constants, read now, so the value follows them by re-resolving.
-  private func constantsFor(_ es: [Expr], _ coords: [String], _ what: String) throws -> [String: Double] {
+  func constantsFor(_ es: [Expr], _ coords: [String], _ what: String) throws -> [String: Double] {
     var env: [String: Double] = [:]
     for e in es {
       for n in freeVars(e) {

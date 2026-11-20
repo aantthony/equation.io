@@ -269,6 +269,7 @@ private final class StackBox<T>: @unchecked Sendable {
     check("needs3D", got.classified?.needs3D, cls?["needs3D"] as? Bool)
     let cpu = want["cpu"] as? [String: Any]
     check("cpu type", got.cpu?.type, cpu?["type"] as? String)
+    check("autoscale", got.autoscale, cpu?["autoscale"] != nil)
     if let cpu, let mine = got.cpu, cpu["omitted"] == nil {
       do {
         // (A list's numbers come through each side's libm: equal to the last few places.)
@@ -409,7 +410,7 @@ private final class StackBox<T>: @unchecked Sendable {
           Constraint(residual: try decode($0["residual"]!), strict: $0["strict"] as! Bool)
         })
     case "scalar2d":
-      if o["autoscale"] != nil { throw FixtureError(description: "an autoscaled field") }
+      // (`autoscale` is the row's, compared beside the plan.)
       return .scalar2d(expr: try expr("expr"))
     case "point": return .point(dim: (o["dim"] as! NSNumber).intValue, coords: try exprs("coords"))
     case "pcurve":
@@ -524,6 +525,12 @@ private final class StackBox<T>: @unchecked Sendable {
       return .orbit(
         dim: (o["dim"] as! NSNumber).intValue, paths: try (o["paths"] as! [[Any]]).map { try $0.map(decode) },
         series: o["series"] as! Bool, from: try expr("from"), to: try expr("to"))
+    case "geodesic":
+      return .geodesic(
+        GeodesicSpec(
+          dim: (o["dim"] as! NSNumber).intValue, params: o["params"] as! [String], surface: try exprs("surface"),
+          derivatives: try exprs("derivatives"), start: try exprs("start"), direction: try exprs("direction"),
+          length: try o["length"].map(decode), domain: try exprs("domain")))
     case "vlist": return .vlist(values: try exprs("values"))
     case "plist":
       return .plist(dim: whole("dim")!, pts: try (o["pts"] as! [[Any]]).map { try $0.map(decode) })

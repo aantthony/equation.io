@@ -87,6 +87,8 @@ public enum CpuPlan: Equatable, Sendable {
   case orbit(dim: Int, paths: [[Expr]], series: Bool, from: Expr, to: Expr)
   /// A moving point whose past positions are drawn (Trail.swift).
   case trail(dim: Int, coords: [Expr])
+  /// A geodesic, traced as it is drawn (Geodesic.swift).
+  indirect case geodesic(GeodesicSpec)
   /// A list of numbers: a dot plot on the number line.
   case vlist(values: [Expr])
   /// A list of points.
@@ -142,6 +144,7 @@ public enum CpuPlan: Equatable, Sendable {
     case .prob: "prob"
     case .orbit: "orbit"
     case .trail: "trail"
+    case .geodesic: "geodesic"
     case .vlist: "vlist"
     case .plist: "plist"
     case .dlist: "dlist"
@@ -339,6 +342,8 @@ public func compileCpu(_ classified: Classified) throws -> CpuPlan {
     return .orbit(dim: series ? 2 : paths.first?.count ?? 2, paths: paths, series: series, from: from, to: to)
   case .trail(let coordinates):
     return .trail(dim: coordinates.count, coords: try coordinates.map(real))
+  case .geodesic(let spec):
+    return .geodesic(spec)
   case .blades(let values, let dim, let quat, let count):
     return .blades(values: try values.map(real), dim: dim, quat: quat, count: count)
   case .flat(let values, let dim, let grade, let count):
@@ -445,7 +450,7 @@ public func compileGpu(_ classified: Classified) throws -> GpuPlan {
     return plan(.bifurcation(field: try glsl(sub(substVars(expr, [variable: .var("a")])))))
   case .point, .complexPoint, .curveParametric, .complexPath, .value, .note, .label, .figure, .tuple, .sequence,
     .automaton, .lattice, .curveTube, .intersection, .system, .complexSystem, .distribution, .probability, .orbit,
-    .trail,
+    .trail, .geodesic,
     .list, .histogram, .tuples, .blades, .flat:
     return plan(.none)
   case .family(let members, let shared):

@@ -40,6 +40,9 @@ struct ResolveOpts {
   var inDefinition = false
   /// A piecewise case may test equality (a row not drawn over the plane).
   var exactConditions = false
+  /// The surface of the row's panel (X, Y, Z in x and y), when it is drawn on
+  /// one (an on(…) row): there gaussian(x, y) and meancurvature(x, y) read it.
+  var surface: [Expr]? = nil
   /// The value of a name defined as a number, field or condition, so
   /// derivatives can differentiate through it.
   var definition: (String) -> Expr? = { _ in nil }
@@ -405,6 +408,7 @@ struct Resolver {
     }
     if name == "tube" || name == "revolve" { return try resolveSpaceForm(name, args) }
     if name == "gaussian" || name == "meancurvature" { return try surfaceGeometry(name, args) }
+    if name == "geodesic" { throw geodesicInsideARow }
     if name == PAINT_CALL { return .call(name, args) }
     guard
       elementaryFunctions.contains(name) || complexFunctions.contains(name) || geometryFunctions.contains(name)
