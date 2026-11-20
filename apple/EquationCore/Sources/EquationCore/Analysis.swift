@@ -213,7 +213,7 @@ func prepareDocument(_ sources: [String]) -> PreparedDocument {
   var document = PreparedDocument(texts: texts, scanned: Array(repeating: nil, count: count))
 
   // What each row is by its text alone, and the rows the port leaves alone:
-  // random variables and regressions (`~`), automata and lattices.
+  // random variables and regressions (`~`), a tuple-valued recurrence's seed.
   let seqScans = scanSequences(texts)
   document.seqScans = seqScans
   var blocked: [Int: String] = [:]
@@ -229,8 +229,8 @@ func prepareDocument(_ sources: [String]) -> PreparedDocument {
       tildeNames.formUnion(writtenNames(text))
     } else if let scan = seqScans[i] {
       // Sequence and recurrence rows (a_n = …, a_{n+1} = …) are plots, not definitions.
-      if scan.lattice || scan.emptyTuple {
-        blocked[i] = scan.lattice ? "automata and lattices" : "tuple-valued recurrences"
+      if scan.emptyTuple {
+        blocked[i] = "tuple-valued recurrences"
         poison.insert(scan.name)
       }
     } else {
@@ -447,6 +447,12 @@ public func analyze(_ sources: [String]) -> DocumentAnalysis {
         if built.fns[letter] != nil { continue }
         if !tildeNames.isEmpty { throw Unsupported("probabilities and expectations") }
         throw LanguageError("Define a random variable first, e.g. X ~ Normal(0, 1).")
+      }
+      if let seq = document.seqScans[i], seq.lattice {
+        // A seed row draws nothing of its own; the rule row carries it.
+        rows[i].classified = try classifyAutomatonRow(
+          document.seqScans, i, fnNames: fnNames, getFn: getFn, constNames: constNames, ropts: ropts)
+        continue
       }
       if let seq = document.seqScans[i] {
         let first = document.seqScans.firstIndex { $0?.name == seq.name && $0?.emptyTuple == false }

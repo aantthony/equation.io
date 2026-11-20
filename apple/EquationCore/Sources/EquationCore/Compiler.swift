@@ -54,6 +54,10 @@ public enum CpuPlan: Equatable, Sendable {
   /// (or 1/2): its cobweb, or its orbit diagram over x.
   case cobweb(f: Expr, recVar: String, a0Name: String?)
   case bifurcation(expr: Expr, recVar: String, a0Name: String?)
+  /// An automaton's rule over its neighbours and its seed over the cells.
+  case automaton(rule: Expr, radius: Int, seed: Expr?, dims: Int, axes: [String])
+  /// A table's value over the cells.
+  case lattice(expr: Expr, axes: [String])
 
   /// The plan's `type`, as the TypeScript spells it.
   public var type: String {
@@ -76,6 +80,8 @@ public enum CpuPlan: Equatable, Sendable {
     case .sequence: "sequence"
     case .cobweb: "cobweb"
     case .bifurcation: "bifurcation"
+    case .automaton: "automaton"
+    case .lattice: "lattice"
     }
   }
 }
@@ -212,6 +218,10 @@ public func compileCpu(_ classified: Classified) throws -> CpuPlan {
     return .cobweb(f: expr, recVar: variable, a0Name: seedName)
   case .bifurcation(let expr, let variable, let seedName):
     return .bifurcation(expr: expr, recVar: variable, a0Name: seedName)
+  case .automaton(let rule, let radius, let seed, let dims, let axes):
+    return .automaton(rule: rule, radius: radius, seed: seed, dims: dims, axes: axes)
+  case .lattice(let expr, let axes):
+    return .lattice(expr: expr, axes: axes)
   }
 }
 
@@ -291,7 +301,8 @@ public func compileGpu(_ classified: Classified) throws -> GpuPlan {
     return plan(.cobweb(curveField: try glsl(sub(.eq(.var("y"), substVars(expr, [variable: .var("x")]))))))
   case .bifurcation(let expr, let variable, _):
     return plan(.bifurcation(field: try glsl(sub(substVars(expr, [variable: .var("a")])))))
-  case .point, .complexPoint, .curveParametric, .complexPath, .value, .note, .label, .figure, .tuple, .sequence:
+  case .point, .complexPoint, .curveParametric, .complexPath, .value, .note, .label, .figure, .tuple, .sequence,
+    .automaton, .lattice:
     return plan(.none)
   }
 }

@@ -53,4 +53,26 @@ export const DISCRETE_CASES: string[] = [
   'p_{n+1} = (1 - 1.4 p_n[1]^2 + p_n[2], 0.3 p_n[1]); p_0 = (0, 0); s_0 = (); s_{n+1} = push(s_n, n); q_{n+1} = (q_n, 1)',
   'D = (1, 1, 0, 1); step(q, s) = mod(2q + s, 3); q_0 = 0; q_{n+1} = step(q_n, D[n + 1]); N = 2; q_N',
   'f(q) = {q = 0: 1, 0}; a_n = f(n); b_{n+1} = f(b_n); f(2); y = f(x)',
+  'f(q) = {q = 0: 1, 0}; c = f(0); c; g = f(x); g; h(s) = 2 f(s); h(0); (f(0), 1); y < f(x); f(x) y; y = {f(x) > 0: 1}',
+  // Automata: 1D rules, their seeds, what a rule may read.
+  'r = floor(clamp(30, 0, 255)); c_{n+1}[i] = mod(floor(r / 2^(4 c_n[i-1] + 2 c_n[i] + c_n[i+1])), 2)',
+  'c_0[i] = {i < 0: mod(floor(i i 0.618), 2), 0}; c_{n+1}[i] = mod(c_n[i-1] + c_n[i+1], 2); c_0[i] = 1',
+  'm = 2; p_{n+1}[k] = mod(p_n[k-1] + p_n[k], m); p_0[k] = {k = 0: 1, 0}',
+  'c_{n+1}[i] = sum(a=-1..1, c_n[i+a]); d_(n+1)[i] = d_n[i - 2] + d_n[i + 2] + n; e_{n+1}[i] = e_n[i] + t',
+  'c_{n+1}[i] = c_n[2i]; d_{n+1}[i] = d_n; e_{n+1}[i] = i; f_{n+1}[i] = f_n[i] + q; g_{n+1}[n] = g_n[n]',
+  'c_{n+1}[i] = c_n[i-1]; c_{n+1}[i] = c_n[i+1]; c_n = 2; d_0[i] = 1; T[i, j] = 1; T_{n+1}[i] = T_n[i]',
+  'c_0 = [0, 3, 4]; c_{n+1}[i] = mod(c_n[i-1] + c_n[i+1], 2); d_0 = [1]; d_{n+1}[i] = d_n[i]; e_0 = [1, 2]',
+  'c_0[i, j] = 1; c_{n+1}[i] = c_n[i]; d_0[i] = q; d_{n+1}[i] = d_n[i]; e_0 = [0.5]; e_{n+1}[i] = e_n[i]',
+  'k = 3; c_{n+1}[i] = prod(a=0..1, c_n[i-a]) + sum[a=1..2] c_n[i+a] + sum(s=1..k, s) c_n[i]',
+  // Boards: 2D rules.
+  'life(c, s) = {s = 3: 1, s = 4: c, 0}; L_0 = [(0, 1), (1, 2), (2, 0), (2, 1), (2, 2)]; L_{n+1}[i, j] = life(L_n[i, j], sum(a=-1..1, sum(b=-1..1, L_n[i+a, j+b])))',
+  'L_0[i, j] = {-20 < i < 20: {-20 < j < 20: mod(floor(43758.5 fract(sin(12.9898 i + 78.233 j))), 2), 0}, 0}; L_{n+1}[i, j] = mod(L_n[i-1, j] + L_n[i+1, j] + L_n[i, j-1] + L_n[i, j+1], 2)',
+  'L_{n+1}[i, j] = L_n[i, j+1]; M_{n+1}[i, i] = M_n[i, i]; N_{n+1}[i, j] = N_n[i]; P_{n+1}[i, j] = P_n[2i, j]; Q_0[i] = 1; Q_{n+1}[i, j] = Q_n[i, j]',
+  'L_0 = [(0, 0), 1]; L_{n+1}[i, j] = L_n[i, j]; M_0 = [(0.5, 0)]; M_{n+1}[i, j] = M_n[i, j]; a = 2; N_{n+1}[i, j] = a N_n[i, j] + n',
+  // Tables.
+  'n = 6; T[i, j] = {0 <= i < n: {0 <= j < n: mod(i + j, n)}}',
+  'n = 12; T[i, j] = {0 < i < n: {0 < j < n: {gcd(i, n) = 1: {gcd(j, n) = 1: mod(i j, n)}}}}',
+  'T[i, j] = {i > 0: {j > 0: gcd(i, j)}}; U[i, i] = i; V[a, b] = a b + t; W[i, j] = i + q; T[i, j] = 2',
+  'rot(k) = mod(k, 3); flip(k) = floor(k/3); m(i, j) = mod(rot(i) + (-1)^flip(i) rot(j), 3) + 3 mod(flip(i) + flip(j), 2); T[i, j] = {0 <= i < 6: {0 <= j < 6: m(i, j)}}',
+  'T[i, j] = sum(k=1..3, i^k) + j; U[x, y] = x + y; V[i, j] = (i, j); W[i,j]=i; T[i] = 2; a_n = n; a[i, j] = 1',
 ];

@@ -96,7 +96,7 @@ import Testing
   }
 
   @Test func whatIsNotPortedSaysSo() {
-    let rows = ["L = [1, 2, 3]", "z = x^2 + y^2", "X ~ Normal(0, 1)", "T[i, j] = i j", "int[0..1] x dx", "(u, u, u)"]
+    let rows = ["L = [1, 2, 3]", "z = x^2 + y^2", "X ~ Normal(0, 1)", "s_{n+1} = push(s_n, n)", "int[0..1] x dx", "(u, u, u)"]
     for text in rows {
       let row = analyze([text]).rows[0]
       #expect(row.unsupported != nil, "\(text)")
@@ -323,6 +323,13 @@ import Testing
     case "cobweb": return .cobweb(f: try expr("f"), recVar: o["recVar"] as! String, a0Name: o["a0Name"] as? String)
     case "bifurcation":
       return .bifurcation(expr: try expr("expr"), recVar: o["recVar"] as! String, a0Name: o["a0Name"] as? String)
+    case "automaton":
+      return .automaton(
+        rule: try expr("rule"), radius: (o["radius"] as! NSNumber).intValue, seed: try o["seed"].map(decode),
+        dims: (o["dims"] as! NSNumber).intValue, axes: o["axes"] as! [String])
+    case "lattice":
+      if o["rows"] != nil { throw FixtureError(description: "a table of computed rows") }
+      return .lattice(expr: try expr("expr"), axes: o["axes"] as! [String])
     default: throw FixtureError(description: "a \(o["type"]!) plan")
     }
   }

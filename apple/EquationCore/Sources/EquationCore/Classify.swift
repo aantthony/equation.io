@@ -58,6 +58,13 @@ public indirect enum MathObject: Equatable, Sendable {
   /// f) its orbit diagram over x. `variable` is the previous term's name.
   case cobweb(expr: Expr, variable: String, seedName: String?)
   case bifurcation(expr: Expr, variable: String, seedName: String?)
+  /// A cellular automaton (Automaton.swift): `rule` reads the previous
+  /// generation's cells within `radius`; `seed` is generation 0 as an
+  /// expression in the cells. One dimension draws rows over time, two one
+  /// generation of a board. `axes` names the lattice's across and down indices.
+  case automaton(rule: Expr, radius: Int, seed: Expr?, dims: Int, axes: [String])
+  /// A function on the integer lattice, `T[i, j] = …`.
+  case lattice(expr: Expr, axes: [String])
 
   /// The kind as the site's tools name it (`publicKind`).
   public var publicKind: String {
@@ -82,6 +89,8 @@ public indirect enum MathObject: Equatable, Sendable {
     case .sequence: "sequence"
     case .cobweb: "cobweb"
     case .bifurcation: "bifurcation"
+    case .automaton: "automaton"
+    case .lattice: "lattice"
     }
   }
 }

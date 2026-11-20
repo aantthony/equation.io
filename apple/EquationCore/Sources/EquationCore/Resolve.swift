@@ -303,12 +303,11 @@ struct Resolver {
     case .piecewise(let cases, let otherwise):
       for c in cases {
         guard case .eq = c.cond else { continue }
-        // A case testing equality is a lattice row's, or a function body's
-        // for the lattice rows that call it.
-        if opts.inDefinition && !opts.exactConditions {
-          throw Unsupported("a case testing equality in a definition")
-        }
-        if !opts.exactConditions {
+        // A lattice row may test equality, and so may a function body for
+        // the lattice rows that call it (life(c, s) = {s = 3: 1, …}); the
+        // lattice rewrites the case (`exactCases`), and any other row
+        // inlining it fails to compile.
+        if !opts.inDefinition && !opts.exactConditions {
           throw LanguageError(equalityCaseMessage)
         }
       }

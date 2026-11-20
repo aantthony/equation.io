@@ -69,7 +69,7 @@ const PORTED = new Set([
 ]);
 // Geometry (lib/geom.ts): figures and labels; matrices and tensors read out, and matrix fields.
 for (const type of ['polygon', 'label', 'tuple', 'tfield2d']) PORTED.add(type);
-for (const type of ['sequence', 'cobweb', 'bifurcation']) PORTED.add(type);
+for (const type of ['sequence', 'cobweb', 'bifurcation', 'automaton', 'lattice']) PORTED.add(type);
 function slim(plan: { type: string } | undefined): unknown {
   if (!plan) return null;
   if (!PORTED.has(plan.type)) return { type: plan.type, omitted: true };
