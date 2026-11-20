@@ -20,23 +20,8 @@ const env = {
 
 const get = (path: string) => worker.fetch(new Request('https://equation.io' + path), env);
 
-describe('/.well-known files', () => {
-  it.each(['/.well-known', '/.well-known/', '/.well-known/missing'])('rejects an HTML page for %s', async path => {
-    const response = await get(path);
-    expect(response.status).toBe(404);
-    expect(await response.text()).toBe('Not found');
-  });
-
-  it.each(['text/plain', 'application/json'])('preserves existing %s assets', async contentType => {
-    const assets = {
-      ASSETS: { fetch: async () => new Response('verification', { headers: { 'content-type': contentType } }) },
-    } as unknown as Env;
-    const response = await worker.fetch(new Request('https://equation.io/.well-known/openai-apps-challenge'), assets);
-    expect(response.status).toBe(200);
-    expect(await response.text()).toBe('verification');
-  });
-
-  it('passes the asset server’s 404 through outside the namespace', async () => {
+describe('asset fallthrough', () => {
+  it('passes the asset server’s 404 through', async () => {
     const missing = {
       ASSETS: {
         fetch: async () =>

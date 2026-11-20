@@ -89,13 +89,11 @@ const BROWSER = `userAgent_like: "Mozilla/%", AND: [${[
 ]
   .map(p => `{userAgent_notlike: "${p}"}`)
   .join(', ')}]`;
-const PAGES: [string, string][] = [
-  ['/', 'clientRequestPath: "/"'],
-  ['/g/', 'clientRequestPath_like: "/g/%"'],
-  ['/about/', 'clientRequestPath: "/about/"'],
-  ['/privacy/', 'clientRequestPath: "/privacy/"'],
-  ['/terms/', 'clientRequestPath: "/terms/"'],
-];
+const PAGES = ['/', '/g/', '/about/', '/privacy/', '/terms/'];
+// The fixed pages come back in one query, split by path. /g/ gets its own, unsplit, since a path
+// dimension there would make a group per graph and per IP. Two queries, not one per page, keep a
+// run inside the GraphQL rate limiter's budget.
+const FIXED = PAGES.filter(page => page !== '/g/');
 
 /** day → page → IPs, with 'site' the union across pages. */
 const ips = new Map<string, Map<string, Set<string>>>();
@@ -105,13 +103,17 @@ const add = (day: string, page: string, ip: string) => {
   if (!byPage.has(page)) byPage.set(page, new Set());
   byPage.get(page)!.add(ip);
 };
-for (const [page, filter] of PAGES) {
-  for (const g of await adaptive(`clientRequestHTTPMethodName: "GET", ${filter}, ${BROWSER}`, 'date clientIP')) {
-    add(g.dimensions.date, page, g.dimensions.clientIP);
-    add(g.dimensions.date, 'site', g.dimensions.clientIP);
-  }
+const GET = `clientRequestHTTPMethodName: "GET", ${BROWSER}`;
+const fixed = await adaptive(
+  `${GET}, OR: [${FIXED.map(page => `{clientRequestPath: "${page}"}`).join(', ')}]`,
+  'date clientIP clientRequestPath',
+);
+const graphs = await adaptive(`${GET}, clientRequestPath_like: "/g/%"`, 'date clientIP');
+for (const g of [...fixed, ...graphs]) {
+  add(g.dimensions.date, g.dimensions.clientRequestPath ?? '/g/', g.dimensions.clientIP);
+  add(g.dimensions.date, 'site', g.dimensions.clientIP);
 }
-const columns = ['site', ...PAGES.map(([page]) => page)];
+const columns = ['site', ...PAGES];
 console.log(
   `Unique IPs per day (UTC) with a browser user agent, all pages ("site") and each page. Upper bound on people.`,
 );

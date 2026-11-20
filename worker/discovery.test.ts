@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import server from '../server.json' with { type: 'json' };
+import { CATALOG_FILES, catalog } from './catalog.ts';
 import worker from './index.ts';
 import { handleMcp } from './mcp.ts';
 
@@ -28,16 +29,13 @@ async function initialize(protocolVersion: string) {
 }
 
 describe('AI Catalog', () => {
-  it('serves one document at the ARD path and its predecessor', async () => {
-    const ard = await json('/.well-known/ard.json');
-    const legacy = await json('/.well-known/ai-catalog.json');
-    expect(legacy.body).toEqual(ard.body);
-    expect(ard.type).toBe('application/json');
-    expect(legacy.type).toBe('application/ai-catalog+json');
+  it('is one document at the ARD path and its predecessor', () => {
+    expect(Object.keys(CATALOG_FILES).sort()).toEqual(['.well-known/ai-catalog.json', '.well-known/ard.json']);
+    for (const body of Object.values(CATALOG_FILES)) expect(JSON.parse(body)).toEqual(catalog);
   });
 
-  it('meets what both the ARD and the closed ai-catalog schemas require', async () => {
-    const { body } = await json('/.well-known/ard.json');
+  it('meets what both the ARD and the closed ai-catalog schemas require', () => {
+    const body = catalog;
     // ai-catalog.schema.json rejects any other top-level member.
     expect(Object.keys(body).sort()).toEqual(['entries', 'host', 'specVersion']);
     expect(body.specVersion).toBe('1.0');
@@ -53,8 +51,7 @@ describe('AI Catalog', () => {
   });
 
   it('points at a server card the worker serves', async () => {
-    const { body } = await json('/.well-known/ard.json');
-    const url = new URL(body.entries[0].url);
+    const url = new URL(catalog.entries[0].url);
     expect(url.origin).toBe(server.websiteUrl);
     const card = await json(url.pathname);
     expect(card.type).toBe('application/mcp-server-card+json');

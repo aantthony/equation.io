@@ -104,12 +104,7 @@ body {
   overflow: hidden;
   overscroll-behavior: none;
   background: var(--page-bg);
-  font-family:
-    ui-sans-serif,
-    system-ui,
-    -apple-system,
-    'Segoe UI',
-    sans-serif;
+  font-family: ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
 }
 #gl,
 #overlay {

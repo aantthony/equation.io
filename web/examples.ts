@@ -1347,10 +1347,7 @@ export const COVERS: Record<string, string> = {
 
 /** Lowercase, accents dropped: `Thébault` → `thebault`. */
 function fold(s: string): string {
-  return s
-    .normalize('NFKD')
-    .replace(/[̀-ͯ]/g, '')
-    .toLowerCase();
+  return s.normalize('NFKD').replace(/[̀-ͯ]/g, '').toLowerCase();
 }
 
 /** Lowercase ASCII words joined by '-': `moiré` → `moire`, `tan(x)` → `tan-x`. */
