@@ -24,6 +24,18 @@ public indirect enum MathObject: Equatable, Sendable {
   /// A pair in u: the curve it traces as u runs from 0 to 1.
   case curveParametric(coordinates: [Expr])
   case value(expr: Expr)
+  /// `label(point, "text")`: text anchored at a point.
+  case label(coordinates: [Expr], text: String)
+  /// A segment, polyline, vector, polygon, square or hull: its vertices,
+  /// flat, `dimension` numbers each.
+  case figure(form: FigureForm, dimension: Int, vertices: [Expr], over: [Column]?)
+  /// A 2×2 matrix over the plane, row-major: drawn as glyphs, or with
+  /// `streamlines` along its major eigenvector.
+  case tensorField(entries: [Expr], streamlines: Bool)
+  /// A tuple of more than 3 values, or a matrix or tensor (`shape`), read
+  /// out. `length`: how many values a long tuple has, of which `values` are
+  /// the ones shown.
+  case tuple(values: [Expr], shape: [Int]?, length: Int?)
   /// A claim with no x or y in it (`2 + 2 = 4`), or an equation whose sides
   /// agree everywhere (`identity`). `constant`: the row reads like a slider
   /// named e, pi or i, which the readout explains.
@@ -51,6 +63,10 @@ public indirect enum MathObject: Equatable, Sendable {
     case .point: "point"
     case .curveParametric: "pcurve"
     case .value: "value"
+    case .label: "label"
+    case .figure: "polygon"
+    case .tensorField: "tfield2d"
+    case .tuple: "tuple"
     case .note: "note"
     case .complexPoint: "point"
     case .complexPath: "pcurve"
@@ -221,6 +237,9 @@ func holdsEverywhere(_ l: Expr, _ r: Expr) -> Bool {
 /// written into the row here.
 func classify(_ lowered: Expr, defined: Set<String>, fields: [String: Expr]) throws -> Classified {
   var expr = lowered
+  if case .call(STREAMLINES_CALL, let args) = lowered, let inner = args.first {
+    return try streamlined(try classify(inner, defined: defined, fields: fields))
+  }
   if fields.values.contains(where: { if case .ineq = $0 { true } else { false } }),
     let misread = conditionAsValue(expr, fields)
   {
@@ -249,6 +268,7 @@ func classify(_ lowered: Expr, defined: Set<String>, fields: [String: Expr]) thr
   if !fields.isEmpty { expr = substVars(expr, fields) }
   let ode = try matchODE(expr)
   if let ode { expr = .vec(ode) }
+  if let nested = nestedFigure(expr) { throw LanguageError("\(nested)(…) must be the whole expression.") }
 
   let special = specialForm(expr)
   if let nested = nestedSpecial(expr, isRoot: true) {
@@ -301,6 +321,11 @@ func classify(_ lowered: Expr, defined: Set<String>, fields: [String: Expr]) thr
     return Classified(object: object, animated: moving, needs3D: false, params: params)
   }
 
+  // A matrix or tensor on a row of its own.
+  if let tensor = try classifyTensor(expr, hasSpace: hasSpace, hasParam: hasParam, hasZ: vars.contains("z")) {
+    return done(tensor)
+  }
+
   // `t = 3` reads like a constant, but t is time: the row would be a silent
   // claim about the clock. Say so instead of drawing nothing.
   if case .eq(.var("t"), let r) = expr, !freeVars(r).contains("t"), !hasSpace, !hasParam {
@@ -320,6 +345,12 @@ func classify(_ lowered: Expr, defined: Set<String>, fields: [String: Expr]) thr
     return done(.note(expr: expr, variable: false, constant: nil, identity: true))
   }
 
+  if let figure = try classifyFigure(expr, hasSpace: hasSpace, hasParam: hasParam, complex: complexRow) {
+    var classified = done(figure.object)
+    classified.needs3D = figure.needs3D
+    return classified
+  }
+
   if let special, case .call(_, let args) = expr {
     return done(try classifySpecial(special, args, vars))
   }
@@ -333,11 +364,12 @@ func classify(_ lowered: Expr, defined: Set<String>, fields: [String: Expr]) thr
     if complexRow { throw LanguageError("Complex values are not supported in vectors.") }
     // Longer than a point: values at positions, shown as a readout.
     if items.count > 3 {
+      // (Over x, y, u or v the site reads a long tuple as a list of its
+      // values, a family; lists are not ported.)
       if hasSpace || hasParam || items.contains(where: isVec) {
-        throw LanguageError(
-          "A tuple of more than 3 values is a value to read, not a picture: (1, 2, 3, 5, 8).")
+        throw Unsupported("tuples of more than 3 values")
       }
-      throw Unsupported("tuples of more than 3 values")
+      return done(classifyTuple(items))
     }
     if hasSpace || ode != nil {
       if hasParam { throw LanguageError("Vector fields cannot use u or v.") }

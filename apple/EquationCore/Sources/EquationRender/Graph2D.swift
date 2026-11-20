@@ -39,6 +39,7 @@ public struct Graph2D: Equatable, Sendable {
     var scalars: [Scalar2D] = []
     var curves: [Curve2D] = []
     var complexLayers = ComplexLayers()
+    var tfields: [TField2D] = []
     for (index, row) in analysis.rows.enumerated() {
       switch row.view {
       case .grid(let mode)?: grid = Frame2D.Grid(rawValue: mode) ?? .on
@@ -63,12 +64,15 @@ public struct Graph2D: Equatable, Sendable {
         vfields.append(VField2D(fx: fx, fy: fy, color: color, params: gpu.params))
       case .complexField, .fractal2d, .color2d:
         complexLayers.add(gpu, color: color)
+      case .tfield2d(let entries, let streamlines):
+        tfields.append(TField2D(entries: entries, color: color, params: gpu.params, streamlines: streamlines))
       }
     }
     // A vector field's streamlines flow whether or not it reads t.
     if !vfields.isEmpty { animated = true }
     layers = Layers2D(vfields: vfields, ineqs: ineqs, scalars: scalars, curves: curves)
     complexLayers.write(to: &layers)
+    if !tfields.isEmpty { layers.tfields = tfields }
   }
 
   /// The constants' values `time` seconds after the graph opened: what the uniforms read.
@@ -111,6 +115,8 @@ public struct Graph2D: Equatable, Sendable {
           pts.append((try? evaluate(comps[1], scope)) ?? .nan)
         }
         overlay.polylines.append(.init(pts: pts, color: css))
+      case .polygon, .label:
+        _ = drawGeometry(cpu, env, color: color, into: &overlay)
       default:
         break
       }

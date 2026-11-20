@@ -191,7 +191,7 @@ import Testing
     let cls = want["cls"] as? [String: Any]
     check("params", got.classified?.params, cls?["params"] as? [String])
     check("animated", got.classified?.animated, cls?["animated"] as? Bool)
-    if cls?["needs3D"] as? Bool == true { out.append("the site draws this row in 3D") }
+    check("needs3D", got.classified?.needs3D, cls?["needs3D"] as? Bool)
     let cpu = want["cpu"] as? [String: Any]
     check("cpu type", got.cpu?.type, cpu?["type"] as? String)
     if let cpu, let mine = got.cpu, cpu["omitted"] == nil {
@@ -240,6 +240,10 @@ import Testing
         check("gpu space", space, gpu["space"] as? String)
         same("field", field, gpu["field"])
         same("locals", locals, gpu["locals"])
+      case .tfield2d(let entries, let streamlines):
+        sameList("entries", entries, gpu["entries"])
+        check("gpu streamlines", streamlines, gpu["streamlines"] as? Bool ?? false)
+        if gpu["jacobian"] != nil { out.append("gpu: a matrix field on mapped axes") }
       }
     }
     return out
@@ -278,6 +282,23 @@ import Testing
     case "value":
       if o["shade"] != nil { throw FixtureError(description: "an integral's shaded area") }
       return .value(expr: try expr("expr"))
+    case "label":
+      return .label(dim: (o["dim"] as! NSNumber).intValue, coords: try exprs("coords"), text: o["text"] as! String)
+    case "polygon":
+      if o["over"] != nil { throw FixtureError(description: "a packed figure") }
+      return .polygon(
+        dim: (o["dim"] as! NSNumber).intValue, pts: try exprs("pts"), closed: o["closed"] as! Bool,
+        arrow: o["arrow"] as? Bool ?? false, hull: o["hull"] as? Bool ?? false, over: nil)
+    case "tfield2d":
+      if o["jacobian"] != nil { throw FixtureError(description: "a matrix field on mapped axes") }
+      return .tfield2d(entries: try exprs("entries"), streamlines: o["streamlines"] as? Bool ?? false)
+    case "tuple":
+      if o["count"] != nil || o["blades"] != nil || o["flat"] != nil {
+        throw FixtureError(description: "a multiset, a multivector or a flat")
+      }
+      return .tuple(
+        values: try exprs("values"), shape: (o["shape"] as? [NSNumber])?.map(\.intValue),
+        length: (o["length"] as? NSNumber)?.intValue)
     case "note":
       return .note(
         expr: try expr("expr"), variable: o["variable"] as! Bool, constant: o["constant"] as? String,

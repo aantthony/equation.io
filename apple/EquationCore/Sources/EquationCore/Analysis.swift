@@ -394,7 +394,7 @@ public func analyze(_ sources: [String]) -> DocumentAnalysis {
   for (name, e) in built.conditions.entries { fieldEnv[name] = e }
   let fnNames = Set(raw.compactMap { if case .function(let name, _, _) = $0 { name } else { nil } })
   // What parses as an index: the named points (T[2]).
-  let listNames = Set(built.points)
+  let listNames = Set(built.points).union(built.mats.keys).union(built.tensors.keys)
   let valueNames = shadowedFnNames(raw.filter { $0.kind != "fn" }.map(\.name) + Array(tildeNames))
   let documentNames = Set(raw.map(\.name)).union(tildeNames)
   func getFn(_ name: String) throws -> FnDef? {
@@ -513,7 +513,8 @@ public func analyze(_ sources: [String]) -> DocumentAnalysis {
         resolved = cases
       }
       // Expand point arithmetic: a point name A becomes (A_x, A_y).
-      let lowered = try lowerObjects(resolved, comps: comps)
+      let lowered = try lowerObjects(
+        resolved, comps: comps, mats: { built.mats[$0] }, tensors: { name, _ in built.tensors[name] })
       // A real row in u and v alone does not depend on the screen, so the
       // site draws the density of its values, as a random variable's.
       switch resolved {
@@ -609,7 +610,9 @@ public func analyze(_ sources: [String]) -> DocumentAnalysis {
     if row.comment {
       row.kind = "comment (group heading)"
     } else if let d = row.definition {
-      row.kind = "definition (\(d.kind == "const" ? (named ? "point" : "const") : d.kind))"
+      let valued = built.mats.has(d.name) ? "matrix" : built.tensors.has(d.name) ? "tensor" : nil
+      let constant = valued ?? (named ? "point" : "const")
+      row.kind = "definition (\(d.kind == "const" ? constant : d.kind))"
     } else if let view = row.view {
       row.kind =
         switch view {

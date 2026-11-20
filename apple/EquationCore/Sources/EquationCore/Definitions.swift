@@ -10,8 +10,9 @@
 /// - `within = r < 2` names a condition, read in braces: `{within: 1}`.
 ///
 /// - `a = e^(i pi/3)` names a complex number, written in where it is read.
+/// - `M = ((1, 2), (3, 4))` names a matrix, expanded where it is used.
 ///
-/// States (`a' = …`), data files, lists, intervals and matrices are not
+/// States (`a' = …`), data files, lists, intervals and multivectors are not
 /// ported: their rows are reported as not supported yet, and so is every row
 /// that names one.
 public enum Definition: Equatable, Sendable {
@@ -444,6 +445,11 @@ struct BuiltDefs {
   /// Named points and how many components each has.
   var points: [String] = []
   var pointDims: [String: Int] = [:]
+  /// Named matrices (2×2 and 3×3) and tensors of any other shape: their
+  /// entries, with those that move with constants and t held as hidden
+  /// constants `M#k` (see `hoist`).
+  var mats = OrderedMap<Mat>()
+  var tensors = OrderedMap<Tensor>()
   /// Per-definition errors by key; failed definitions are not in the stores.
   var errors = OrderedMap<String>()
   /// Definitions the port cannot read yet, by key, with what stopped it.
@@ -490,7 +496,7 @@ func buildDefs(_ raw: [Definition], skip: Set<String>) -> BuiltDefs {
   func parse(_ d: Definition) throws -> Expr {
     if let p = parsed[d.key] { return p }
     var values = valueNames
-    var names = Set(defs.pointDims.keys)
+    var names = Set(defs.pointDims.keys).union(defs.mats.keys).union(defs.tensors.keys)
     if case .function(_, let params, _) = d {
       // A function's parameters are values in its body, and index too.
       values.formUnion(shadowedFnNames(params))
@@ -526,6 +532,31 @@ func buildDefs(_ raw: [Definition], skip: Set<String>) -> BuiltDefs {
     let fn = FnDef(params: params, body: body)
     defs.fns[name] = fn
     return fn
+  }
+
+  // A named value's coefficients as constants of their own (lib/defs.ts
+  // `hoist`): each entry of a matrix that depends only on constants and t is
+  // stored as a hidden constant `M#k`, evaluated once per frame like a named
+  // point's components, and the value written into rows refers to it. A
+  // number or a single name stays as it is, as does an entry of numbers alone.
+  var hidden = 0
+  func hoist(_ owner: String, _ e: Expr) -> Expr {
+    switch e {
+    case .num, .var: return e
+    default: break
+    }
+    func plain(_ n: Expr) -> Bool {
+      switch n {
+      case .list, .data, .lazy, .range: false
+      default: childrenOf(n).allSatisfy(plain)
+      }
+    }
+    let names = freeVars(e)
+    guard plain(e), !names.isEmpty, names.allSatisfy({ $0 == "t" || defs.consts.has($0) }) else { return e }
+    let name = "\(owner)#\(hidden)"
+    hidden += 1
+    defs.consts[name] = e
+    return .var(name)
   }
 
   // Named conditions (`within = r < R`), found before anything else resolves:
@@ -565,7 +596,29 @@ func buildDefs(_ raw: [Definition], skip: Set<String>) -> BuiltDefs {
         // Lowering expands point arithmetic; a pair result names a point.
         // Point-ness flows in definition order, so `C = B + D` needs B and D
         // defined above (a stray point name below is reported after the loop).
-        let e = try lowerObjects(resolved, comps: comps)
+        // (`L = line(A, B)` names the line as a value of projective geometry.)
+        if case .call("line", _) = resolved { throw Unsupported("lines and planes of projective geometry") }
+        try refuseUnportedGeometry(resolved)
+        // `M = ((a, b), (c, d))`, `R = e^(a J)`, `N = 2 M`: a tuple of rows,
+        // or matrix algebra, names a matrix.
+        let getMat: GetMat = { defs.mats[$0] }
+        let getTensor: GetTensor = { tensor, _ in defs.tensors[tensor] }
+        if let computed = try lowerMatrix(resolved, comps: comps, getMat: getMat, getTensor: getTensor) {
+          defs.mats[name] = computed.map { row in row.map { hoist(name, $0) } }
+          continue
+        }
+        // `T = e_x ⊗ e_y ⊗ e_z`: a tensor of any other shape.
+        if let tensor = try lowerTensorValue(resolved, comps: comps, getMat: getMat, getTensor: getTensor) {
+          defs.tensors[name] = Tensor(shape: tensor.shape, data: tensor.data.map { hoist(name, $0) })
+          continue
+        }
+        let e = try lowerObjects(resolved, comps: comps, mats: getMat, tensors: getTensor)
+        // A tuple of computed points that is square, `A = (2 P, Q + R)`:
+        // one tensor, named as a matrix when it is square.
+        if let reduced = tensorOfNode(e), reduced.shape.count >= 2 {
+          if let m = toMat(reduced) { defs.mats[name] = m } else { defs.tensors[name] = reduced }
+          continue
+        }
         // `within = r < R`, or another name for one: a condition.
         var alias: Expr?
         if case .var(let other) = e { alias = defs.conditions[other] }
@@ -684,6 +737,8 @@ func buildDefs(_ raw: [Definition], skip: Set<String>) -> BuiltDefs {
       constNames.insert(name)
     }
   }
+  // A named value's hidden coefficients (M#3) are constants by construction.
+  for name in defs.consts.keys where name.utf16.contains(unit("#")) { constNames.insert(name) }
   // Constant point rows resolve to their component constants; a vector
   // field's components are fields, not uniforms.
   for p in defs.points {
@@ -831,6 +886,11 @@ func buildDefs(_ raw: [Definition], skip: Set<String>) -> BuiltDefs {
   // Trial-evaluate to surface cycles and unsupported calls at definition time.
   func check(_ name: String, _ visiting: inout Set<String>) throws {
     guard let e = defs.consts[name] else {
+      // A surviving matrix or tensor name means it was defined below its
+      // use, so lowering saw it as a plain scalar.
+      if let kind = defs.mats.has(name) ? "a matrix" : defs.tensors.has(name) ? "a tensor" : nil {
+        throw LanguageError("\(name) is \(kind) — move its definition above where it is used.")
+      }
       throw LanguageError(
         defs.errors.has(name) ? "\(name) has an error in its definition." : "\(name) is not defined.")
     }
@@ -887,7 +947,7 @@ func buildDefs(_ raw: [Definition], skip: Set<String>) -> BuiltDefs {
     func present(_ name: String) -> Bool {
       defs.consts.has(name) || defs.fields.has(name) || defs.conditions.has(name) || defs.points.contains(name)
         || defs.complexes.has(name)
-        || defs.fns[name] != nil || defs.unsupported[name] != nil
+        || defs.fns[name] != nil || defs.unsupported[name] != nil || defs.mats.has(name) || defs.tensors.has(name)
     }
     func references(_ expr: Expr) -> NameSet {
       var names = freeVars(expr)
@@ -920,6 +980,8 @@ func buildDefs(_ raw: [Definition], skip: Set<String>) -> BuiltDefs {
       defs.conditions[name] = nil
       defs.fns[name] = nil
       defs.complexes[name] = nil
+      defs.mats[name] = nil
+      defs.tensors[name] = nil
     }
     func remove(_ name: String) {
       let owner = ownerOf(name)
@@ -939,6 +1001,9 @@ func buildDefs(_ raw: [Definition], skip: Set<String>) -> BuiltDefs {
       candidates += defs.complexes.entries.map { ($0.key, $0.value, []) }
       candidates += defs.conditions.entries.map { ($0.key, $0.value, []) }
       candidates += defs.fns.entries.map { ($0.key, $0.value.body, $0.value.params) }
+      // (A matrix's entries are checked one by one, to the same end.)
+      for (name, matrix) in defs.mats.entries { candidates += matrix.flatMap { $0 }.map { (name, $0, []) } }
+      for (name, tensor) in defs.tensors.entries { candidates += tensor.data.map { (name, $0, []) } }
       for (name, expr, params) in candidates where present(name) {
         var refs = sourceRefs(name)
         for ref in references(expr) { refs.insert(ref) }

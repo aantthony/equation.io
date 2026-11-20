@@ -66,6 +66,8 @@ const PORTED = new Set([
   'implicit2d', 'ineq2d', 'scalar2d', 'point', 'pcurve', 'vfield2d', 'value', 'note', 'none',
   'complex2d', 'domain2d', 'conformal2d', 'fractal2d', 'rgb2d', 'hsl2d', 'oklch2d',
 ]);
+// Geometry (lib/geom.ts): figures and labels; matrices and tensors read out, and matrix fields.
+for (const type of ['polygon', 'label', 'tuple', 'tfield2d']) PORTED.add(type);
 function slim(plan: { type: string } | undefined): unknown {
   if (!plan) return null;
   if (!PORTED.has(plan.type)) return { type: plan.type, omitted: true };
@@ -273,6 +275,69 @@ const CASES: string[] = [
   // A hand-written gated series is the Fourier loop a reconstruction compiles to.
   'N = 4; y = 1 + {N >= 1: 2 cos(3 x), 0} + {N >= 2: 0.5 sin(6 x), 0} + {N >= 3: cos(9 x) + sin(9 x), 0} + {N >= 4: 0.25 cos(12 x), 0}',
   'N = 4; y = {N >= 1: 2 cos(x), 0} + {N >= 2: sin(2 x), 0} + {N >= 3: cos(3 x), 0} + {N >= 4: cos(4 x), 0}; y = x + {N >= 1: 2 cos(x), 0} + {N >= 2: sin(2 x), 0} + {N >= 3: cos(3 x), 0} + {N >= 4: cos(4 x), 0}',
+  // Geometry (lib/geom.ts): figures.
+  'A = (0, 0); B = (3, 1); C = (1, 2); segment(A, B); polyline(A, B, C); polygon(A, B, C); vector(A, B); vector(B)',
+  'A = (0, 0); B = (3, 1); square(A, B); hull(A, B, (1, 2), (1, 0.5)); line(A, B); circle(A, 2); circle((1, 2), B_x)',
+  'segment((0, 0), (1, 1)); segment(0, 0, 1, 1); polygon((0,0), (1,0), (0,1)); polyline(0, 0, 1, 1, 2, 0); vector(1, 2)',
+  'a = 2; segment((0, 0), (a, a^2)); polygon((0, 0), (cos(t), sin(t)), (a, 0)); vector((a, 1), (1, a)); hull((0, 0), (a, 0), (0, a))',
+  'segment((0, 0)); segment((0, 0), (1, 1), (2, 2)); polygon((0, 0), (1, 1)); polyline((0, 0)); hull((0, 0), (1, 1)); vector()',
+  'vector(1, 2, 3); vector((0, 0), (1, 1), (2, 2)); square((0, 0)); line((0, 0)); circle((0, 0)); circle(1); circle((0, 0), (1, 1))',
+  'segment((0, 0), (x, 1)); polygon((0, 0), (u, 1), (1, 1)); segment((0, 0), (1, 2, 3)); segment(1, (2, 3)); circle((1, 2, 3), 1)',
+  'segment((0, 0, 0), (1, 1, 1)); polygon((0, 0, 0), (1, 0, 0), (0, 1, 0)); vector((1, 2, 3)); hull((0,0,0), (1,0,0), (0,1,0), (0,0,1))',
+  'P = (1, 2, 3); Q = (0, 0, 1); segment(P, Q); polyline(P, Q, (0, 0, 0)); square(P, Q); line((0, 0, 0), (1, 1)); vector(P, Q)',
+  '1 + segment((0, 0), (1, 1)); y = circle((0, 0), 1); (segment((0, 0), (1, 1)), 1); S = segment((0, 0), (1, 1)); S; c = circle((0, 0), 1); c',
+  'A = (1, 2); L = line(A, (0, 0)); L; y = line(A, (0, 0)); line(A, (0, 0)) = 1; f(p, q) = segment(p, q); f(A, (0, 0))',
+  // A transformed figure is the figure of the transformed points; a tuple of points is its points.
+  'A = (0, 0); B = (3, 1); C = (1, 2); polygon(A, B, C) + (1, 0); 2 segment(A, B); -polygon(A, B, C); segment(A, B)/2; (1, 1) - segment(A, B)',
+  'A = (0, 0); B = (3, 1); C = (1, 2); rotate(polygon(A, B, C), t); rotate(hull(A, B, C), 1, C); 2 rotate(segment(A, B), 0.5) + (1, 1); vector(B) + A',
+  'A = (0, 0); B = (3, 1); C = (1, 2); segment(A, B) + segment(B, C); segment(A, B)^2; 2/segment(A, B); 1 + segment(A, B); segment(A, B) + 1; vector(A, B) + C',
+  'A = (0, 0); B = (3, 1); C = (1, 2); polygon((A, B, C)); polyline(((0, 0), (1, 1), (2, 0))); hull((A, B, C, (2, 2))); polyline((A, B)); polygon((A, 1)); segment((A, B))',
+  'A = (0, 0); B = (3, 1); C = (1, 2); S = polygon(A, B, C) + (1, 0); S; T = polygon((A, B, C)); sin(segment(A, B)); rotate(1, segment(A, B)); polygon((A, B)) + (1, 1)',
+  'P = (0, 0, 0); Q = (1, 0, 0); R = (0, 1, 0); rotate(polygon(P, Q, R), t); rotate(hull(P, Q, R, (0, 0, 1)), t, (1, 1, 1)); polygon(P, Q, R) + (0, 0, 1); 2 segment(P, Q)',
+  // Point functions.
+  'A = (1, 2); B = (3, -1); dot(A, B); A · B; cross(A, B); A × B; midpoint(A, B); perp(A); unit(B); |A|; abs(A - B); |(3, 4)|',
+  'A = (1, 2); B = (3, -1); distance(A, B); distance(A, (0, 0)); distance((0, 0), (3, 4)); distance(0, 0, 3, 4); angle(A, (0, 0), B); angle(A, B)',
+  'A = (1, 2, 2); B = (0, 1, 0); dot(A, B); cross(A, B); |A|; distance(A, B); angle(A, B); angle(A, (0, 0, 0), B); unit(A); midpoint(A, B); perp(A)',
+  'A = (1, 2); B = (1, 2, 3); dot(A, B); cross(A); cross(A, B); midpoint(A); perp(A, A); unit(1); dot(1, 2, 3); distance(A); distance(A, B); angle(A)',
+  'A = (1, 2); B = (1, 2, 3); angle(A, B); angle(A, A, A, A); dot(A, 1); abs(A, A); abs(1, 2, 3); sin(A); max(A, 1); distance(1, 2, 3)',
+  'A = (1, 2); a = 0.5; rotate(A, a); rotate(A, a, (1, 1)); rotate((1, 0), pi/2); rotate(A, t); rotate(A); rotate(A, a, 1); rotate(1, 2, 3, 4, 5, 6)',
+  'P = (1, 2, 3); a = 0.5; rotate(P, a); rotate(P, a, (0, 1, 0)); rotate(P, a, (1, 1, 1)); n = (0, a, 1); rotate(P, t, n); rotate(P, a, (0, 0, 0))',
+  'A = (1, 2); B = (3, -1); M = midpoint(A, B); M; N = perp(B - A) + M; N; U = unit(B - A); segment(M, N); d = distance(A, B); d; d + 1',
+  'A = (1, 2); B = (3, -1); R = rotate(B, t, A); R; segment(A, R); th = angle(B, A, R); th; C = A + 2 unit(B - A); circle(C, |A - B|/2)',
+  'A = (1, 2); y = dot((x, y), A); dot((x, y), (x, y)) = 4; distance((x, y), A) < 2; |(x, y) - A| = 1; angle((x, y), A) = 1; y = |A| x',
+  's = (x, y); A = (1, 2); dot(s, s) = 1; |s - A| = 2; cross(s, A); perp(s); unit(s); (x, y) · A; distance(s, A) = distance(s, (0, 0))',
+  // Points through functions: f(P), p.x of computed points.
+  'f(a, b) = a + b; A = (1, 2); B = (3, 4); f(A); f(A + B); f(2 A); f(midpoint(A, B)); f(perp(A)); f(dot(A, B)); f(A, B)',
+  'f(a, b) = a b; g(a, b, c) = a + b + c; A = (1, 2); P = (1, 2, 3); f(P); g(A); g(P); g(cross(P, P)); f(1); f(A_x); y = f(A + (x, 0))',
+  'h(p) = p.x + p.y; A = (1, 2); B = (3, 4); h(A + B); h(2 A); h(midpoint(A, B)); h(unit(A)); h(3); h(A.x); k(p) = p.z; k(A + B); k((1, 2, 3) + (1, 1, 1))',
+  'd(p, q) = |p - q|; m(p, q) = (p + q)/2; A = (1, 2); B = (3, 4); m(A, B); |m(A, B)|; segment(A, m(A, B)); w(p) = (p.y, p.x); w(A + B); w(A)',
+  // Labels.
+  'A = (1, 2); label(A, "vertex"); label((1, 2), "peak"); label((cos(t), sin(t)), "moving"); label(A + (1, 0), "a \\"b\\""); label((1, 2, 3), "up")',
+  'A = (1, 2); label(A); label("a", A); label(A, "a", "b"); label((x, 1), "x"); label(1, "one"); label((u, 1), "u"); c = label(A, "x"); 1 + label(A, "y")',
+  // Matrices (lib/mat.ts): definitions, algebra, det, trace, solve, the matvec.
+  'M = ((1, 2), (3, 4)); M; det(M); trace(M); M (1, 1); M (x, y); y = det(M) x; solve(M, (1, 2)); solve(M, 1, 2); transpose(M); M^-1; M^2; M M',
+  'a = 2; M = ((a, 1), (0, a t)); M; det(M); N = 2 M; N; N (1, 0); M + N; M - N; M N; -M; M/2; a M; M a; M^0; M^3; M^9; M^0.5; M + 1; 1/M; M/M',
+  'J = ((0, -1), (1, 0)); a = 0.5; R = e^(a J); R; R (1, 0); e^(t J) (1, 0); exp(a J) (x, y); (e^(a J)) (1, 2); segment((0, 0), R (2, 0)); 2^J; e^J',
+  'A = ((1, 2), (0, 1)); e^(t A) (1, 1); e^A; exp(A) (1, 0); B = ((2, 0), (0, 3)); e^(t B) (x, y); S = ((0, 1), (1, 0)); e^S (1, 2)',
+  'M = ((1, 2, 3), (0, 1, 4), (5, 6, 0)); M; det(M); trace(M); M (1, 0, 0); solve(M, (1, 2, 3)); M^-1; transpose(M) (1, 1, 1); M (1, 2); M^2 (1, 0, 0)',
+  'n = (0, 0, 1); K = cross(n); K; e^(t K) (1, 0, 0); a = 1; e^(a cross((1, 1, 1))) (1, 0, 0); cross((1, 2)); e^(a cross(n)); cross(n) (0, 1, 0); W = ((1, 2, 3), (4, 5, 6), (7, 8, 9)); e^W',
+  'A = (1, 2); B = (3, 4); M = (A, B); M; det(M); M (1, 1); (A, B); (A, B) (1, 1); det((A, B)); det(((1, 2), (3, 4))); ((1, 2), (3, 4)) (1, 1); (A, 1)',
+  'M = ((1, 2), (3, 4)); M + (1, 1); (1, 1) - M; M + (1, 2, 3); M (1, 2, 3); (1, 2) M; sin(M); M; M < 1; y = M; M = 2; {x > 0: M}; f(v) = M v; f((1, 2))',
+  'M = ((1, 2), (3, 4)); det(M, M); det(); det(2); trace(1); solve(M); solve(M, (1, 2, 3)); solve(M, 1); solve(2, (1, 2)); transpose(M) (1, 0); transpose(2); transpose(M, M)',
+  'N = M + ((1, 0), (0, 1)); M = ((1, 2), (3, 4)); N; d1 = det(M); d1; d1 + 1; v = M (1, 2); v; w = solve(M, v); w; segment(v, w); T = transpose(M); T',
+  'M = ((x, y), (y, -x)); M; M (1, 0); det(M) = 1; streamlines(M); streamlines(((x, 1), (1, y))); a = 2; ((a x, 0), (0, y)); ((1, x), (0, 1)) + ((1, 0), (0, 1))',
+  'streamlines(); streamlines(1); streamlines(((1, 2), (3, 4))); 1 + streamlines(((x, y), (y, x))); ((x, y, 0), (0, 1, 0), (0, 0, 1)); ((u, 0), (0, 1)); ((x, z), (0, 1))',
+  'M = ((1, 2), (3, 4)); polygon(M); a = 0.3; R = e^(a J); J = ((0, -1), (1, 0)); R polygon((0, 0), (1, 0), (0, 1)); M segment((0, 0), (1, 1)); hull(((0, 0, 0), (1, 0, 0), (0, 1, 0)))',
+  'J = ((0, -1), (1, 0)); a = 0.3; R = e^(a J); R polygon((0, 0), (1, 0), (0, 1)); 2 R segment((0, 0), (1, 1)); R (R (1, 0)); R^2 (1, 0); P = R (1, 0); P; f(p, q) = p + q; f(R (1, 0)); f(M)',
+  // Tensors (lib/tensor.ts): ⊗, ∧, contract, shapes that are no matrix.
+  'a = (1, 2); b = (3, 4); a ⊗ b; outer(a, b); a ∧ b; wedge(a, b); contract(a ⊗ b, 1, 2); T = a ⊗ b; T; T (1, 0); det(T); (a ⊗ b) (1, 1); a ⊗ b ⊗ a',
+  'T = ((1, 2, 3), (4, 5, 6)); T; T (1, 0, 0); (1, 2) T; T + T; 2 T; T/2; -T; T T; contract(T, 1, 2); R = ((1, 2, 3, 4), (5, 6, 7, 8)); R; R + T',
+  'u = (1, 0, 0); v = (0, 1, 0); w = (0, 0, 1); u ∧ v; u ∧ v ∧ w; V = u ∧ v ∧ w; V; contract(u ⊗ v, 1, 2); outer(u); contract(u ⊗ v); contract(u ⊗ v, 1, 1); contract(u ⊗ v, 1, 5); contract(u, 1, 2)',
+  'n = (0.6, 0.8); I = ((1, 0), (0, 1)); H = I - 2 n ⊗ n; H; H (1, 0); det(H); n ⊗ n; (n ⊗ n) n; ((1, 2), (3, 4, 5)); (1, 2, 3, 4) ⊗ (1, 2); a = 2; a ∧ n; n ∧ a',
+  '(1, 2, 3, 4); (1, 2, 3, 4, 5, 6, 7, 8, 9, 10); a = 2; (a, a^2, a^3, sqrt(a)); (1, 2, 3, x); (t, 1, 2, 3); ((1, 2, 3, 4), (5, 6, 7, 8)); ((1, 2), (3, 4), (5, 6))',
+  // What geometry leaves alone: multivectors, projective geometry.
+  'A = (1, 2); B = (3, 4); (A, B); cross((0, 0, 1)); det(((1, 2), (3, 4))); ((1, 2), (3, 4)) (1, 1); join(A, B); meet(line(A, B), line(A, (0, 0)))',
+  'A = (1, 2); rotate(A, quat(1, 0, 0, 0)); gp(A, A); A ⟑ A; distance(A, line(A, (0, 0))); outer(A, A); A ∧ A; transpose(((1, 2), (3, 4)))',
 ];
 
 /** Small documents written at random from the ported core's own words, so

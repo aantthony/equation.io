@@ -33,6 +33,16 @@ public enum CpuPlan: Equatable, Sendable {
   case pcurve(dim: Int, comps: [Expr], d1: [Expr]?, d2: [Expr]?, d3: [Expr]?)
   case vfield2d(comps: [Expr])
   case value(expr: Expr)
+  case label(dim: Int, coords: [Expr], text: String)
+  /// A figure: `pts` flat, or with `over` one vertex template run over the
+  /// columns. `arrow`: a head at the last vertex; `hull`: the convex hull of
+  /// the points is what is drawn.
+  case polygon(dim: Int, pts: [Expr], closed: Bool, arrow: Bool, hull: Bool, over: [Column]?)
+  /// A 2×2 matrix field's entries, row-major.
+  case tfield2d(entries: [Expr], streamlines: Bool)
+  /// Values read out: a long tuple's (`length` of them in all), or a
+  /// matrix's or tensor's, nested by `shape`.
+  case tuple(values: [Expr], shape: [Int]?, length: Int?)
   case note(expr: Expr, variable: Bool, constant: String?, identity: Bool)
   /// Drawn per pixel on the GPU, like the three below: the complex expression itself.
   case complexField(form: ComplexForm, expr: Expr)
@@ -49,6 +59,10 @@ public enum CpuPlan: Equatable, Sendable {
     case .pcurve: "pcurve"
     case .vfield2d: "vfield2d"
     case .value: "value"
+    case .label: "label"
+    case .polygon: "polygon"
+    case .tfield2d: "tfield2d"
+    case .tuple: "tuple"
     case .note: "note"
     case .complexField(let form, _): form.planType
     case .fractal2d: "fractal2d"
@@ -86,6 +100,8 @@ public struct GpuPlan: Equatable, Sendable {
     /// `field` is a vec4 of the channels and opacity, read after the shared
     /// calculations `locals` declares.
     case color2d(space: String, field: String, locals: String)
+    /// A 2×2 matrix field's entries, row-major, each in floats x, y and t.
+    case tfield2d(entries: [String], streamlines: Bool)
   }
 
   public var type: String {
@@ -98,6 +114,7 @@ public struct GpuPlan: Equatable, Sendable {
     case .complexField(let form, _): form.planType
     case .fractal2d: "fractal2d"
     case .color2d(let space, _, _): "\(space)2d"
+    case .tfield2d: "tfield2d"
     }
   }
 }
@@ -157,6 +174,14 @@ public func compileCpu(_ classified: Classified) throws -> CpuPlan {
     return pcurve([re, im])
   case .value(let expr):
     return .value(expr: try real(expr))
+  case .label(let coordinates, let text):
+    return .label(dim: coordinates.count, coords: try coordinates.map(real), text: text)
+  case .figure(let form, let dimension, let vertices, let over):
+    return compileFigure(form: form, dimension: dimension, vertices: vertices, over: over)
+  case .tensorField(let entries, let streamlines):
+    return .tfield2d(entries: try entries.map(real), streamlines: streamlines)
+  case .tuple(let values, let shape, let length):
+    return .tuple(values: try values.map(real), shape: shape, length: length)
   case .note(let expr, let variable, let constant, let identity):
     return .note(expr: expr, variable: variable, constant: constant, identity: identity)
   // Like domain coloring, these expressions are rendered per pixel on the GPU.
@@ -239,7 +264,9 @@ public func compileGpu(_ classified: Classified) throws -> GpuPlan {
         step: compiled.type == .complex ? compiled.code : "vec2(\(compiled.code), 0.0)", seed: seed, maxIter: maxIter))
   case .complexField(let form, let expr):
     return plan(.complexField(form: form, field: try scalar(expr)))
-  case .point, .complexPoint, .curveParametric, .complexPath, .value, .note:
+  case .tensorField(let entries, let streamlines):
+    return plan(.tfield2d(entries: try entries.map { try glsl(sub($0)) }, streamlines: streamlines))
+  case .point, .complexPoint, .curveParametric, .complexPath, .value, .note, .label, .figure, .tuple:
     return plan(.none)
   }
 }
@@ -312,6 +339,8 @@ public func plotReadout(_ plan: CpuPlan, _ env: [String: Double]) throws -> Stri
     return valueReadout(try evaluate(expr, env))
   case .note(let expr, let variable, let constant, let identity):
     return try comparisonReadout(expr, variable: variable, constant: constant, identity: identity, env)
+  case .tuple(let values, let shape, let length):
+    return try tupleReadout(values, shape: shape, length: length, env)
   default:
     return nil
   }

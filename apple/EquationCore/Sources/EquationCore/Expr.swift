@@ -7,7 +7,7 @@
 /// TypeScript hangs on a node besides (`axes` and `origin`, a list's identity
 /// while lists lower) is not carried: an enum's cases have no room for it,
 /// and `exprKey` leaves it out.
-public indirect enum Expr: Equatable, Sendable {
+public indirect enum Expr: Equatable, Hashable, Sendable {
   case num(Double)
   case `var`(String)
   case bin(BinOp, Expr, Expr, glyph: ProductGlyph? = nil)
@@ -61,7 +61,7 @@ public indirect enum Expr: Equatable, Sendable {
   /// no case holds and there is no default.
   case loop(params: [String], seeds: [Expr], body: Expr, limit: Int)
 
-  public struct Case: Equatable, Sendable {
+  public struct Case: Equatable, Hashable, Sendable {
     public var cond: Expr
     public var value: Expr
     /// A condition written without a value (`{x > 0, …}`), whose value is 1.
@@ -132,7 +132,7 @@ public enum FigureForm: String, Sendable {
 /// `Column`): `name` is the variable its template reads, bound to values[k]
 /// for element k. Names start with '@', so they never collide with anything
 /// a row can write.
-public struct Column: Equatable, Sendable {
+public struct Column: Equatable, Hashable, Sendable {
   public var name: String
   public var values: [Double]
 
