@@ -84,6 +84,9 @@ public indirect enum MathObject: Equatable, Sendable {
   case distribution(form: DistributionForm, rv: String, mass: Expr? = nil)
   /// A `P(…)` row with no closed-form region: its event, and the variable whose law it shades.
   case probability(body: Expr, shade: ProbShade?)
+  /// Where states go over [from, to], integrated ahead of time (Orbit.swift):
+  /// each path a point's coordinates, or with `series` one value drawn against t.
+  case orbit(paths: [[Expr]], series: Bool, from: Expr, to: Expr)
 
   /// The kind as the site's tools name it (`publicKind`).
   public var publicKind: String {
@@ -117,6 +120,7 @@ public indirect enum MathObject: Equatable, Sendable {
     case .lattice: "lattice"
     case .distribution(let form, _, _): form.rawValue
     case .probability: "prob"
+    case .orbit: "orbit"
     }
   }
 }

@@ -41,7 +41,7 @@ import { sliderBounds, sliderForm, sliderValue, writeSlider } from '../../lib/sl
 import { keepNote, noteStart, splitStatements } from '../../lib/statements.ts';
 import { EXAMPLES } from '../../web/examples.ts';
 import { DISCRETE_CASES } from './cases-discrete.ts';
-import { PANEL_CASES, recordGridFields } from './cases-panels.ts';
+import { PANEL_CASES, recordGridFields, recordStates } from './cases-panels.ts';
 
 const fixtures = new URL('../EquationCore/Tests/EquationCoreTests/Fixtures/', import.meta.url);
 
@@ -69,6 +69,7 @@ const fmtNum = (v: number) => String(parseFloat(v.toPrecision(6)));
 const PORTED = new Set([
   'implicit2d', 'ineq2d', 'scalar2d', 'point', 'pcurve', 'vfield2d', 'value', 'note', 'none',
   'complex2d', 'domain2d', 'conformal2d', 'fractal2d', 'rgb2d', 'hsl2d', 'oklch2d',
+  'orbit',
 ]);
 // Geometry (lib/geom.ts): figures and labels; matrices and tensors read out, and matrix fields.
 for (const type of ['polygon', 'label', 'tuple', 'tfield2d']) PORTED.add(type);
@@ -657,6 +658,7 @@ const recorded = docs.map(({ name, rows }) => {
     rows,
     env: analysis.constEnv,
     gridFields: recordGridFields(analysis),
+    states: recordStates(analysis),
     results: analysis.rows.map((row, i) => {
       const def = row.def;
       // web/main.ts sliderOf, sliderRange and moveSlider, without the DOM.

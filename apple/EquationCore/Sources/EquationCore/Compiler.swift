@@ -76,6 +76,8 @@ public enum CpuPlan: Equatable, Sendable {
   case expect(rv: String)
   /// A `P(…)` row: its event, and the variable whose law it shades.
   case prob(body: Expr, shade: ProbShade?)
+  /// States' paths over a time range (Orbit.swift); `dim` 2 for a series against t.
+  case orbit(dim: Int, paths: [[Expr]], series: Bool, from: Expr, to: Expr)
 
   /// The plan's `type`, as the TypeScript spells it.
   public var type: String {
@@ -111,6 +113,7 @@ public enum CpuPlan: Equatable, Sendable {
     case .pmf: "pmf"
     case .expect: "expect"
     case .prob: "prob"
+    case .orbit: "orbit"
     }
   }
 }
@@ -274,6 +277,8 @@ public func compileCpu(_ classified: Classified) throws -> CpuPlan {
     }
   case .probability(let body, let shade):
     return .prob(body: body, shade: shade)
+  case .orbit(let paths, let series, let from, let to):
+    return .orbit(dim: series ? 2 : paths.first?.count ?? 2, paths: paths, series: series, from: from, to: to)
   }
 }
 
@@ -358,7 +363,7 @@ public func compileGpu(_ classified: Classified) throws -> GpuPlan {
   case .bifurcation(let expr, let variable, _):
     return plan(.bifurcation(field: try glsl(sub(substVars(expr, [variable: .var("a")])))))
   case .point, .complexPoint, .curveParametric, .complexPath, .value, .note, .label, .figure, .tuple, .sequence,
-    .automaton, .lattice, .curveTube, .intersection, .system, .distribution, .probability:
+    .automaton, .lattice, .curveTube, .intersection, .system, .distribution, .probability, .orbit:
     return plan(.none)
   }
 }

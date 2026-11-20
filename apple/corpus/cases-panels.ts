@@ -5,7 +5,10 @@
  */
 import type { Analysis } from '../../lib/analysis.ts';
 import { compileGridCpu, compileGridGpu } from '../../lib/compiler.ts';
+import { evaluate } from '../../lib/expr.ts';
+import { orbitInput, traceOrbit } from '../../lib/orbit.ts';
 import { panelIndices } from '../../lib/panels.ts';
+import { advanceState, initialState } from '../../lib/state.ts';
 
 /** A document's coordinate fields as web/main.ts compiles them (reconcile),
  *  each with the panel its definition is in (gridFieldPanels). */
@@ -22,6 +25,50 @@ export function recordGridFields(analysis: Analysis): unknown[] {
       return { name: spec.name, error: (err as Error).message };
     }
   });
+}
+
+const text = (v: number) => (Number.isSafeInteger(v) ? v : String(v));
+
+/**
+ * A document's state system as the site runs it: where each state starts,
+ * where a run stepped frame by frame (60 a second, as web/main.ts
+ * currentConstEnv steps it) has them after half a second and after two, and
+ * each orbit row's polyline, thinned to a few of its points (lib/orbit.ts).
+ */
+export function recordStates(analysis: Analysis): unknown {
+  const sys = analysis.document.stateSystem;
+  if (!sys) return null;
+  const defs = analysis.defs;
+  const initial = initialState(defs, sys);
+  const values = { ...initial };
+  const runs: unknown[] = [];
+  let reached = 0;
+  for (let frame = 1; frame <= 120; frame++) {
+    reached = advanceState(defs, sys, values, reached, frame / 60);
+    if (frame === 30 || frame === 120)
+      runs.push({ time: frame / 60, reached: text(reached), values: sys.names.map(n => text(values[n])) });
+  }
+  const orbits = analysis.rows.map(row => {
+    if (row.cpu?.type !== 'orbit' || row.error) return null;
+    try {
+      const plot = row.cpu;
+      const pts = traceOrbit(
+        orbitInput(
+          defs,
+          plot.paths,
+          plot.series,
+          evaluate(plot.from, analysis.constEnv),
+          evaluate(plot.to, analysis.constEnv),
+          analysis.constEnv,
+        ),
+      );
+      const step = Math.max(1, Math.floor(pts.length / 40));
+      return { count: pts.length, step, points: pts.filter((_, k) => k % step === 0).map(p => p.map(text)) };
+    } catch (err) {
+      return { error: (err as Error).message };
+    }
+  });
+  return { names: sys.names, initial: sys.names.map(n => text(initial[n])), runs, orbits };
 }
 
 export const PANEL_CASES: string[] = [
@@ -58,4 +105,20 @@ export const PANEL_CASES: string[] = [
   'm = x y; n = x^2 - y^2; grid(m, n); m = 1; n = 2; ---; grid(ON); grid(Axes); ---; grid(m,); grid(,n)',
   'r = sqrt(x^2 + y^2); within = r < 2; ---; p = x + y; grid(p, r, within); ---; grid(off); c = 2 x; A = (1, 2); grid(A_x)',
   'u1 = ln(sqrt(x^2 + y^2)); v1 = atan2(y, x); w1 = gamma(x) + y; e1 = erf(x) y; grid(u1, v1)',
+  // States: the system, its starting values, what reads a state, and its errors.
+  "a' = -a; a(0) = 1; y = a x; a; a + 1; (a, 1); a > 0.5",
+  "th' = om; om' = -sin(th) - om/8; th(0) = 3; bob = (sin(th), -cos(th)); bob; (th, om); y = th; th + om",
+  "k = 2; p' = v1; v1' = -k p; p(0) = k/2; e1 = v1^2/2 + k p^2/2; e1; y = e1; x = p; view(x = -p..p)",
+  "pos' = vel; vel' = sin(2t) - pos - vel/5; X = (pos, vel); X; X(0..6); pos(0..6); (t, pos)",
+  "b = 0.3; g = 0.1; S' = -b S sick; sick' = b S sick - g sick; S(0) = 0.99; sick(0) = 0.01; R = 1 - S - sick; S(0..20); R(0..20)",
+  "r' = (10(r_2 - r_1), r_1(28 - r_3) - r_2, r_1 r_2 - 8 r_3/3); r(0) = (1, 1, 20); q = (r_1/4, r_3/4 - 6); q(1..3); q; r_1",
+  "w' = (w_2, -w_1); w(0) = (1, 0); w; w(0..3); w_1 + w_2; (w_1, w_2); c' = 1; c(0) = (1, 2); d2' = (1, 2); d2(0) = 3",
+  "a' = x; b' = q; c' = c2; c2 = 1; c(0) = t; h' = h; h(0) = h; m(0) = 1; n' = 1; n = 2; f' = 1; f(s) = s",
+  "a' = -a; a(0) = 1; a' = 2; a(0) = 3; a = 4; y = a x",
+  "a' = b; b' = -a; a(0) = 1; a(5..1); a(-1..2); a(0..x); a(0..a); (a, b, 1)(0..1); a(0..1) + 1; (1, 2)(0..1); a(0..t)",
+  "s' = -s/2; s(0) = 2; s(0..4); (s, s^2)(0..4); c = s + 1; c(0..2); k = 3; k(0..2); (t, s)(1..2); y = s(0..1)",
+  "a' = sin(; a(0) = 1; b' = -b; b(0) = (; c' = 1/0; c; d2' = ln(-1); d2",
+  "u1' = -u1; u1(0) = 1; view(x = 0..u1); grid(u1); ---; view(x = 10^X); (u1 + 1, 1); y = u1 x",
+  "th' = om; om' = -sin(th); th(0) = [1..12]/4; (th, om); y = x",
+  "r' = vel; vel' = -9 r/|r|^3; r(0) = (2, 0); vel(0) = (0, 1.5); r; (0, 0)",
 ];

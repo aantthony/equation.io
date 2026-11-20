@@ -74,6 +74,10 @@ public struct DocumentAnalysis: Equatable, Sendable {
   /// The document's planar coordinate fields, whose level sets grid the
   /// panel each is defined in (Grid.swift).
   public var gridFields: [GridField] = []
+  /// The states to integrate (`a' = …`), or nil when the document has none,
+  /// and where each starts (States.swift). `env` has them at their starts.
+  public var stateSystem: StateSystem?
+  public var initialState: [String: Double] = [:]
   /// The document's own functions (a slider's `clamp` is not one of these).
   var userFns: Set<String>
   /// Each constant's expression, in the order the rows define them.
@@ -86,7 +90,26 @@ public struct DocumentAnalysis: Equatable, Sendable {
     if animated.isEmpty { return env }
     var defs = BuiltDefs()
     for (name, expr) in zip(constNames, constExprs) { defs.consts[name] = expr }
-    return (try? evaluateFrame(defs, time: time)) ?? env
+    return (try? evaluateFrame(defs, time: time, states: initialState)) ?? env
+  }
+
+  /// The constants as definitions, for the evaluators that read them.
+  var defs: BuiltDefs {
+    var defs = BuiltDefs()
+    for (name, expr) in zip(constNames, constExprs) { defs.consts[name] = expr }
+    if let sys = stateSystem {
+      for (k, name) in sys.names.enumerated() {
+        defs.states[name] = StateDef(deriv: sys.derivs[k], initial: sys.initials[k])
+      }
+    }
+    return defs
+  }
+
+  /// Every constant's value at a time, with the states at `states`: a run's
+  /// values (`StateStepper.environment(at:)`), which are in the result too.
+  public func environment(at time: Double, states: [String: Double]) -> [String: Double] {
+    if stateSystem == nil { return environment(at: time) }
+    return (try? evaluateFrame(defs, time: time, states: states)) ?? states
   }
 
   /// The row's text with its slider moved to `value`: held to the slider's
@@ -347,11 +370,15 @@ public func analyze(_ sources: [String]) -> DocumentAnalysis {
     }
   }
 
-  // Only static constants can affect compilation.
-  let constEnv = (try? evaluateFrame(built, time: 0)) ?? [:]
+  let stateSystem = buildStateSystem(built)
+  // Only static constants can affect compilation. Dummy states permit evaluating
+  // unrelated constants; every state and dependent constant is removed below.
+  var dummyStates: [String: Double] = [:]
+  for name in built.states.keys { dummyStates[name] = 0 }
+  let constEnv = (try? evaluateFrame(built, time: 0, states: dummyStates)) ?? [:]
   let animated = animatedConstNames(built)
-  // Pass 2: viewport rows and plots.
-  var constNames = Set(built.consts.keys)
+  // Pass 2: viewport rows and plots. States are constants to every consumer.
+  var constNames = Set(built.consts.keys).union(built.states.keys)
   // A named condition is written into a row as a field is.
   var fieldEnv: [String: Expr] = [:]
   for (name, e) in built.fields.entries { fieldEnv[name] = e }
@@ -373,11 +400,16 @@ public func analyze(_ sources: [String]) -> DocumentAnalysis {
   // A view's bounds read the constants' values at t = 0, the animated ones excluded.
   var boundVals = constEnv
   for name in animated { boundVals[name] = nil }
+  for name in built.states.keys { boundVals[name] = nil }
   func comps(_ name: String) -> [String]? {
-    built.points.contains(name) ? pointComps(name, built.pointDims[name] ?? 2) : nil
+    built.points.contains(name)
+      ? pointComps(name, built.pointDims[name] ?? 2) : built.vecStates[name].map { vecStateComps(name, $0) }
   }
   var ropts = ResolveOpts()
-  ropts.definition = { built.fields[$0] ?? built.conditions[$0] ?? built.consts[$0] }
+  // A state stands for itself: defined, and constant across space.
+  ropts.definition = {
+    built.fields[$0] ?? built.conditions[$0] ?? built.consts[$0] ?? (built.states.has($0) ? .var($0) : nil)
+  }
   ropts.comps = comps
   ropts.documentNames = documentNames
   ropts.complex = { built.complexes[$0] }
@@ -433,7 +465,7 @@ public func analyze(_ sources: [String]) -> DocumentAnalysis {
   let random = document.random
   var distributions = DistributionRows(
     rvs: RVSystem(random.built.declarations), rvNames: random.built.names, constNames: constNames,
-    constEnv: constEnv, moving: animated,
+    constEnv: constEnv, moving: animated.union(built.states.keys),
     parse: { body in
       try Resolver(getFn: getFn, opts: ropts).resolve(
         try parseExpr(body, userFns: fnNames, listNames: listNames, valueNames: valueNames))
@@ -544,7 +576,16 @@ public func analyze(_ sources: [String]) -> DocumentAnalysis {
       if let takenName = takenBinder(text) { throw LanguageError(takenName) }
       let rawParsed = try parseExpr(text, userFns: fnNames, listNames: listNames, valueNames: valueNames)
       // `p(50..400)`: where p goes over that time.
-      if case .bin(.mul, _, .range, _) = rawParsed { throw Unsupported("orbits") }
+      if case .bin(.mul, let value, .range(let from, let to), _) = rawParsed {
+        func lower(_ e: Expr) throws -> Expr {
+          try lowerObjects(
+            try Resolver(getFn: getFn, opts: ropts).resolve(e), comps: comps, mats: { built.mats[$0] },
+            tensors: { name, _ in built.tensors[name] })
+        }
+        rows[i].classified = try classifyOrbit(
+          try lower(value), from: try lower(from), to: try lower(to), built, constNames: constNames)
+        continue
+      }
       // A row not drawn over the plane may test equality in a case: `f(2)`
       // with f(m) = {mod(m, 2) = 0: …}.
       func plane(_ e: Expr) -> Bool { freeVars(e).contains(where: ["x", "y", "z"].contains) }
@@ -613,8 +654,12 @@ public func analyze(_ sources: [String]) -> DocumentAnalysis {
     }
   }
 
+  // What the rows read out, and the uniforms' values at t = 0: every state
+  // at its start (lib/analysis.ts `analyzeRows`).
+  let initial = stateSystem.map { initialState(built, $0) } ?? [:]
+  let frameEnv = stateSystem == nil ? constEnv : (try? evaluateFrame(built, time: 0, states: initial)) ?? initial
   // Backend compilation is explicit and never changes the semantic object.
-  var readoutEnv = constEnv
+  var readoutEnv = frameEnv
   for (name, value) in boundVals { readoutEnv[name] = value }
   readoutEnv["t"] = 0
   for i in 0..<count {
@@ -745,7 +790,7 @@ public func analyze(_ sources: [String]) -> DocumentAnalysis {
       var value = form.literal
       let lo: Double
       let hi: Double
-      if let bounds = sliderBounds(form, constEnv, userFns: userFns) {
+      if let bounds = sliderBounds(form, frameEnv, userFns: userFns) {
         (lo, hi) = bounds
         value = sliderValue(form, value, bounds)
       } else {
@@ -762,10 +807,11 @@ public func analyze(_ sources: [String]) -> DocumentAnalysis {
     }
   }
   // The constants once more: a recurrence's chain of terms is among them now.
-  let env = (try? evaluateFrame(built, time: 0)) ?? constEnv
+  let env = (try? evaluateFrame(built, time: 0, states: initial)) ?? frameEnv
   return DocumentAnalysis(
     rows: rows, env: env, animated: animatedConstNames(built), names: boundNames(document),
-    random: distributions.rvs, gridFields: inPanels(gridFields, owner: owner, rows: rows), userFns: userFns,
+    random: distributions.rvs, gridFields: inPanels(gridFields, owner: owner, rows: rows),
+    stateSystem: stateSystem, initialState: initial, userFns: userFns,
     constNames: built.consts.keys,
     constExprs: built.consts.entries.map(\.value))
 }

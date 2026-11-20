@@ -51,6 +51,9 @@ import Testing
       for difference in compareGridFields(analysis, doc["gridFields"] as? [[String: Any]] ?? []) {
         failures.append("\(name): \(difference)")
       }
+      for difference in compareStates(analysis, doc["states"] as? [String: Any]) {
+        failures.append("\(name): \(difference)")
+      }
       // The environment the uniforms read.
       if whole {
         let env = doc["env"] as! [String: Any]
@@ -384,6 +387,10 @@ import Testing
             hiStrict: s["hiStrict"] as? Bool, point: s["point"] as? Bool ?? false, not: s["not"] as? Bool ?? false))
       }
       return .prob(body: try expr("body"), shade: shade)
+    case "orbit":
+      return .orbit(
+        dim: (o["dim"] as! NSNumber).intValue, paths: try (o["paths"] as! [[Any]]).map { try $0.map(decode) },
+        series: o["series"] as! Bool, from: try expr("from"), to: try expr("to"))
     default: throw FixtureError(description: "a \(o["type"]!) plan")
     }
   }
