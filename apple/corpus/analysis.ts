@@ -366,6 +366,13 @@ const CASES: string[] = [
   '(x + u, y, z) = (1, 2, 3); (x - cos(2 pi u), y - sin(2 pi u), z - u) = (0, 0, 0); (x + z, y + z, x) = (u, v, 1)',
   'z = x^2 + y^2; y = x; (1, 2); (cos(u), sin(u)); x^2 + y^2 < 1; x y; (y, -x); 1 + 1; camera(0.5, 0.3, 9); grid(off)',
   'camera(-pi/3, 0.5, 9); z = x y; ---; y = x; camera(1, 1); ---; (1, 2, 3); view(x = -1..1)',
+  // A surface coloured by its curvature, and curvature read at a point of it.
+  'S = (u, v, u^2 - v^2); gaussian(S); meancurvature(S); gaussian(S, 0.5, 0.25); gaussian(S, (0.5, 0.25)); 2 gaussian(S)',
+  'a = 2; S = (cos(2 pi u) sin(pi v), sin(2 pi u) sin(pi v), a cos(pi v) + t); gaussian(S); meancurvature(S, 0.3, a)',
+  'f(a, b) = (a, b, a b); gaussian(f); gaussian(f, 1, 2); g(a) = a; gaussian(g); P = (1, 2); gaussian(P); gaussian(f, P)',
+  'S = (u, v, u v); gaussian(1, 2); gaussian(S, 1); gaussian((u, u, u)); gaussian(T); gaussian((u, v, x)); gaussian((1, 2))',
+  'gaussian((u, v, u v)); gaussian((u, v, u v), 0, 0); S = (u, v, floor(u) v); gaussian(S); gaussian(S, 1, 2, 3); gaussian(S, 1, 2, 3, 4)',
+  'k = u v; S = (u, v, k); gaussian(S); C = (u, u, u); gaussian(C); A = (1, 2, 3); meancurvature(A); gaussian(x) = x; gaussian(2)',
 ];
 
 /** Small documents written at random from the ported core's own words, so

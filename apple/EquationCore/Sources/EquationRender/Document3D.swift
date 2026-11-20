@@ -160,9 +160,14 @@ public struct Document3D: Equatable, Sendable {
       let now = fieldScale(expr, env, camera.target, volumeRadius(camera))
       let scale = traces.largest(key("cloud:\(camera.target):\(camera.radius)", false), now)
       scene.volumes = (scene.volumes ?? []) + [Scene3D.Volume(field: field, scale: scale, color: color, params: params)]
-    case .psurface:
-      guard case .psurface(let glsl, let du, let dv, _)? = row.gpu?.shader else { break }
-      scene.psurfaces.append(Scene3D.PSurface(comps: glsl, du: du, dv: dv, color: color, params: params))
+    case .psurface(let comps, let paint):
+      guard case .psurface(let glsl, let du, let dv, let painted)? = row.gpu?.shader else { break }
+      // gaussian(S): shaded with the gain that brings its curvature to
+      // about 1, kept until a value it reads (a slider, t) changes.
+      let gain = paint.map { paint in traces.number(key("gain")) { paintGain(comps, paint, env) } }
+      scene.psurfaces.append(
+        Scene3D.PSurface(
+          comps: glsl, du: du, dv: dv, color: color, params: params, paint: painted, gain: gain))
     case .pcurve(_, let comps, _, _, _):
       // (A curve in the plane lies in z = 0.)
       scene.curves.append(Scene3D.Curve(pts: Self.sample(comps, env), color: color))

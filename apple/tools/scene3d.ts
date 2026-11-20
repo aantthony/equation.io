@@ -44,7 +44,7 @@ export function graphJSON(
   texts: readonly string[],
   { dark = false, time = 0, warn = console.error }: { dark?: boolean; time?: number; warn?: (m: string) => void } = {},
 ): string {
-  const { rows, constEnv } = analyzeRows(texts, { backend: 'both', readouts: false });
+  const { rows, constEnv, defs } = analyzeRows(texts, { backend: 'both', readouts: false });
   const env = { ...constEnv, t: time };
 
   // web/main.ts defaultCamera, and the camera row over it.
@@ -265,13 +265,16 @@ export function graphJSON(
 
   let slot = 0;
   rows.forEach((row, index) => {
-    if (row.error) warn(`${row.text}: ${row.error}`);
-    if (!row.cpu || row.error) return;
     // A row's own text: the analysis keeps it without its note.
     const text = texts[index] ?? row.text;
-    const point = row.cpu.type === 'point';
-    const takes = takesColor({ ...row, text, point });
+    // Every row that takes a colour takes a slot, drawn or not, as on the
+    // page: a named point or surface, a row in error.
+    const named = row.def?.kind === 'const' && defs.points.has(row.def.name);
+    const takes = takesColor({ ...row, text, point: named });
     const color = noteColor(text) ?? palette[takes ? slot++ % palette.length : 0];
+    if (row.error) warn(`${row.text}: ${row.error}`);
+    if (!row.cpu || row.error) return;
+    const point = row.cpu.type === 'point';
     if (surfaceGLSL && row.cls && !row.cls.needs3D) {
       const { gpu } = row;
       const paint =

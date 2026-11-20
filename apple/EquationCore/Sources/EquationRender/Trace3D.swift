@@ -255,3 +255,48 @@ func fieldScale(_ expr: Expr, _ env: [String: Double], _ center: SIMD3<Double>, 
   let scale = sizes[min(sizes.count - 1, Int((QUANTILE * Double(sizes.count)).rounded(.down)))]
   return scale > 0 ? scale : 1
 }
+
+/// What brings a surface's paint (its curvature) to about 1 where it is
+/// typical (web/main.ts `paintGain`): 1.5 over the 90th percentile of |f| at
+/// a lattice of points of the unit square of u and v — the largest few are
+/// left out, as curvature runs off to infinity at a cusp — or 1 when f is
+/// rounding everywhere, or nowhere defined (lib/surface-geometry.ts
+/// `divergingGain`).
+func paintGain(_ comps: [Expr], _ paint: Expr, _ env: [String: Double]) -> Double {
+  var scope = env
+  func at(_ e: Expr, _ u: Double, _ v: Double) -> Double {
+    scope["u"] = u
+    scope["v"] = v
+    return (try? evaluate(e, scope)) ?? .nan
+  }
+  // Twice the diagonal of the box round the surface (`defaultGeodesicLength`), halved.
+  var lo = [Double](repeating: .infinity, count: 3)
+  var hi = [Double](repeating: -.infinity, count: 3)
+  let n = 16
+  for i in 0...n {
+    for j in 0...n {
+      let pt = comps.map { at($0, Double(i) / Double(n), Double(j) / Double(n)) }
+      guard pt.allSatisfy(\.isFinite) else { continue }
+      for k in 0..<min(3, pt.count) {
+        lo[k] = min(lo[k], pt[k])
+        hi[k] = max(hi[k], pt[k])
+      }
+    }
+  }
+  let diagonal = hypot((0..<3).map { hi[$0] > lo[$0] ? hi[$0] - lo[$0] : 0 })
+  let size = (diagonal.isFinite && diagonal > 0 ? 2 * diagonal : 1) / 2
+  // Rounding, not curvature, below 1e-9 of the surface's own size.
+  let floor = 1e-9 * min(1 / size, 1 / (size * size))
+  var sizes: [Double] = []
+  let m = 24
+  for i in 0...m {
+    for j in 0...m {
+      let k = abs(at(paint, (Double(i) + 0.5) / Double(m + 1), (Double(j) + 0.5) / Double(m + 1)))
+      if k.isFinite { sizes.append(k) }
+    }
+  }
+  if sizes.isEmpty { return 1 }
+  sizes.sort()
+  let typical = sizes[Int((0.9 * Double(sizes.count - 1)).rounded(.down))]
+  return typical > floor ? 1.5 / typical : 1
+}

@@ -119,9 +119,11 @@ struct Resolver {
 
   /// `e` with the named definitions it reaches that depend on position
   /// written out, so differentiation sees through them (`throughFields`).
-  private func throughFields(_ e: Expr) -> Expr {
+  func throughFields(_ e: Expr, over asked: Set<String>? = nil) -> Expr {
+    // (`over` asks for other variables than x, y, z: u and v write out a named surface.)
+    let over = asked ?? spaceVars
     func closed(_ name: String, _ seen: Set<String>) -> Expr? {
-      if spaceVars.contains(name) || seen.contains(name) { return nil }
+      if over.contains(name) || seen.contains(name) { return nil }
       guard let value = opts.definition(name) else { return nil }
       if case .vec = value { return nil }
       if case .list = value { return nil }
@@ -131,7 +133,7 @@ struct Resolver {
         if let c = closed(v, inner) { sub[v] = c }
       }
       let out = sub.isEmpty ? value : substVars(value, sub)
-      return freeVars(out).contains(where: spaceVars.contains) ? out : nil
+      return freeVars(out).contains(where: over.contains) ? out : nil
     }
     var sub: [String: Expr] = [:]
     for v in freeVars(e) {
@@ -143,7 +145,7 @@ struct Resolver {
   /// Step for the central-difference fallback.
   private static let fdH = 1e-4
 
-  private func applyDiff(_ operand: Expr, _ v: String, _ order: Int) throws -> Expr {
+  func applyDiff(_ operand: Expr, _ v: String, _ order: Int) throws -> Expr {
     var e = throughFields(operand)
     // A component that does not exist — F_1 of a function F, G_1 of a point
     // whose components are G_x, G_y — would differentiate to 0.
@@ -403,6 +405,8 @@ struct Resolver {
       throw LanguageError("\(name)(…) must be a whole row, not part of a definition.")
     }
     if name == "tube" || name == "revolve" { return try resolveSpaceForm(name, args) }
+    if name == "gaussian" || name == "meancurvature" { return try surfaceGeometry(name, args) }
+    if name == PAINT_CALL { return .call(name, args) }
     guard
       elementaryFunctions.contains(name) || complexFunctions.contains(name) || geometryFunctions.contains(name)
     else {
@@ -527,6 +531,10 @@ func lowerGeom(
   _ e: Expr, comps: @escaping (String) -> [String]?, mats: @escaping GetMat = { _ in nil },
   tensors: @escaping GetTensor = { _, _ in nil }
 ) throws -> Expr {
+  // `[paint](S, f)`: the surface and the scalar it is coloured by, each lowered.
+  if case .call(PAINT_CALL, let args) = e {
+    return .call(PAINT_CALL, try args.map { try lowerGeom($0, comps: comps, mats: mats, tensors: tensors) })
+  }
   try refuseUnportedGeometry(e)
   // (A root-level geometry form — segment, polygon, circle, … — desugars first.)
   return try lowerWithMatrices(e, comps: comps, getMat: mats, getTensor: tensors)

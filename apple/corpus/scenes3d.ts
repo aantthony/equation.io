@@ -31,6 +31,10 @@ const DOCUMENTS: Array<[text: string, time?: number]> = [
   ['(cos(6 pi u), sin(6 pi u), 4 u - 2); (u, u, floor(4 u)); (u, 1/(u - 0.5), 0)'],
   ['tube((2 cos(2 pi u), 2 sin(2 pi u), sin(6 pi u)), 0.2); tube((u, u^2, u^3)); a = 0.3; tube((u, 0, 1), a t)', 1],
   ['a = 0.3; tube((u, 0, 1), a t); tube((u, abs(u - 0.5), 1), 0.05); tube((1, 1, 1 + 0 u))'],
+  // Surfaces coloured by their curvature.
+  ['S = (4 u - 2, 4 v - 2, (2 u - 1)^2 - (2 v - 1)^2); gaussian(S)'],
+  ['a = 2; T = ((a + cos(2 pi v)) cos(2 pi u), (a + cos(2 pi v)) sin(2 pi u), sin(2 pi v) + t); meancurvature(T)', 1],
+  ['P = (u, v, 0); gaussian(P); Q = (u, v, 1/(u - 0.5)); gaussian(Q)'],
   // Vector fields: integral curves, arrows, streamlines. (A moving field is
   // retraced on the twentieths of a second, as the page does: a time on one.)
   ['(y, -x, 0.2)'],

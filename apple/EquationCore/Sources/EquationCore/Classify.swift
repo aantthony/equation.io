@@ -277,6 +277,8 @@ func classify(_ lowered: Expr, defined: Set<String>, fields: [String: Expr]) thr
   if case .call(STREAMLINES_CALL, let args) = lowered, let inner = args.first {
     return try streamlined(try classify(inner, defined: defined, fields: fields))
   }
+  // gaussian(S) alone on a row: the surface S, coloured by its curvature.
+  if case .call(PAINT_CALL, let args) = expr { return try paintedSurface(args, defined: defined, fields: fields) }
   if fields.values.contains(where: { if case .ineq = $0 { true } else { false } }),
     let misread = conditionAsValue(expr, fields)
   {
