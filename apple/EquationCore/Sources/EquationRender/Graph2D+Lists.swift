@@ -21,6 +21,30 @@ extension Graph2D {
     return color + (RGB(repeating: 1) - color) * shade
   }
 
+  /// A row as the rows that draw it: itself, or — a family — one row per
+  /// member with the member's plans and its shade of the row's color
+  /// (web/main.ts `renderMembers`).
+  static func familyMembers(_ row: RowAnalysis, _ cpu: CpuPlan, _ color: RGB) -> [(row: RowAnalysis, color: RGB)] {
+    guard case .family(let members) = cpu else { return [(row, color)] }
+    var shaders: [GpuPlan] = []
+    if case .family(let plans)? = row.gpu?.shader { shaders = plans }
+    return members.enumerated().map { k, member in
+      var one = row
+      one.classified = member.classified
+      one.cpu = member.cpu
+      one.gpu = k < shaders.count ? shaders[k] : nil
+      return (one, familyColor(color, member: k, of: members.count))
+    }
+  }
+
+  /// What a plan sets itself, by the uniform's name (web/render-plan.ts `shaderBindings`).
+  static func shaderUniforms(_ plan: GpuPlan?) -> [String: Double]? {
+    guard let plan, !plan.uniforms.isEmpty else { return nil }
+    var uniforms: [String: Double] = [:]
+    for (name, value) in plan.uniforms { uniforms[uniformName(name)] = value }
+    return uniforms
+  }
+
   /// The shader layers of a family: each member's plan, with the index it
   /// reads in the program its family shares as a uniform of its own.
   static func addFamily(
@@ -28,8 +52,7 @@ extension Graph2D {
   ) {
     for (k, member) in members.enumerated() {
       let shaded = familyColor(color, member: k, of: members.count)
-      var uniforms: [String: Double] = [:]
-      for (name, value) in member.uniforms { uniforms[uniformName(name)] = value }
+      let uniforms = shaderUniforms(member)
       switch member.shader {
       case .implicit2d(let field, _):
         curves.append(Curve2D(field: field, color: shaded, params: member.params, uniforms: uniforms))

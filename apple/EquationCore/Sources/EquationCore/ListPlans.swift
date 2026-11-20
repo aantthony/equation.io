@@ -110,7 +110,6 @@ func classifyList(_ expr: Expr, _ vars: NameSet) throws -> MathObject? {
       default: throw LanguageError("A point mixing data with an expression is not supported yet.")
       }
     }
-    if items.count == 3 { throw Unsupported("points in space") }
     return .list(.scatter(dimension: items.count, coordinates: coords))
   case .list(let items):
     for v in vars where v != "t" {
@@ -132,7 +131,6 @@ func classifyList(_ expr: Expr, _ vars: NameSet) throws -> MathObject? {
     if Set(vecs.map(\.count)).count > 1 {
       throw LanguageError("All points in a list need the same number of coordinates.")
     }
-    if vecs[0].count == 3 { throw Unsupported("points in space") }
     return .list(.points(dimension: vecs[0].count, values: vecs))
   default:
     return nil

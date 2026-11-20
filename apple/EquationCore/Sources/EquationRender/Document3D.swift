@@ -117,7 +117,10 @@ public struct Document3D: Equatable, Sendable {
       guard row.error == nil, row.unsupported == nil, let cpu = row.cpu, index < colors.count,
         let color = colors[index]
       else { continue }
-      draw(cpu, row, index, color, env, time, camera, into: &scene)
+      // A family draws member by member, each a shade lighter (web/main.ts `renderMembers`).
+      for (member, shade) in Graph2D.familyMembers(row, cpu, color) {
+        draw(member.cpu!, member, index, shade, env, time, camera, into: &scene)
+      }
     }
     return scene
   }
@@ -128,6 +131,8 @@ public struct Document3D: Equatable, Sendable {
     _ camera: Camera3D, into scene: inout Scene3D
   ) {
     let params = row.gpu?.params ?? []
+    // (A family member's index into the program its family shares.)
+    let uniforms = Graph2D.shaderUniforms(row.gpu)
     // The box the solvers search: the camera's, padded a quarter each way so
     // small pans and zooms stay inside it (web/main.ts solveFor).
     let target = [camera.target.x, camera.target.y, camera.target.z]
@@ -157,10 +162,10 @@ public struct Document3D: Equatable, Sendable {
     case .implicit2d:
       // Extrudes to its true locus (a vertical sheet).
       guard case .implicit2d(let field, _)? = row.gpu?.shader else { break }
-      scene.implicits.append(Surface3D(field: field, color: color, params: params))
+      scene.implicits.append(Surface3D(uniforms: uniforms, field: field, color: color, params: params))
     case .implicit3d:
       guard case .implicit3d(let field, let grad)? = row.gpu?.shader else { break }
-      scene.implicits.append(Surface3D(field: field, color: color, params: params, grad: grad))
+      scene.implicits.append(Surface3D(uniforms: uniforms, field: field, color: color, params: params, grad: grad))
     case .scalar3d(let expr):
       guard case .scalar3d(let field)? = row.gpu?.shader else { break }
       // The largest the field has been since the view or a slider last
@@ -175,7 +180,7 @@ public struct Document3D: Equatable, Sendable {
       let gain = paint.map { paint in traces.number(key("gain")) { paintGain(comps, paint, env) } }
       scene.psurfaces.append(
         Scene3D.PSurface(
-          comps: glsl, du: du, dv: dv, color: color, params: params, paint: painted, gain: gain))
+          uniforms: uniforms, comps: glsl, du: du, dv: dv, color: color, params: params, paint: painted, gain: gain))
     case .pcurve(_, let comps, _, _, _):
       // (A curve in the plane lies in z = 0.)
       scene.curves.append(Scene3D.Curve(pts: Self.sample(comps, env), color: color))
@@ -269,9 +274,25 @@ public struct Document3D: Equatable, Sendable {
         scene.points.append(
           Scene3D.Point(pos: SIMD3(p[0], p[1], p.count > 2 ? p[2] : 0), color: color, group: index * 1000 + k))
       }
+    case .plist(_, let pts):
+      // One sprite per point of a list (Graph2D+Lists.swift has the plane's).
+      for comps in pts {
+        let p = comps.map { value($0, env) }
+        guard p.count >= 2, p.allSatisfy(\.isFinite) else { continue }
+        scene.points.append(Scene3D.Point(pos: SIMD3(p[0], p[1], p.count > 2 ? p[2] : 0), color: color, group: index))
+      }
+    case .dscatter(_, let coords) where coords.count >= 2:
+      // A gap in any coordinate skips the point: an unplaced z would reach
+      // projection and depth sorting as NaN.
+      for k in coords[0].indices {
+        let p = coords.map { k < $0.count ? $0[k] : .nan }
+        guard p.allSatisfy(\.isFinite) else { continue }
+        scene.points.append(Scene3D.Point(pos: SIMD3(p[0], p[1], p.count > 2 ? p[2] : 0), color: color, group: index))
+      }
     default:
-      // 2D-only plots (regions, planar fields) a 3D scene leaves out
-      // (web/main.ts SKIPPED_IN_3D), and readouts, which draw nothing.
+      // 2D-only plots (regions, planar fields, dot plots and bars) a 3D
+      // scene leaves out (web/main.ts SKIPPED_IN_3D), and readouts, which
+      // draw nothing.
       break
     }
   }
