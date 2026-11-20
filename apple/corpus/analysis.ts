@@ -766,6 +766,12 @@ function randomListDocs(count: number): string[] {
           'hull(R P)', 'R L', 'R[1]', 'L i', '[i, 1]', 'e^(i L)', 'abs(e^(i L))', 'sort([i, 1])', '(L, L, 1)',
           'polygon(P + (1, 0))', '2 hull(P)', 'rotate(hull(P), L)', 'circle((p, 0), 1)', 'segment(A, (p, q))',
           'polyline((L, L^2))', 'polygon(sort(P, P.y)) + (1, 1)', 'count(R)', 'T (1, 0)', 'R T', 'label(A, "a")',
+          // …and space, states, random variables, sequences, integrals and derivatives.
+          'z = L x', 'x^2 + y^2 + z^2 = L', '(u, L u, v)', '(cos(u), sin(u), L)', 'trail((p, t))', 'trail(P)',
+          'X0 ~ Normal(L, 1)', 'P(X0 > L)', 'E(L)', 'a_n = L[n]', 'b_n = total(L) n', "s' = L", 's(0) = L',
+          'int[0..1] L x dx', 'int[0..L] x dx', 'y = d/dx (L x)', 'y = d/dx (x^L)', 'L x y z', '(x, L y)',
+          '(L y, -x)', 'tube((cos(u), sin(u), L))', 'L x y', 'mean(X0)', 'y = L normalpdf(x, 0, 1)', "y' = L y",
+          '(L, 2, 3)', '[(1, 2, 3), (0, 0, p)]', 'P + (0, 0, 1)', 'z = p', 'segment((0, 0, 0), (L, 1, 1))',
         ]);
       default:
         return `${pick(['f', 'g', 'avg'])}(${value()}${pick(['', ', ' + value()])})`;
@@ -785,6 +791,7 @@ function randomListDocs(count: number): string[] {
       `g(u1, v1) = ${pick(['u1 + v1', '(v1, u1)', 'u1 total(v1)'])}`,
       'avg(s) = mean(s)',
       'R = ((0, -1), (1, 0))',
+      'X0 ~ Normal(0, 1)',
       `p ∈ ${pick(['[1, 2]', 'L', '[0, 1, 2]'])}`,
       `q ∈ ${pick(['[1, 2]', 'L', 'M'])}`,
     ].filter(() => random() < 0.8);

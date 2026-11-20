@@ -1253,3 +1253,21 @@ private func readsLists(_ e: Expr, _ isList: (String) -> Bool) -> Bool {
   default: return childrenOf(e).contains { readsLists($0, isList) }
   }
 }
+
+/// The body of a P(…) or E(…) row once its points and lists have lowered
+/// (lib/analysis.ts `parseRowBody`): points first, as in a plot row — what
+/// geometry refuses stays as written — then lists, with no expansion into a
+/// family.
+func lowerBody(_ e: Expr, _ defs: BuiltDefs, _ opts: ResolveOpts) throws -> Expr {
+  let get = listGetter(defs)
+  var lowered = e
+  do {
+    lowered = try lowerGeom(
+      e, comps: opts.comps, mats: { defs.mats[$0] }, isList: { name in ((try? get(name)) ?? nil) != nil })
+  } catch let error as Unsupported {
+    throw error
+  } catch {
+    // As written.
+  }
+  return try lowerLists(lowered, get, opts).e
+}

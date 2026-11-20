@@ -476,6 +476,7 @@ public func analyze(_ sources: [String]) -> DocumentAnalysis {
         try parseExpr(body, userFns: fnNames, listNames: listNames, valueNames: valueNames))
     },
     lower: { try lowerObjects($0, built, ropts).e },
+    lowerBody: { try lowerBody($0, built, ropts) },
     userDefined: {
       constNames.contains($0) || built.fns[$0] != nil || built.mats.has($0) || built.tensors.has($0)
     })

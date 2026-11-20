@@ -233,17 +233,50 @@ func classifyFamily(_ members: [Expr], defined: Set<String>, fields: [String: Ex
     throw LanguageError(
       "A family of scalar fields cannot be drawn — for curves write y = …, or pick one member, like L[k].")
   }
-  if ["family", "density", "pmf", "prob", "expect", "trail", "label"].contains(first) {
+  if first == "solid" {
+    throw LanguageError("A list of solids cannot be drawn yet — write each solid on a row of its own.")
+  }
+  if first == "scalar3d" {
+    throw LanguageError(
+      "A family of fields in space cannot be drawn — for nested level surfaces write f(x, y, z) = [1..5], "
+        + "or pick one member, like L[k].")
+  }
+  let alone: Set<String> = [
+    "family", "rgb2d", "hsl2d", "oklch2d", "domain2d", "complex2d", "conformal2d", "fractal2d", "density", "pmf",
+    "prob", "expect", "trail", "label",
+  ]
+  if alone.contains(first) {
     throw LanguageError(
       "Families of \(first) do not superimpose meaningfully — select a list element L[k] instead.")
   }
   if let odd = classified.firstIndex(where: {
     $0.object.publicKind != first || $0.needs3D != classified[0].needs3D
   }) {
+    // `y = [1, i] x`: a complex member is a complex equation, solved for
+    // points, where the real ones draw curves.
+    if usesComplex(members[odd]) != usesComplex(members[0]) {
+      let complex = usesComplex(members[0]) ? 0 : odd
+      let real = complex == 0 ? odd : 0
+      throw LanguageError(
+        "Family element \(complex + 1) is complex where element \(real + 1) is not, so it draws a different "
+          + "kind of object — a list of complex numbers draws as points on a row of its own.")
+    }
     throw LanguageError("Family element \(odd + 1) has a different object kind or dimension.")
   }
+  // An implicit surface is raymarched across the whole screen, once per
+  // member, and a curve of intersection or a field in space is traced per
+  // member, so their families stay small.
+  if first == "implicit3d" && classified.count > 8 {
+    throw LanguageError(
+      "A family of implicit surfaces has at most 8 members — each is raymarched across the screen.")
+  }
+  if (first == "spacecurve" || first == "vfield3d") && classified.count > 8 {
+    throw LanguageError(
+      "A family of \(first == "spacecurve" ? "curves of intersection" : "fields in space") has at most 8 "
+        + "members — each is traced on its own.")
+  }
   var shared: FamilyShared?
-  if ["implicit2d", "ineq2d", "vfield2d"].contains(first) {
+  if ["implicit2d", "ineq2d", "implicit3d", "psurface", "vfield2d"].contains(first) {
     var index = "eqioFamilyIndex"
     while defined.contains(index) || members.contains(where: { freeVars($0).contains(index) }) { index += "X" }
     // Members already describe the post-field math; source merging here
