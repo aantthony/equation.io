@@ -1,4 +1,6 @@
 import EquationAssist
+import EquationCore
+import EquationRender
 import FoundationModels
 import SwiftUI
 
@@ -10,9 +12,8 @@ import SwiftUI
   var apply: ([String]) -> Void = { _ in }
   weak var model: GraphModel?
 
-  /// What the renderer no longer answers and the app doesn't yet: sliders
-  /// arrive with the language's port.
-  private static let notYet = #"{"error":"not available in this build of the app yet"}"#
+  /// Sliders gliding for animate_slider, by the slider's name.
+  private var glides: [String: Task<Void, Never>] = [:]
 
   /// The lookups (EquationAssist, lib/assistant-tools.ts ported), over the
   /// data `pnpm app:data` writes and the app bundles; read once.
@@ -23,40 +24,112 @@ import SwiftUI
     return try? AssistantLookups(assistant: assistant, language: language)
   }()
   private static let noLookups = #"{"error":"the app's reference is missing from this build"}"#
+  private static let notReady = #"{"error":"the graph isn't ready"}"#
 
-  /// The voice prototype's get_graph: every row's status, and the window.
+  /// The voice prototype's get_graph: every row's status, and the window or camera.
   func graph() async -> String {
-    guard let model else { return #"{"error":"the graph isn't ready"}"# }
-    return Self.state(rows: rows(), status: await model.status(after: rows()), window: model.metal?.visible)
+    guard let model else { return Self.notReady }
+    return Self.state(rows: rows(), status: await model.status(after: rows()), framing: model.metal?.framing)
   }
 
   /// Change the graph, and read it back.
   func set(_ rows: [String]) async -> String {
     apply(rows)
-    guard let model else { return #"{"error":"the graph isn't ready"}"# }
-    return Self.state(rows: rows, status: await model.status(after: rows), window: model.metal?.visible)
+    guard let model else { return Self.notReady }
+    // The view takes the new rows on the next turn of the run loop: its framing is the new graph's then.
+    await Task.yield()
+    return Self.state(rows: rows, status: await model.status(after: rows), framing: model.metal?.framing)
   }
 
+  /// move_view (web/main.ts `movePanelView`): ease the first panel's window
+  /// or camera to a new framing, answering once it is there.
   func moveView(_ target: [String: Any], seconds: Double) async -> String {
-    guard let canvas = model?.metal else { return #"{"error":"the graph isn't ready"}"# }
-    let range = { (key: String) -> (Double, Double)? in
-      guard let pair = (target[key] as? [Any])?.compactMap({ ($0 as? NSNumber)?.doubleValue }), pair.count == 2,
-        pair[0].isFinite, pair[1].isFinite, pair[0] != pair[1]
-      else { return nil }
-      return (min(pair[0], pair[1]), max(pair[0], pair[1]))
+    guard let canvas = model?.metal, let framing = canvas.framing else { return Self.notReady }
+    let number = { (key: String) in (target[key] as? NSNumber)?.doubleValue }
+    let spin = number("spin")
+    guard case .camera = framing else {
+      let range = { (key: String) -> (Double, Double)? in
+        guard let pair = (target[key] as? [Any])?.compactMap({ ($0 as? NSNumber)?.doubleValue }), pair.count == 2,
+          pair[0].isFinite, pair[1].isFinite, pair[0] != pair[1]
+        else { return nil }
+        return (min(pair[0], pair[1]), max(pair[0], pair[1]))
+      }
+      if spin != nil { return #"{"error":"spin turns the 3D camera; this graph is 2D"}"# }
+      guard range("x") != nil || range("y") != nil else {
+        return #"{"error":"give the window as x: [min, max] and y: [min, max]"}"#
+      }
+      guard await canvas.glide(x: range("x"), y: range("y"), seconds: seconds) else { return Self.stopped }
+      return Self.state(rows: rows(), status: model?.status ?? [], framing: canvas.framing)
     }
-    guard range("x") != nil || range("y") != nil else {
-      return #"{"error":"give the window as x: [min, max] and y: [min, max]"}"#
+    var move = CameraMove(theta: number("theta"), phi: number("phi"), radius: number("radius"))
+    if let point = (target["target"] as? [Any])?.compactMap({ ($0 as? NSNumber)?.doubleValue }), point.count == 3 {
+      move.target = SIMD3(point[0], point[1], point[2])
     }
-    await canvas.glide(x: range("x"), y: range("y"), seconds: seconds)
-    return Self.state(rows: rows(), status: model?.status ?? [], window: canvas.visible)
+    if move.isEmpty {
+      guard let spin else { return #"{"error":"the graph is 3D: give theta, phi, radius, target and/or spin"}"# }
+      canvas.setSpin(spin)
+      return Self.json(["spin": spin, "note": "saved in the camera row"])
+    }
+    guard await canvas.glide(camera: move, seconds: seconds) else { return Self.stopped }
+    // Arrive, then ease into the spin: the camera never jerks from rest to full speed.
+    if let spin { canvas.setSpin(spin) }
+    guard case .camera(let camera, let turning)? = canvas.framing else { return Self.notReady }
+    var answer = Self.camera(camera, spin: turning)
+    answer["seconds"] = seconds
+    if spin != nil { answer["note"] = "spinning now; saved in the camera row" }
+    return Self.json(answer)
   }
 
-  func animateSlider(_ name: String, to: Double, from: Double?, seconds: Double) async -> String { Self.notYet }
+  /// A move a hand cut short by taking the graph, or one a new graph replaced.
+  private static let stopped =
+    #"{"stopped":"the view was taken over before the move finished; call get_graph for where it is"}"#
+
+  /// animate_slider (web/main.ts `animateSlider`): glide a slider's row to a
+  /// value at a steady rate, by rewriting it. It answers as the glide
+  /// starts, saying where it will stop.
+  func animateSlider(_ name: String, to: Double, from: Double?, seconds: Double) async -> String {
+    guard let model else { return Self.notReady }
+    let lines = rows()
+    let analysis = analyze(lines)
+    let sliders = analysis.rows.indices.filter { analysis.rows[$0].slider != nil && analysis.rows[$0].error == nil }
+    let named = { (index: Int) in analysis.rows[index].definition?.name }
+    guard let index = sliders.first(where: { named($0) == name }),
+      case .constant(_, let rhs, _)? = analysis.rows[index].definition,
+      let form = sliderForm(rhs.trimmingCharacters(in: .whitespaces)), let slider = analysis.rows[index].slider
+    else {
+      let names = sliders.compactMap(named)
+      let known = names.isEmpty ? "" : "; sliders: \(names.joined(separator: ", "))"
+      return Self.json(["error": "no slider named \"\(name)\"\(known)"])
+    }
+    // The slider's own value now; and where its range lets it stop.
+    let start = from ?? slider.value
+    let goal = form.whole ? to.rounded() : to
+    let end = sliderValue(form, goal, sliderBounds(form, analysis.env))
+    glides[name]?.cancel()
+    glides[name] = Task { @MainActor [weak self] in
+      let began = CACurrentMediaTime()
+      var written: String?
+      while !Task.isCancelled {
+        guard let rows = self?.rows(), index < rows.count else { return }
+        // The row was typed in, undone, or is another graph's: it is theirs now.
+        if let written, rows[index] != written { return }
+        let k = seconds > 0 ? min((CACurrentMediaTime() - began) / seconds, 1) : 1
+        // Whole-number sliders glide in steps: a fraction would be an error for the whole glide.
+        let value = start + (goal - start) * k
+        model.setSlider(row: index, to: form.whole ? value.rounded() : value)
+        written = self?.rows()[index]
+        if k >= 1 { return }
+        try? await Task.sleep(for: .milliseconds(16))
+      }
+    }
+    var answer: [String: Any] = ["slider": name, "from": start, "to": end, "seconds": seconds]
+    if end != to { answer["note"] = "held to the slider's range" }
+    return Self.json(answer)
+  }
 
   func check(_ rows: [String]) async -> String {
-    guard let model else { return #"{"error":"the graph isn't ready"}"# }
-    return Self.state(rows: rows, status: await model.status(after: rows), window: nil)
+    guard let model else { return Self.notReady }
+    return Self.state(rows: rows, status: await model.status(after: rows), framing: nil)
   }
 
   func listKinds() async -> String { Self.lookups?.listKinds() ?? Self.noLookups }
@@ -65,8 +138,27 @@ import SwiftUI
   func searchFunctions(_ query: String) async -> String { Self.lookups?.searchFunctions(query) ?? Self.noLookups }
   func functionDoc(_ name: String) async -> String { Self.lookups?.functionDoc(name) ?? Self.noLookups }
 
-  /// The graph as the tools report it (web/voice.ts `GraphState`).
-  private static func state(rows: [String], status: [RowStatus], window: (x: [Double], y: [Double])?) -> String {
+  /// `Math.round(v * 1e6) / 1e6`, as the site's reports round.
+  private static func round6(_ v: Double) -> Double { (v * 1e6).rounded() / 1e6 }
+
+  /// The live camera as get_graph reports it, spin included, so a move can
+  /// be relative ("turn a bit left").
+  private static func camera(_ camera: Camera3D, spin: Double) -> [String: Any] {
+    [
+      "theta": round6(camera.shownTheta), "phi": round6(camera.phi), "radius": round6(camera.radius),
+      "target": [camera.target.x, camera.target.y, camera.target.z].map(round6), "spin": spin,
+    ]
+  }
+
+  private static func json(_ object: [String: Any]) -> String {
+    guard let data = try? JSONSerialization.data(withJSONObject: object), let text = String(data: data, encoding: .utf8)
+    else { return notReady }
+    return text
+  }
+
+  /// The graph as the tools report it (the site's `GraphState`): the mode,
+  /// the first panel's window or camera, and every row.
+  private static func state(rows: [String], status: [RowStatus], framing: MetalCanvas.Framing?) -> String {
     var state: [String: Any] = [
       "mode": "2d",
       "rows": rows.enumerated().map { k, text in
@@ -78,10 +170,16 @@ import SwiftUI
         return row
       },
     ]
-    if let window { state["window"] = ["x": window.x, "y": window.y] }
-    guard let data = try? JSONSerialization.data(withJSONObject: state), let text = String(data: data, encoding: .utf8)
-    else { return #"{"error":"the graph isn't ready"}"# }
-    return text
+    switch framing {
+    case .window(let x, let y)?:
+      state["window"] = ["x": x, "y": y]
+    case .camera(let camera, let spin)?:
+      state["mode"] = "3d"
+      state["camera"] = Self.camera(camera, spin: spin)
+    case nil:
+      break
+    }
+    return json(state)
   }
 }
 
