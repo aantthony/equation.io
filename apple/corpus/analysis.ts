@@ -60,7 +60,10 @@ const fmtNum = (v: number) => String(parseFloat(v.toPrecision(6)));
 
 /** The plan kinds the Swift port compiles: their plans are recorded whole.
  *  Of the rest (and of a plan too long to be worth carrying) only the type. */
-const PORTED = new Set(['implicit2d', 'ineq2d', 'scalar2d', 'point', 'pcurve', 'vfield2d', 'value', 'note', 'none']);
+const PORTED = new Set([
+  'implicit2d', 'ineq2d', 'scalar2d', 'point', 'pcurve', 'vfield2d', 'value', 'note', 'none',
+  'complex2d', 'domain2d', 'conformal2d', 'fractal2d', 'rgb2d', 'hsl2d', 'oklch2d',
+]);
 function slim(plan: { type: string } | undefined): unknown {
   if (!plan) return null;
   if (!PORTED.has(plan.type)) return { type: plan.type, omitted: true };
@@ -204,6 +207,70 @@ const CASES: string[] = [
   // Parametric curves in the plane.
   '(cos(2 pi u), sin(2 pi u)); a = 2; (a u, u^2); (floor(3 u), u); (u, abs(u - 0.5)); (u, t); (u, gamma(u))',
   'c = (cos(2 pi u), sin(2 pi u)); c; 2 c; c + (1, 0); k = u^2; (u, k); (k, x); (u, sinc(u)); (mod(u, 0.3), u)',
+  // Complex numbers: values, claims, and what typing refuses.
+  'i; i^2; 1 + 2i; e^(i pi); (1 + i)/(1 - i); sqrt(i); ln(i); i^i; 2^i; conj(1 + i); re(1 + 2i); im(1 + 2i)',
+  'abs(3 + 4i); arg(i); sin(i); cos(1 + i); tan(i); sinh(i); cosh(i); tanh(1 + i); log(i); exp(i); -i; i^-3; i^20',
+  'i^2 = -1; e^(i pi) = -1; i = 1; i^2 = 1; (1 + i)^2 = 2i; abs(i) < 2; i < 1; 1/(i - i) = 1; re(i) = 0',
+  're(2); im(2); arg(-1); conj(2); abs(-2); re(1, 2); conj(); re(); floor(i); max(i, 1); atan2(i, 1); i!; mod(i, 2)',
+  'a = 2; a i; a + t i; t i; sin(t) + i cos(t); {a > 1: i, 1}; {i > 1: 1}; {abs(i) > 0: 2}',
+  // Fields of w = x + iy.
+  'w^2; 1/w; ln(w - 1) - ln(w + 1); re(w^2); im(w^2); abs(w); arg(w); conj(w); w conj(w); exp(w); sqrt(w)',
+  'y = re(w^2); im(ln(w)) = 1; abs(w) = 2; abs(w - 1) < 1; re(w) > im(w); w = 1; w^2 = 1; y = w; w < 1; y = im(w)',
+  'w^0.5; w^w; w^9; w^-2; w^8; 2^w; sin(w) + t; a = 2; a w + 1; w + z; z w; w^2 + u; cosh(w)/sinh(w); tan(w); log(w)',
+  '{x > 0: w, 1}; {abs(w) < 1: w^2, i}; {w > 0: 1}; {x > 0: re(w)}; r = abs(w); r = 1; r; q = w^2; q; re(q) = 1',
+  'k = 1; re(w^2) = k; k = im(w^2); abs(w) + arg(w) = k; y = arg(w) + k',
+  // domain(…), conformal(…).
+  'domain(w^2); domain((w - 1)/(w + 1)); domain(x); domain(w, 2); domain(); domain(z); domain(u w); 1 + domain(w)',
+  'conformal(w^2); conformal(w + 1/w); conformal(1); a = 2; conformal(w^a); conformal(exp(w) + t); conformal(i)',
+  'sin(rgb(x, y, 0)); domain(domain(w)); y = iter(z); domain(w) = 1; (domain(w), 1); f(q) = domain(q); f(w)',
+  // iter(…): escape-time fractals.
+  'iter(z^2 + w); iter(z^2 - 0.8 + 0.156i); iter(z^2 + w, 100); iter(z^2 + w, 0); iter(z^2 + w, x); iter()',
+  'iter(z^2 + w, 1e9); iter((abs(re(z)) + i abs(im(z)))^2 + w); iter(x + y); c = 0.3; iter(z^2 + c); iter(z^3 + w, 50.4)',
+  'iter(sin(z) + w); iter(z^2 + w, 2, 3); iter(z); iter(1); iter(z^2 + u); iter({abs(z) < 1: z^2 + w, z}); iter(z < 1)',
+  'c = -0.8 + 0.156i; iter(z^2 + c); k = 3; iter(z^k + w t); iter(conj(z)^2 + w, 60)',
+  // Colour fields.
+  'rgb(x, y, 0); rgb(x, y, 0, 0.5); hsl(arg(w), 1, 0.5); oklch(0.7, 0.1, arg(w)); rgb(1, 2); rgb(w, 0, 0)',
+  'rgb(x > 0, 0, 0); hsl(atan2(y, x), 1, {x^2 + y^2 < 4: 0.5, 1}); rgb(re(w^2), re(w^2), im(w^2)); rgb(1, 0, 0)',
+  'a = 2; rgb(a x, a x, t); c = rgb(1, 0, 0); rgb(u, 0, 0); rgb(z, 0, 0); f(q) = rgb(q, q, q); rgb(x, y, 0, 0, 0)',
+  'q = (w - 1)/(w + 1); hsl(arg(q), 1, abs(q)/(1 + abs(q))); oklch(abs(q), 0.1, arg(q^2), {abs(q) < 1: 1, 0.5})',
+  'rgb(sin(x)^2, sin(x)^2, (sin(x)^2)^2); rgb(x = 1, 0, 0); hsl(i, 1, 1); rgb(x y, x y + 1, {x y > 0: x y, -x y})',
+  // Complex constants.
+  'a = e^(i pi/3); a; c = 2a; c; b = abs(a); b; q = w - a; domain(q); a^2; y = re(a) x; a = 1',
+  'a = 1 + i; f(z) = z^2 + a; f(i); domain(f(w)); g(a) = a^2; g(2); ok = abs(a) < 2; {ok: 1, 0}; bad = a < 2',
+  'A = (1, i); A; s = (x, w); s; B = (re(i), 2); B; n = im(1 + 2i); n; m = clamp(n, 0, 3); k = i^2; k; y = k x',
+  'a = i; b = a^2; c = b a; d1 = c + t; a; b; c; d1; p = a + x; p; a x; view(x = -abs(a)..abs(a))',
+  'a = i; a1 = (a + 1)^16; a2 = (a1 + 1)^16; a3 = (a2 + 1)^16; a4 = (a3 + 1)^16; a4; a2',
+  // Complex paths.
+  'exp(i 2 pi u); u + i u^2; abs(exp(i u)); exp(i u) + v; (u, i); cos(u) + i; exp(i 2 pi u) + t; w + u; exp(i u) = 1',
+  'a = 2; a exp(2 pi i u); c = e^(i pi/4); c u; sqrt(u - 0.5 + 0 i); (u + i)^3; ln(u + i); {u < 0.5: u, i}; i floor(3u)',
+  // Complex values where they have no reading.
+  '(1, i); (w, 1); (i, i); (x, y) = (w, 1); (w, w) = (1, 1); (i, 1, 2, 3, 4); (cos(u), i)',
+  // Recursive functions: loops.
+  'f(n) = {n <= 1: 1, f(n - 1)}; f(5); y = f(x); f(x) < y; f(x) y; (f(2), f(3)); (u, f(4 u))',
+  'fact(n, acc) = {n <= 1: acc, fact(n - 1, n acc)}; fact(5, 1); y = fact(floor(x), 1); fact(5); fact((4, 1))',
+  'f(n) = n f(n - 1); f(3)',
+  'f(n) = {f(n - 1) > 0: 1, 0}; f(1)',
+  'f(n) = {n > 0: 1 + f(n - 1), 0}; y = f(x)',
+  'g(z, c, k) = {abs(z) > 2: k, k >= 50: k, g(z^2 + c, c, k + 1)}; g(0, w, 0); rgb(g(0, w, 0)/50, 0, 0); y = g(0, x, 0)',
+  'g(z, c, k) = {abs(z) > 2: k, k >= 50: k, g(z^2 + c, c, k + 1)}; g(0, 0.3 + 0.5i, 0); g(0, 0.3, 0); g(0, 3, 0) = 1',
+  'h(k) = {k >= 600: k, h(k + 1)}; h(0); h2(k) = {6000 < k: k, h2(1 + k)}; h2(0); h3(k) = {k > 2.5: k, h3(k + 2)}; h3(0)',
+  'collatz(n, k) = {n <= 1: k, mod(n, 2) < 0.5: collatz(n/2, k + 1), collatz(3n + 1, k + 1)}; collatz(27, 0); collatz(x, 0)',
+  'f(a, b) = {a > b: a, f(a + 1)}; f(0, 3)',
+  'f(a, b) = {a > b: a, f((a + 1, b))}; f(0, 3); f((0, 3)); f((1, 2, 3))',
+  'P = (1, 2); f(a, b, k) = {k > 3: a + b, f((a, b) + P, k + 1)}; f(0, 0, 0); g(a, k) = {k > 3: a, g(P, k)}; g(0, 0)',
+  'P = (1, 2); f(a, k) = {k > 3: a, f(a + P, k + 1)}; f(0, 0); g(a) = {a > 3: P, g(a + 1)}; g(0)',
+  'f(n) = {n < 1: 0, g(n - 1)}; g(n) = f(n); f(3)',
+  'f(n) = {n <= 0: 0, f(n - 1)}; g(n) = {n <= 0: f(n), g(n - 1)}; g(3); h(n) = {n <= 0: 1, h(f(n) - 1)}; h(2)',
+  'm(z, k) = {k >= 3: z, m(z^2 + i, k + 1)}; m(0, 0); domain(m(w, 0)); m(w, 0); abs(m(w, 0)) = 1; m(u, 0)',
+  'm(z, k) = {k >= 3: z, m(z^2 + i, k + 1)}; a = m(0, 0); a; b = abs(m(1, 0)); b; y = b x; conformal(m(w, 1))',
+  'gg(a, b) = {b < 0.5: a, gg(b, mod(a, b))}; gg(12, 18); y = gg(floor(x), 6); a = 2; y = d/dx gg(x, a); gg(t, 1)',
+  'f(n) = {n <= 1: 1, f(n - 1)}; g(x) = f(x) + f(2 x); y = g(x); f(f(3)); y = {f(x) > 0: f(x)}; r = f(x) + y; r = 1',
+  'f(z) = {abs(z) > 4: z, re(z) > 9: i, f(z^2 + 1)}; f(w); f(i); f(2); s(z) = {z > 1: 1, s(z + i)}; s(0)',
+  'f(n) = {n <= 1: 1, f(n - 1)}; f(n) = 2; n = 3; f(n)',
+  'f(k) = {k > 3: k}; f(5); f(1); lo(n) = lo(n); lo(1); y = lo(x)',
+  // A hand-written gated series is the Fourier loop a reconstruction compiles to.
+  'N = 4; y = 1 + {N >= 1: 2 cos(3 x), 0} + {N >= 2: 0.5 sin(6 x), 0} + {N >= 3: cos(9 x) + sin(9 x), 0} + {N >= 4: 0.25 cos(12 x), 0}',
+  'N = 4; y = {N >= 1: 2 cos(x), 0} + {N >= 2: sin(2 x), 0} + {N >= 3: cos(3 x), 0} + {N >= 4: cos(4 x), 0}; y = x + {N >= 1: 2 cos(x), 0} + {N >= 2: sin(2 x), 0} + {N >= 3: cos(3 x), 0} + {N >= 4: cos(4 x), 0}',
 ];
 
 /** Small documents written at random from the ported core's own words, so
@@ -267,6 +334,9 @@ function randomDocs(count: number): string[] {
     'x = a', 'y = b', 'x = y', '# note', 'y = x # a', 'a = 3 #f00', '', 'y =', 'sin(', 'y = )', 'a = ', '1 +',
     'c = clamp(a, 0)', 'y = sin(x, y)', 'y = atan(y, x)', 'log2(a)', 'a!', 'x!', '2^3!', 'r_0 = 1', 'q = {a > 0: b}',
     'within = a > 0', 'within = x > a', '{within: 1, 0}', 'y = {c > 0: x}', 'inf', 'y = inf', 'int[0..1] x dx',
+    'domain(a w)', 'conformal(w^2 + b)', 'iter(z^2 + w)', 'iter(z^2 + a)', 'rgb(x, a, b)', 'hsl(arg(w), 1, c)',
+    'exp(i a u)', 'i^2 = -1', 're(w^2) = a', 'abs(w - a) < b', 'a + b i', 'f(w)', 'g(w, i)', 'c = a i', 'r = w + a',
+    'domain(f(w))', 'rgb(f(x), g(x, y), 0)', 'q(n) = {n > a: n, q(n + 1)}', 'q(x)', 'y = q(b)',
   ];
   const out: string[] = [];
   for (let k = 0; k < count; k++) {

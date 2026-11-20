@@ -3,7 +3,7 @@
 /// (lib/defs.ts `resolveExpr`/`rx`, lib/geom.ts `lowerGeom`).
 ///
 /// The port covers the scalar core. Everything it has not reached — sums and
-/// integrals, lists, matrices, complex numbers, geometry statements, … —
+/// integrals, lists, matrices, geometry statements, … —
 /// throws `Unsupported`, and the row says it is not supported yet rather
 /// than drawing something the site would not.
 
@@ -20,6 +20,9 @@ struct Unsupported: Error, Equatable {
 struct FnDef: Equatable {
   var params: [String]
   var body: Expr
+  /// The function now being resolved, seen from inside its own body: a call
+  /// becomes a RECUR marker, and the finished body wraps into a loop.
+  var recursive = false
 }
 
 /// Looks a user function up, resolving it first if need be; nil for a name
@@ -43,10 +46,17 @@ struct ResolveOpts {
   var documentNames: Set<String>?
   /// A function's parameters, while its body resolves.
   var params: Set<String>?
+  /// The value of a name defined as a complex number (`a = e^(iπ/3)`),
+  /// written in wherever the name is read.
+  var complex: (String) -> Expr? = { _ in nil }
 }
 
 /// The elementary functions the port evaluates and compiles: a call to any
 /// other builtin is not supported yet.
+/// The calls complex typing reads (lib/complex.ts): the projections, and the
+/// forms that are a whole row.
+let complexFunctions: Set<String> = ["re", "im", "arg", "conj", "domain", "conformal", "iter", "rgb", "hsl", "oklch"]
+
 let elementaryFunctions: Set<String> = [
   "sin", "cos", "tan", "asin", "acos", "atan", "atan2", "sinh", "cosh", "tanh", "sech", "asinh", "acosh", "atanh",
   "sqrt", "abs", "exp", "ln", "log", "floor", "ceil", "round", "sign", "min", "max", "mod", "fract", "erf",
@@ -226,6 +236,7 @@ struct Resolver {
     case .num:
       return e
     case .var(let name):
+      if let value = opts.complex(name) { return value }
       // What the port cannot write in yet, by the names that ask for it.
       if name == "int" || name == "sum" || name == "prod" { throw Unsupported("sums and integrals") }
       if name == "grad" || name == "div" || name == "curl" || name == "laplacian" {
@@ -309,7 +320,8 @@ struct Resolver {
       let n = fn.params.count
       // A function's arguments are as written when they fill its parameters:
       // only a mismatch spreads tuples, f((a, b)) ≡ f(a, b).
-      let args = try (rawArgs.count == n ? rawArgs : legacyCallArgs("", rawArgs)).map(resolve)
+      let args = try (!fn.recursive && rawArgs.count == n ? rawArgs : legacyCallArgs("", rawArgs)).map(resolve)
+      if fn.recursive { return try resolveRecur(name, n, args) }
       var env: [String: Expr] = [:]
       if args.count == 1, n >= 2, !isNum(args[0]) {
         // f(P) ≡ f(P_1, …, P_n): one argument that is an n-component point.
@@ -351,8 +363,35 @@ struct Resolver {
       if args.count != 3 { throw LanguageError("clamp takes three arguments: clamp(x, lo, hi).") }
       return .call("min", [.call("max", [args[0], args[1]]), args[2]])
     }
-    guard elementaryFunctions.contains(name) else { throw Unsupported("\(name)(…)") }
+    if opts.inDefinition, name == "rgb" || name == "hsl" || name == "oklch" {
+      throw LanguageError("\(name)(…) must be a whole row, not part of a definition.")
+    }
+    guard elementaryFunctions.contains(name) || complexFunctions.contains(name) else {
+      throw Unsupported("\(name)(…)")
+    }
     return .call(name, args)
+  }
+
+  /// A function's call to itself, inside its own body (lib/defs.ts `rx`,
+  /// `fn.recursive`): the RECUR marker `wrapRecursion` makes a loop of.
+  private func resolveRecur(_ name: String, _ n: Int, _ args: [Expr]) throws -> Expr {
+    // f((a, b)) ≡ f(a, b), as for any other call with a tuple in hand.
+    var splat = args
+    if args.count == 1, n >= 2, case .vec(let items) = args[0] {
+      splat = items
+      if splat.count != n {
+        throw LanguageError("\(name) takes \(n) arguments, and that point has \(splat.count) components.")
+      }
+    }
+    // A computed point spreads into consecutive parameters too — f(T(a, b) +
+    // P, k + 1) for f(a, b, k) — but how many it fills is only known once it
+    // lowers, so geometry lowering counts then (lowerPoints, case .loop).
+    // Arguments that cannot be points are counted here, where the definition
+    // was written.
+    if splat.count != n, !splat.contains(where: { mightBePoint($0, opts.comps) }) {
+      throw LanguageError("\(name) takes \(n) argument\(n == 1 ? "" : "s").")
+    }
+    return .call(RECUR, splat)
   }
 
   private func isNum(_ e: Expr) -> Bool {
@@ -493,10 +532,8 @@ private func lowerPoints(_ e: Expr, _ comps: (String) -> [String]?) throws -> Lo
     // to be a point, a matrix's rows or a list of points; the last two need
     // matrices and lists.
     throw Unsupported("a point passed to a function")
-  case .loop:
-    // Port: lib/geom.ts `lower` (case 'loop') spreads a self-call's points
-    // and quaternions into consecutive params (lowerMv, quaternionParts).
-    throw Unsupported("recursive functions")
+  case .loop(let params, let seeds, let loopBody, let limit):
+    return .scalar(try lowerLoop(params, seeds, loopBody, limit, lo))
   case .var(let name):
     guard let names = comps(name) else { return .scalar(e) }
     return .vec(names.map { .var($0) })
@@ -627,4 +664,42 @@ private func lowerPoints(_ e: Expr, _ comps: (String) -> [String]?) throws -> Lo
     let same = Expr.piecewise(cases.map { Expr.Case(cond: $0.cond, value: $0.value) }, otherwise: otherwise)
     return .scalar(rebuilt == same ? e : rebuilt)
   }
+}
+
+/// A loop under point lowering (lib/geom.ts `lower`, case 'loop'). A
+/// self-call's points spread into consecutive parameters, as a call's single
+/// point does: f(T(a, b) + P, k + 1) passes f(a, b, k) three values. The
+/// function's result and conditions stay numbers. (A quaternion spreads the
+/// same way on the site; multivectors are not ported.)
+private func lowerLoop(
+  _ params: [String], _ seeds: [Expr], _ loopBody: Expr, _ limit: Int, _ lo: (Expr) throws -> Lowered
+) throws -> Expr {
+  func scalar(_ n: Expr) throws -> Expr {
+    guard case .scalar(let a) = try lo(n) else {
+      throw LanguageError("Points cannot pass through a recursive function.")
+    }
+    return a
+  }
+  func body(_ x: Expr) throws -> Expr {
+    if let recur = recurArgs(x) {
+      var args: [Expr] = []
+      for a in recur {
+        switch try lo(a) {
+        case .vec(let items): args += items
+        case .scalar(let e): args.append(e)
+        }
+      }
+      if args.count != params.count {
+        throw LanguageError(
+          "A recursive call passes \(args.count) value\(args.count == 1 ? "" : "s"), "
+            + "and the function takes \(params.count).")
+      }
+      return .call(RECUR, args)
+    }
+    guard case .piecewise(let cases, let otherwise) = x else { return try scalar(x) }
+    return .piecewise(
+      try cases.map { Expr.Case(cond: try scalar($0.cond), value: try body($0.value)) },
+      otherwise: try otherwise.map(body))
+  }
+  return .loop(params: params, seeds: try seeds.map(scalar), body: try body(loopBody), limit: limit)
 }

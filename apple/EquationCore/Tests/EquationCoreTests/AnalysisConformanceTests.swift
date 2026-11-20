@@ -205,13 +205,15 @@ import Testing
     check("gpu type", got.gpu?.type, gpu?["type"] as? String)
     if let gpu, let mine = got.gpu, gpu["omitted"] == nil {
       check("gpu params", mine.params, gpu["params"] as! [String])
-      if gpu["graphEval"] != nil { out.append("gpu: the site compiles a Fourier graph here") }
       func same(_ what: String, _ a: String?, _ b: Any?) {
         check("gpu \(what)", a.map(normalizeGLSL), (b as? String).map(normalizeGLSL))
       }
       func sameList(_ what: String, _ a: [String]?, _ b: Any?) {
         check("gpu \(what)", a?.map(normalizeGLSL), (b as? [String])?.map(normalizeGLSL))
       }
+      let graph = gpu["graphEval"] as? [String: Any]
+      same("graphEval", mine.graphEval?.glsl, graph?["glsl"])
+      check("gpu slopeScale", mine.graphEval?.slopeScale, graph?["slopeScale"].map(number))
       switch mine.shader {
       case .none: break
       case .implicit2d(let field, let levels):
@@ -228,6 +230,16 @@ import Testing
       case .vfield2d(let fx, let fy):
         same("fx", fx, gpu["fx"])
         same("fy", fy, gpu["fy"])
+      case .complexField(_, let field):
+        same("field", field, gpu["field"])
+      case .fractal2d(let step, let seed, let maxIter):
+        same("step", step, gpu["step"])
+        check("gpu seed", seed, gpu["seed"] as? String)
+        check("gpu maxIter", maxIter, (gpu["maxIter"] as? NSNumber)?.intValue)
+      case .color2d(let space, let field, let locals):
+        check("gpu space", space, gpu["space"] as? String)
+        same("field", field, gpu["field"])
+        same("locals", locals, gpu["locals"])
       }
     }
     return out
@@ -270,6 +282,14 @@ import Testing
       return .note(
         expr: try expr("expr"), variable: o["variable"] as! Bool, constant: o["constant"] as? String,
         identity: o["identity"] as? Bool ?? false)
+    case "complex2d": return .complexField(form: .potential, expr: try expr("expr"))
+    case "domain2d": return .complexField(form: .domain, expr: try expr("expr"))
+    case "conformal2d": return .complexField(form: .conformal, expr: try expr("expr"))
+    case "fractal2d":
+      return .fractal2d(
+        step: try expr("step"), seed: o["seed"] as! String, maxIter: (o["maxIter"] as! NSNumber).intValue)
+    case "rgb2d", "hsl2d", "oklch2d":
+      return .color2d(space: String((o["type"] as! String).dropLast(2)), channels: try exprs("channels"))
     default: throw FixtureError(description: "a \(o["type"]!) plan")
     }
   }

@@ -34,6 +34,10 @@ public enum CpuPlan: Equatable, Sendable {
   case vfield2d(comps: [Expr])
   case value(expr: Expr)
   case note(expr: Expr, variable: Bool, constant: String?, identity: Bool)
+  /// Drawn per pixel on the GPU, like the three below: the complex expression itself.
+  case complexField(form: ComplexForm, expr: Expr)
+  case fractal2d(step: Expr, seed: String, maxIter: Int)
+  case color2d(space: String, channels: [Expr])
 
   /// The plan's `type`, as the TypeScript spells it.
   public var type: String {
@@ -46,6 +50,9 @@ public enum CpuPlan: Equatable, Sendable {
     case .vfield2d: "vfield2d"
     case .value: "value"
     case .note: "note"
+    case .complexField(let form, _): form.planType
+    case .fractal2d: "fractal2d"
+    case .color2d(let space, _): "\(space)2d"
     }
   }
 }
@@ -54,6 +61,14 @@ public struct GpuPlan: Equatable, Sendable {
   /// The constants the shader reads, each as the uniform `uniformName` gives.
   public var params: [String]
   public var shader: Shader
+  /// A finite Fourier graph's value and analytic slope, as one vec4 in x and
+  /// `reach` (lib/glsl.ts `fourierGraphGLSL`): only a `y = f(x)` curve has one.
+  public var graphEval: GraphEval?
+
+  public struct GraphEval: Equatable, Sendable {
+    public var glsl: String
+    public var slopeScale: Double
+  }
 
   public enum Shader: Equatable, Sendable {
     /// Nothing for the GPU: the row is drawn (or only read out) on the CPU.
@@ -64,6 +79,13 @@ public struct GpuPlan: Equatable, Sendable {
     case ineq2d(field: String, edges: [String])
     case scalar2d(field: String)
     case vfield2d(fx: String, fy: String)
+    /// A complex field, a vec2 in floats x, y and t.
+    case complexField(form: ComplexForm, field: String)
+    /// One step of the iteration, a vec2 in the vec2 `zc` and floats x, y.
+    case fractal2d(step: String, seed: String, maxIter: Int)
+    /// `field` is a vec4 of the channels and opacity, read after the shared
+    /// calculations `locals` declares.
+    case color2d(space: String, field: String, locals: String)
   }
 
   public var type: String {
@@ -73,6 +95,9 @@ public struct GpuPlan: Equatable, Sendable {
     case .ineq2d: "ineq2d"
     case .scalar2d: "scalar2d"
     case .vfield2d: "vfield2d"
+    case .complexField(let form, _): form.planType
+    case .fractal2d: "fractal2d"
+    case .color2d(let space, _, _): "\(space)2d"
     }
   }
 }
@@ -87,41 +112,60 @@ private func hasAtan2(_ e: Expr) -> Bool {
   return childrenOf(e).contains(where: hasAtan2)
 }
 
-private func compileGridCpu(_ spec: LevelSetSpec) -> CpuGrid {
+private func compileGridCpu(_ spec: LevelSetSpec) throws -> CpuGrid {
+  let expr = try real(spec.expr)
   // (No gradient: the renderer takes finite differences.)
-  let gradient = try? [diff(spec.expr, "x"), diff(spec.expr, "y")]
+  let gradient = try? [diff(expr, "x"), diff(expr, "y")]
   return CpuGrid(
-    name: spec.name, expr: spec.expr, grad: gradient, params: spec.params, angular: hasAtan2(spec.expr),
+    name: spec.name, expr: expr, grad: gradient, params: spec.params, angular: hasAtan2(spec.expr),
     level: spec.level)
 }
 
-public func compileCpu(_ classified: Classified) -> CpuPlan {
-  switch classified.object {
-  case .curveGraph(_, let equation, let levels):
-    guard case .eq(let l, let r) = equation else { preconditionFailure("a graph is an equation") }
-    return .implicit2d(residual: .bin(.sub, l, r), equation: equation, levels: levels.map(compileGridCpu))
-  case .curveImplicit(let residual, let equation, let levels):
-    return .implicit2d(residual: residual, equation: equation, levels: levels.map(compileGridCpu))
-  case .region(let constraints):
-    return .ineq2d(constraints: constraints)
-  case .scalarField(let expr):
-    return .scalar2d(expr: expr)
-  case .vectorField(let components):
-    return .vfield2d(comps: components)
-  case .point(let coordinates):
-    return .point(dim: coordinates.count, coords: coordinates)
-  case .curveParametric(let coordinates):
-    func derivatives(_ exprs: [Expr]?) -> [Expr]? {
-      guard let exprs else { return nil }
-      return try? exprs.map { try diff($0, "u") }
-    }
-    let d1 = derivatives(coordinates)
+public func compileCpu(_ classified: Classified) throws -> CpuPlan {
+  func derivatives(_ exprs: [Expr]?) -> [Expr]? {
+    guard let exprs else { return nil }
+    return try? exprs.map { try diff($0, "u") }
+  }
+  func pcurve(_ comps: [Expr]) -> CpuPlan {
+    let d1 = derivatives(comps)
     let d2 = derivatives(d1)
-    return .pcurve(dim: coordinates.count, comps: coordinates, d1: d1, d2: d2, d3: derivatives(d2))
+    return .pcurve(dim: comps.count, comps: comps, d1: d1, d2: d2, d3: derivatives(d2))
+  }
+  switch classified.object {
+  case .curveGraph(_, let written, let levels):
+    let equation = try realEquation(written)
+    guard case .eq(let l, let r) = equation else { preconditionFailure("a graph is an equation") }
+    return .implicit2d(residual: .bin(.sub, l, r), equation: equation, levels: try levels.map(compileGridCpu))
+  case .curveImplicit(let residual, let equation, let levels):
+    return .implicit2d(
+      residual: try real(residual), equation: try realEquation(equation), levels: try levels.map(compileGridCpu))
+  case .region(let constraints):
+    return .ineq2d(constraints: try constraints.map { Constraint(residual: try real($0.residual), strict: $0.strict) })
+  case .scalarField(let expr):
+    return .scalar2d(expr: try real(expr))
+  case .vectorField(let components):
+    return .vfield2d(comps: try components.map(real))
+  case .point(let coordinates):
+    return .point(dim: coordinates.count, coords: try coordinates.map(real))
+  case .complexPoint(let expr):
+    let (re, im) = try splitWithin(expr, "point", "evaluate")
+    return .point(dim: 2, coords: [re, im])
+  case .curveParametric(let coordinates):
+    return pcurve(try coordinates.map(real))
+  case .complexPath(let expr):
+    let (re, im) = try splitWithin(expr, "path", "sample")
+    return pcurve([re, im])
   case .value(let expr):
-    return .value(expr: expr)
+    return .value(expr: try real(expr))
   case .note(let expr, let variable, let constant, let identity):
     return .note(expr: expr, variable: variable, constant: constant, identity: identity)
+  // Like domain coloring, these expressions are rendered per pixel on the GPU.
+  case .complexField(let form, let expr):
+    return .complexField(form: form, expr: expr)
+  case .fractal(let step, let seed, let maxIter):
+    return .fractal2d(step: step, seed: seed, maxIter: maxIter)
+  case .colorField(let space, let channels):
+    return .color2d(space: space, channels: channels)
   }
 }
 
@@ -138,7 +182,7 @@ private func glsl(_ e: Expr) throws -> String {
   }
 }
 
-private func uniformSub(_ params: [String]) -> (Expr) -> Expr {
+func uniformSub(_ params: [String]) -> (Expr) -> Expr {
   var map: [String: Expr] = [:]
   for name in params { map[name] = .var(uniformName(name)) }
   return { expr in params.isEmpty ? expr : substVars(expr, map) }
@@ -161,20 +205,41 @@ public func compileGpu(_ classified: Classified) throws -> GpuPlan {
   let params = classified.params
   let sub = uniformSub(params)
   func plan(_ shader: GpuPlan.Shader) -> GpuPlan { GpuPlan(params: params, shader: shader) }
+  /// (What the TypeScript calls `scalar`: typed, so a complex subterm or a loop compiles.)
+  func scalar(_ e: Expr) throws -> String { try typedGLSL(sub(e)).code }
   switch classified.object {
-  case .curveGraph(_, let equation, let levels), .curveImplicit(_, let equation, let levels):
-    // (A graph's `graphEval` is for reconstructed Fourier series, which the
-    // port does not reach.)
-    return plan(.implicit2d(field: try glsl(sub(equation)), levels: try levels.map(compileGridGpu)))
+  case .curveGraph(let rhs, let equation, let levels):
+    let field = try scalar(equation)
+    let graphEval: GpuPlan.GraphEval?
+    do {
+      graphEval = try fourierGraphGLSL(sub(rhs)).map { GpuPlan.GraphEval(glsl: $0.glsl, slopeScale: $0.slopeScale) }
+    } catch {
+      throw LanguageError(error.message)
+    }
+    var graph = plan(.implicit2d(field: field, levels: try levels.map(compileGridGpu)))
+    graph.graphEval = graphEval
+    return graph
+  case .curveImplicit(_, let equation, let levels):
+    return plan(.implicit2d(field: try scalar(equation), levels: try levels.map(compileGridGpu)))
   case .region(let constraints):
-    let fields = try constraints.map { (code: try glsl(sub($0.residual)), edge: !$0.strict) }
+    let fields = try constraints.map { (code: try scalar($0.residual), edge: !$0.strict) }
     let field = fields.dropFirst().reduce(fields[0].code) { "max(\($0), \($1.code))" }
     return plan(.ineq2d(field: field, edges: fields.filter(\.edge).map(\.code)))
   case .scalarField(let expr):
-    return plan(.scalar2d(field: try glsl(sub(expr))))
+    return plan(.scalar2d(field: try scalar(expr)))
   case .vectorField(let components):
     return plan(.vfield2d(fx: try glsl(sub(components[0])), fy: try glsl(sub(components[1]))))
-  case .point, .curveParametric, .value, .note:
+  case .colorField(let space, let channels):
+    let program = try colorProgram(channels, params)
+    return plan(.color2d(space: space, field: program.field, locals: program.locals))
+  case .fractal(let step, let seed, let maxIter):
+    let compiled = try typedGLSL(sub(step), ["z": Typed(type: .complex, code: "zc")])
+    return plan(
+      .fractal2d(
+        step: compiled.type == .complex ? compiled.code : "vec2(\(compiled.code), 0.0)", seed: seed, maxIter: maxIter))
+  case .complexField(let form, let expr):
+    return plan(.complexField(form: form, field: try scalar(expr)))
+  case .point, .complexPoint, .curveParametric, .complexPath, .value, .note:
     return plan(.none)
   }
 }
@@ -203,11 +268,17 @@ private func comparisonReadout(
   let values: String
   switch e {
   case .eq(let l, let r):
-    let a = try evaluate(l, env)
-    let b = try evaluate(r, env)
-    if !a.isFinite || !b.isFinite { return "Undefined comparison" }
+    func parts(_ x: Expr) throws -> [Double] {
+      guard usesComplex(x) else { return [try evaluate(x, env), 0] }
+      let (re, im) = try complexParts(x)
+      return [try evaluate(re, env), try evaluate(im, env)]
+    }
+    let a = try parts(l)
+    let b = try parts(r)
+    if !(a + b).allSatisfy(\.isFinite) { return "Undefined comparison" }
     truth = a == b
-    values = "\(six(a)) \(truth ? "=" : "≠") \(six(b))"
+    func fmt(_ p: [Double]) -> String { p[1] == 0 ? six(p[0]) : "\(six(p[0]))\(p[1] < 0 ? "" : "+")\(six(p[1]))i" }
+    values = "\(fmt(a)) \(truth ? "=" : "≠") \(fmt(b))"
   case .ineq:
     let comparisons = ineqComparisons(e)
     var vals: [(Double, Double)] = []

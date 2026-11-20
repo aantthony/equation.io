@@ -9,9 +9,11 @@
 /// - `A = (1, 2)` names a point: its components are the constants A_x, A_y.
 /// - `within = r < 2` names a condition, read in braces: `{within: 1}`.
 ///
-/// States (`a' = …`), data files, lists, intervals, matrices and complex
-/// constants are not ported: their rows are reported as not supported yet,
-/// and so is every row that names one.
+/// - `a = e^(i pi/3)` names a complex number, written in where it is read.
+///
+/// States (`a' = …`), data files, lists, intervals and matrices are not
+/// ported: their rows are reported as not supported yet, and so is every row
+/// that names one.
 public enum Definition: Equatable, Sendable {
   /// `draw`: `p ∈ A`, a binder over A's members.
   case constant(name: String, rhs: String, draw: Bool = false)
@@ -434,6 +436,8 @@ struct BuiltDefs {
   var fields = OrderedMap<Expr>()
   /// Named conditions.
   var conditions = OrderedMap<Expr>()
+  /// `a = e^(iπ/3)`: complex numbers with a name, bound as complex.
+  var complexes = OrderedMap<Expr>()
   /// Functions, in the order they resolved: one first called from a row
   /// above its own resolves there.
   var fns = OrderedMap<FnDef>()
@@ -478,6 +482,7 @@ func buildDefs(_ raw: [Definition], skip: Set<String>) -> BuiltDefs {
     opts.definition = { defs.conditions[$0] ?? defs.consts[$0] }
     opts.comps = comps
     opts.documentNames = Set(byName.keys)
+    opts.complex = { defs.complexes[$0] }
     return opts
   }
   // List names accumulate in definition order: a point indexes (`T[2]`) only
@@ -506,8 +511,7 @@ func buildDefs(_ raw: [Definition], skip: Set<String>) -> BuiltDefs {
       if resolving.last != name {
         throw LanguageError("\(name) and \(resolving.last!) are defined in terms of each other.")
       }
-      // A body that calls its own function runs as a bounded loop on the site.
-      throw Unsupported("recursive functions")
+      return recursiveMarker(params)
     }
     resolving.append(name)
     defer { resolving.removeLast() }
@@ -515,7 +519,10 @@ func buildDefs(_ raw: [Definition], skip: Set<String>) -> BuiltDefs {
     var scope = options()
     scope.documentNames = scope.documentNames!.union(params)
     scope.params = Set(params)
-    let body = try Resolver(getFn: getFn, opts: scope).resolve(try parse(byName[name]!))
+    // A parameter shadows a complex constant of the same name.
+    scope.complex = { params.contains($0) ? nil : defs.complexes[$0] }
+    var body = try Resolver(getFn: getFn, opts: scope).resolve(try parse(byName[name]!))
+    if containsRecur(body) { body = try wrapRecursion(name, params, body) }
     let fn = FnDef(params: params, body: body)
     defs.fns[name] = fn
     return fn
@@ -555,8 +562,6 @@ func buildDefs(_ raw: [Definition], skip: Set<String>) -> BuiltDefs {
         defs.conditions[name] = nil
         // u and v take only an interval: the range they run over.
         if paramVars.contains(name) { throw Unsupported("intervals") }
-        let free = freeVars(resolved)
-        if free.contains("i") || free.contains("w") { throw Unsupported("complex numbers") }
         // Lowering expands point arithmetic; a pair result names a point.
         // Point-ness flows in definition order, so `C = B + D` needs B and D
         // defined above (a stray point name below is reported after the loop).
@@ -639,6 +644,8 @@ func buildDefs(_ raw: [Definition], skip: Set<String>) -> BuiltDefs {
     }
   }
 
+  writeComplexConstants(&defs)
+
   // A definition whose value depends on position — x, y, or z, directly or
   // via another such definition — is a coordinate field, not a constant. So
   // is one over the parameters u, v, a named curve.
@@ -671,7 +678,9 @@ func buildDefs(_ raw: [Definition], skip: Set<String>) -> BuiltDefs {
 
   var constNames: Set<String> = []
   for d in raw {
-    if case .constant(let name, _, _) = d, !fieldNames.contains(name), !defs.conditions.has(name) {
+    if case .constant(let name, _, _) = d, !fieldNames.contains(name), !defs.conditions.has(name),
+      !defs.complexes.has(name)
+    {
       constNames.insert(name)
     }
   }
@@ -717,10 +726,13 @@ func buildDefs(_ raw: [Definition], skip: Set<String>) -> BuiltDefs {
             + "so it may only use x, y, z, t, and constants (found \(fv))."
       )
     }
-    // Trial-evaluate to surface unsupported calls now.
-    var env: [String: Double] = ["x": 0.7, "y": 0.4, "z": 0.3, "t": 0]
-    for fv in vars where env[fv] == nil { env[fv] = 1 }
-    _ = try evaluate(e, env)
+    // Trial-evaluate to surface unsupported calls (re, im, …) now. A
+    // complex field has no real value; the rows using it check it.
+    if !vars.contains("i") && !vars.contains("w") {
+      var env: [String: Double] = ["x": 0.7, "y": 0.4, "z": 0.3, "t": 0]
+      for fv in vars where env[fv] == nil { env[fv] = 1 }
+      _ = try evaluate(e, env)
+    }
     defs.fields[name] = e
     return e
   }
@@ -746,6 +758,13 @@ func buildDefs(_ raw: [Definition], skip: Set<String>) -> BuiltDefs {
     let values = names.compactMap { defs.fields[$0] }
     guard values.count == names.count else { continue }
     let vars = values.flatMap { freeVars($0).list }
+    if values.contains(where: isComplexValued) {
+      // Nor has `s = (x, w)` one meaning: a vector's components are real.
+      defs.errors[p] = "\(p) has a complex component; a vector's components are real — take re(…) or im(…)."
+      dropPoint(p)
+      for c in names { defs.fields[c] = nil }
+      continue
+    }
     guard let param = vars.first(where: paramVars.contains), vars.contains(where: positionVars.contains) else {
       continue
     }
@@ -867,6 +886,7 @@ func buildDefs(_ raw: [Definition], skip: Set<String>) -> BuiltDefs {
     let known = Set(byName.keys).union(compOwner.keys).union(defs.consts.keys)
     func present(_ name: String) -> Bool {
       defs.consts.has(name) || defs.fields.has(name) || defs.conditions.has(name) || defs.points.contains(name)
+        || defs.complexes.has(name)
         || defs.fns[name] != nil || defs.unsupported[name] != nil
     }
     func references(_ expr: Expr) -> NameSet {
@@ -899,6 +919,7 @@ func buildDefs(_ raw: [Definition], skip: Set<String>) -> BuiltDefs {
       defs.fields[name] = nil
       defs.conditions[name] = nil
       defs.fns[name] = nil
+      defs.complexes[name] = nil
     }
     func remove(_ name: String) {
       let owner = ownerOf(name)
@@ -915,6 +936,7 @@ func buildDefs(_ raw: [Definition], skip: Set<String>) -> BuiltDefs {
       var candidates: [(String, Expr, [String])] = []
       candidates += defs.consts.entries.map { ($0.key, $0.value, []) }
       candidates += defs.fields.entries.map { ($0.key, $0.value, []) }
+      candidates += defs.complexes.entries.map { ($0.key, $0.value, []) }
       candidates += defs.conditions.entries.map { ($0.key, $0.value, []) }
       candidates += defs.fns.entries.map { ($0.key, $0.value.body, $0.value.params) }
       for (name, expr, params) in candidates where present(name) {

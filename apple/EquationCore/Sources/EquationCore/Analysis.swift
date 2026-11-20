@@ -412,6 +412,7 @@ public func analyze(_ sources: [String]) -> DocumentAnalysis {
   ropts.definition = { built.fields[$0] ?? built.conditions[$0] ?? built.consts[$0] }
   ropts.comps = comps
   ropts.documentNames = documentNames
+  ropts.complex = { built.complexes[$0] }
 
   // Each panel's rows are read with its view's maps, its surface and its
   // metric, none of which is ported: a panel that has one is left alone.
@@ -517,6 +518,7 @@ public func analyze(_ sources: [String]) -> DocumentAnalysis {
       // site draws the density of its values, as a random variable's.
       switch resolved {
       case .eq, .ineq: break
+      case _ where usesComplex(resolved): break
       default:
         let free = freeVars(resolved).list.filter { !constNames.contains($0) }
         if free.contains(where: { $0 == "u" || $0 == "v" }),
@@ -563,7 +565,7 @@ public func analyze(_ sources: [String]) -> DocumentAnalysis {
   for i in 0..<count {
     guard let cls = rows[i].classified, rows[i].error == nil else { continue }
     do {
-      let cpu = compileCpu(cls)
+      let cpu = try compileCpu(cls)
       rows[i].gpu = try compileGpu(cls)
       rows[i].cpu = cpu
       if let info = try? plotReadout(cpu, readoutEnv) { rows[i].info = info }
