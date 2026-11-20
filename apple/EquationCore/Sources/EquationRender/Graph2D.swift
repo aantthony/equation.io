@@ -111,12 +111,18 @@ public struct Graph2D: Equatable, Sendable {
   }
 
   /// What is drawn over the shader passes at a time: the rows the CPU
-  /// evaluates (points, parametric curves). `bounds` is the part of the
-  /// plane in view, which a sequence's dots and a cobweb's diagonal are
-  /// drawn over; `theme` gives that diagonal its color. Without bounds they
-  /// are drawn over a window wide enough for most: a sequence's first 4000
-  /// terms, one dot each as the site draws them in any window narrower.
-  public func overlay(at time: Double, bounds: Bounds? = nil, theme: GraphTheme = .light) -> Overlay2D {
+  /// evaluates (points, parametric curves, a random variable's law). `bounds`
+  /// is the part of the plane in view, which a sequence's dots and a cobweb's
+  /// diagonal are drawn over, and a pmf's stems; `theme` gives that diagonal
+  /// its color. Without bounds they are drawn over a window wide enough for
+  /// most: a sequence's first 4000 terms, one dot each as the site draws them
+  /// in any window narrower; and a law whole. `pointsPerUnit` is how far
+  /// apart whole numbers stand on screen, which says whether stems have room
+  /// for their dots.
+  public func overlay(
+    at time: Double, bounds: Bounds? = nil, theme: GraphTheme = .light, pointsPerUnit: Double? = nil
+  ) -> Overlay2D {
+    let window = bounds
     let bounds = bounds ?? Bounds(xmin: -4000, xmax: 3999, ymin: -4000, ymax: 4000)
     var env = environment(at: time)
     env["t"] = time
@@ -159,6 +165,9 @@ public struct Graph2D: Equatable, Sendable {
         Self.cobweb(
           f: f, recVar: recVar, seed: Self.seed(a0Name, env), env: env, bounds: bounds, color: css,
           axis: theme.axis, into: &overlay)
+      case .density, .pmf, .prob, .expect:
+        drawDistribution(
+          cpu, color: color, env: env, window: window, pointsPerUnit: pointsPerUnit, into: &overlay)
       default:
         break
       }
@@ -208,7 +217,9 @@ public struct Graph2D: Equatable, Sendable {
     let drawn = cells(at: time, view: view, width: width, height: height, dpr: dpr)
     if !drawn.cells.isEmpty { scene.layers.cells = drawn.cells }
     scene.lattice = drawn.labels
-    scene.overlay = overlay(at: time, bounds: Bounds(view: view, width: width, height: height), theme: theme)
+    scene.overlay = overlay(
+      at: time, bounds: Bounds(view: view, width: width, height: height), theme: theme,
+      pointsPerUnit: 1 / (view.upp * dpr))
     return scene
   }
 }
