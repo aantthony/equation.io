@@ -80,6 +80,9 @@ public indirect enum MathObject: Equatable, Sendable {
   /// A square system, one residual per unknown: its isolated solutions, or
   /// with u (`parametric`) the curve they trace.
   case system(residuals: [Expr], parametric: Bool, angular: [Bool])
+  /// A complex equation in w, `w^3 = 1`: its roots, the solutions of the
+  /// system its real and imaginary parts make in x and y (ComplexRoots.swift).
+  case complexSystem(equation: Expr)
   /// A random variable's row the CPU draws (a density curve, a pmf's stems),
   /// or the marker of an `E(…)` row. `mass` multiplies what is drawn.
   case distribution(form: DistributionForm, rv: String, mass: Expr? = nil)
@@ -115,7 +118,7 @@ public indirect enum MathObject: Equatable, Sendable {
     case .surfaceParametric: "psurface"
     case .intersection: "spacecurve"
     case .scalarField3D: "scalar3d"
-    case .system: "system"
+    case .system, .complexSystem: "system"
     case .value: "value"
     case .label: "label"
     case .figure: "polygon"
@@ -525,8 +528,7 @@ func classify(_ lowered: Expr, defined: Set<String>, fields: [String: Expr]) thr
       if !hasSpace {
         throw LanguageError("A constant complex comparison has no isolated roots — use w as the unknown.")
       }
-      // Port: a complex equation is a system in x and y (lib/plot.ts), solved for its roots.
-      throw Unsupported("complex equations")
+      return done(.complexSystem(equation: expr))
     }
     if vars.contains("z") { return done(.surfaceImplicit(residual: .bin(.sub, l, r), equation: expr)) }
     let graphRhs: Expr? = isVar(l, "y") ? r : isVar(r, "y") ? l : nil

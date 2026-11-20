@@ -402,8 +402,9 @@ import Testing
     case "scalar3d": return .scalar3d(expr: try expr("expr"))
     case "spacecurve": return .spacecurve(residuals: try exprs("residuals"))
     case "system":
-      if o["complexEquation"] != nil || o["coordinates"] != nil {
-        throw FixtureError(description: "a complex or positional system")
+      if o["coordinates"] != nil { throw FixtureError(description: "a positional system") }
+      if let equation = o["complexEquation"] {
+        return .complexSystem(residuals: try exprs("residuals"), equation: try decode(equation))
       }
       return .system(
         dim: (o["dim"] as! NSNumber).intValue, residuals: try exprs("residuals"),

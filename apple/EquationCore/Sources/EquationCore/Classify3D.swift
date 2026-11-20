@@ -145,9 +145,6 @@ func classifySystem(
     let eqs = "\(left.count) equation\(left.count == 1 ? "" : "s")"
     throw LanguageError("\(eqs) in \(dim) unknowns — a system needs one equation per unknown.")
   }
-  // Port: a system in the plane draws its solutions over the 2D window,
-  // which Graph2D's overlay is not given.
-  if dim == 2 { throw Unsupported("systems of equations in the plane") }
   return .system(
     residuals: zip(left, right).map { .bin(.sub, $0, $1) }, parametric: parametric, angular: left.map(isAngle))
 }

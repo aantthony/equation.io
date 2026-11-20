@@ -42,4 +42,14 @@ export const FITS_CASES: string[] = [
   's = interval(0, 1); S = fourier(e^(2pi i s)); fourier(re(e^(2pi i s))); fourier(i s); k = s; fourier(sin(2pi k))',
   // An interval anywhere else is another kind's.
   's = interval(0, 1); s; y = s x; (s, s^2); mean(s^2); b = 2 s; b; s = interval(2, 1); interval(1); q = interval(1, x)',
+  // Systems in the plane: a square system's isolated solutions, an angle's residual, a curve traced by u.
+  '(x^2 + y^2, y) = (4, x); (x + y, x - y) = (2, 0); a = 2; (x^2 - y, y) = (0, a); (sin(x), cos(y)) = (0, 0)',
+  '(atan2(y, x), x^2 + y^2) = (pi/4, 4); (x y, x + y) = (1, 2 + sin(t)); (x, y) = (1, 2); (x^2, y) = (u, 2u)',
+  '(x, y, x + y) = (1, 2, 3); (x) = (1); (x, y) = 3; (x, y) = (1, 2, 3); (x + i, y) = (1, 2); (w, y) = (1, 2)',
+  'f(x, y) = x^2 - y; g(x, y) = x - y^2; (f(x, y), g(x, y)) = (0, 0); A = (1, 1); (x, y) = A; (x, y) = 2 A',
+  'r = sqrt(x^2 + y^2); (r, y) = (2, 1); view(x = -4..4, y = -3..3); (x^3 - 3x, y) = (y, x/2)',
+  // Complex equations: the roots of an equation in w.
+  'w^3 = 1; w^2 + 1 = 0; w^2 = i; e^w = 1; a = 2; w^2 = a; w^4 + w = t; conj(w) = w^2',
+  'w^5 = 1 + i; (w - 1)(w + i) = 0; sin(w) = 2; w = 2 + i; abs(w) = 1; re(w) = im(w); w^2 = x; 1 + i = 2',
+  'p(z) = z^3 - 2z + 2; p(w) = 0; c = 1 + i; w^2 = c; w^2 + c w + 1 = 0; z = w^2; z = 1',
 ];
