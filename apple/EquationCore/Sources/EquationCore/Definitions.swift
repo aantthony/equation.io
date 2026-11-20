@@ -760,6 +760,8 @@ func buildDefs(
   seq.hasConst = { defs.consts.has($0) }
   seq.defineConstant = { defs.consts[$0] = $1 }
   seq.setValue = { numEnv[$0] = $1 }
+  seq.pointDim = { defs.pointDims[$0] }
+  seq.hasList = { defs.lists.has($0) }
 
   // Named conditions (`within = r < R`), found before anything else resolves:
   // a function body reads one by its shape, and that must not depend on

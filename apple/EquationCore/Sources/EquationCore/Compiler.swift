@@ -61,7 +61,9 @@ public enum CpuPlan: Equatable, Sendable {
   /// An automaton's rule over its neighbours and its seed over the cells.
   case automaton(rule: Expr, radius: Int, seed: Expr?, dims: Int, axes: [String])
   /// A table's value over the cells.
-  case lattice(expr: Expr, axes: [String])
+  /// `rows`: a table computed already (a tuple-valued recurrence's terms):
+  /// row k's position h is rows[k][h - 1].
+  case lattice(expr: Expr, axes: [String], rows: [[Double]]? = nil)
   /// A graph's edges, one row of [from, to] or [from, to, label] each (Graphs.swift).
   case graph(edges: [[Expr]])
   // In space (Compiler3D.swift).
@@ -331,8 +333,8 @@ public func compileCpu(_ classified: Classified) throws -> CpuPlan {
     return .bifurcation(expr: expr, recVar: variable, a0Name: seedName)
   case .automaton(let rule, let radius, let seed, let dims, let axes):
     return .automaton(rule: rule, radius: radius, seed: seed, dims: dims, axes: axes)
-  case .lattice(let expr, let axes):
-    return .lattice(expr: expr, axes: axes)
+  case .lattice(let expr, let axes, let rows):
+    return .lattice(expr: expr, axes: axes, rows: rows)
   case .graph(let edges):
     return .graph(edges: try edges.map { try $0.map(real) })
   case .distribution(let form, let rv, let mass):

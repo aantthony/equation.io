@@ -137,14 +137,14 @@ private final class StackBox<T>: @unchecked Sendable {
   }
 
   @Test func whatIsNotPortedSaysSo() {
-    let rows = ["graph(1)", "s_{n+1} = push(s_n, n)"]
+    let rows = ["c' = [1, 2] c"]
     for text in rows {
       let row = analyze([text]).rows[0]
       #expect(row.unsupported != nil, "\(text)")
       #expect(row.cpu == nil && row.gpu == nil && row.error == nil, "\(text)")
     }
     // A name the port cannot read takes the rows that use it with it.
-    let analysis = analyze(["s_{n+1} = push(s_n, n)", "b = s_3 + 1", "c = 2 b", "y = x"])
+    let analysis = analyze(["c' = [1, 2] c", "b = c + 1", "a = 2 b", "y = x"])
     #expect(analysis.rows.map { $0.unsupported != nil } == [true, true, true, false])
   }
 
@@ -489,8 +489,9 @@ private final class StackBox<T>: @unchecked Sendable {
     case "graph":
       return .graph(edges: try (o["edges"] as! [[Any]]).map { try $0.map(decode) })
     case "lattice":
-      if o["rows"] != nil { throw FixtureError(description: "a table of computed rows") }
-      return .lattice(expr: try expr("expr"), axes: o["axes"] as! [String])
+      return .lattice(
+        expr: try expr("expr"), axes: o["axes"] as! [String],
+        rows: (o["rows"] as? [[Any]])?.map { $0.map(number) })
     case "implicit3d":
       return .implicit3d(
         residual: try expr("residual"), equation: try expr("equation"),

@@ -130,7 +130,7 @@ extension Graph2D {
     }
     let cells = drawn.compactMap { plan -> [String]? in
       switch plan {
-      case .automaton(_, _, _, _, let axes), .lattice(_, let axes): axes
+      case .automaton(_, _, _, _, let axes), .lattice(_, let axes, _): axes
       default: nil
       }
     }
@@ -228,7 +228,7 @@ extension Graph2D {
         }
         layers.append(cells.colored(color))
         latticeValues(grid, nonzero: true)
-      case .lattice(let expr, _)?:
+      case .lattice(let expr, _, let computed)?:
         // Only the cells in the window, which is all a table ever needs.
         func span(_ lo: Double, _ hi: Double) -> (Int, Int) {
           let (a, b) = ((lo + 0.5).rounded(.down), (hi + 0.5).rounded(.down))
@@ -239,7 +239,7 @@ extension Graph2D {
         let (k0, kh) = span(-view.cy - (height / 2) * view.uppY, -view.cy + (height / 2) * view.uppY)
         let key = [Double(i0), Double(iw), Double(k0), Double(kh)] + params + [cls.animated ? time : 0]
         let (grid, cells) = discrete.grid(index, row.cpu!, key) {
-          let grid = evalTable(expr, env, i0: i0, j0: k0, width: iw, rows: kh)
+          let grid = evalTable(expr, env, i0: i0, j0: k0, width: iw, rows: kh, computed: computed)
           return (grid, Self.cellsOf(grid, runs: .init(x: false, y: false), shades: tableShades(grid)))
         }
         layers.append(cells.colored(color))

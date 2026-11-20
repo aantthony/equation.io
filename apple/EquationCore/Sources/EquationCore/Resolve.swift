@@ -301,6 +301,7 @@ struct Resolver {
       return .bin(op, a, b)
     case .index(let target, let at):
       if case .var(let name) = target, let term = try opts.sequenceTerm?(name, at, opts.openVars) { return term }
+      if case .var(let name) = target, let element = try tupleTermElement(name, at) { return element }
       return try mapChildren(e, resolve)
     case .eqtest:
       return try mapChildren(e, resolve)
@@ -358,6 +359,7 @@ struct Resolver {
       let body = rawArgs[rawArgs.count - 1]
       return try expandInt(rawArgs.count == 3 ? (rawArgs[0], rawArgs[1]) : nil, body)
     }
+    if name == "count", rawArgs.count == 1, let n = try tupleTermCount(rawArgs[0]) { return n }
     // A reduction of one argument is over a list, or an integral against a measure.
     if rawArgs.count == 1, ["count", "total", "mean", "min", "max", "stdev", "median", "hist"].contains(name) {
       return try resolveReduction(name, rawArgs[0])
@@ -394,6 +396,7 @@ struct Resolver {
       if name == "label", case .str = arg { return arg }
       return try resolve(arg)
     }
+    if stackFns.contains(name) { return try stackCall(name, args) ?? .call(name, args) }
     if vectorOps.contains(name) { return try vectorCalculus(name, args) }
     if curveOps.contains(name) { return try curveGeometry(name, args) }
     if name == "clamp" {

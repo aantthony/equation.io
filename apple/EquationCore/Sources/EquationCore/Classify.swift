@@ -72,7 +72,7 @@ public indirect enum MathObject: Equatable, Sendable {
   /// generation of a board. `axes` names the lattice's across and down indices.
   case automaton(rule: Expr, radius: Int, seed: Expr?, dims: Int, axes: [String])
   /// A function on the integer lattice, `T[i, j] = …`.
-  case lattice(expr: Expr, axes: [String])
+  case lattice(expr: Expr, axes: [String], rows: [[Double]]? = nil)
   /// `graph(from, to)` / `graph(from, to, label)` (Graphs.swift): one edge per row.
   case graph(edges: [[Expr]])
   // In space (Classify3D.swift).

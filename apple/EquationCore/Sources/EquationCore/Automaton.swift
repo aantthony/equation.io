@@ -22,8 +22,8 @@
 /// The lattice is unbounded. Beyond a window around the seed every cell is
 /// its side's background, which steps by the rule applied to itself.
 ///
-/// Not ported: a table of rows computed already (a tuple-valued recurrence's
-/// terms, lib/seq.ts `classifyTupleRun`), which needs lists.
+/// A table may also be rows computed already: a tuple-valued recurrence's
+/// terms (SequenceTuples.swift `classifyTupleRun`).
 
 /// The last row computed, as for scalar sequences (`AUTOMATON_STEPS`).
 let AUTOMATON_STEPS = 1000
@@ -713,7 +713,22 @@ public let TABLE_MAX = 512
 
 /// A table's values over the cells [i0, i0 + width) × [j0, j0 + rows)
 /// (`evalTable`); undefined values (a piecewise with no case) are NaN.
-public func evalTable(_ expr: Expr, _ env: [String: Double], i0: Int, j0: Int, width: Int, rows: Int) -> CellGrid {
+public func evalTable(
+  _ expr: Expr, _ env: [String: Double], i0: Int, j0: Int, width: Int, rows: Int, computed: [[Double]]? = nil
+) -> CellGrid {
+  if let computed {
+    // Computed already: row k's position h is rows[k][h - 1].
+    var values = [Float](repeating: .nan, count: max(0, width * rows))
+    for y in 0..<max(0, rows) where computed.indices.contains(j0 + y) {
+      let row = computed[j0 + y]
+      var x = max(0, 1 - i0)
+      while x < width, i0 + x <= row.count {
+        values[y * width + x] = Float(row[i0 + x - 1])
+        x += 1
+      }
+    }
+    return CellGrid(values: values, width: width, rows: rows, x0: i0, y0: j0)
+  }
   var (slots, vars) = slotsFor([expr], env)
   let prog = CellProgram(expr, slots)
   let (si, sj) = (slots[CELL_VAR]!, slots[CELL_VAR2]!)
@@ -787,9 +802,9 @@ public func latticeFrame(
   // n × n), with a cell of margin; one defined everywhere opens on (0, 0)
   // with cells big enough to print values in.
   var box = (0, 11, 0, 11)
-  if case .lattice(let expr, _)? = plan {
+  if case .lattice(let expr, _, let computed)? = plan {
     let R = 32
-    let g = evalTable(expr, env, i0: -R, j0: -R, width: 2 * R + 1, rows: 2 * R + 1)
+    let g = evalTable(expr, env, i0: -R, j0: -R, width: 2 * R + 1, rows: 2 * R + 1, computed: computed)
     var b = (Int.max, Int.min, Int.max, Int.min)
     for y in 0..<g.rows {
       for x in 0..<g.width where g.values[y * g.width + x].isFinite {

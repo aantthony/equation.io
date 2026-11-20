@@ -4,16 +4,16 @@
 /// - `a_{n+1} = r a_n (1 - a_n)` (also `a_(n+1)`) is a recurrence. With no
 ///   other free variable it draws a cobweb diagram; with `x` free in the
 ///   right side, x is the parameter axis and the plot is the orbit diagram.
-/// - A recurrence whose step also reads n, or another sequence at n, is no
-///   single map: it draws its terms as dots, computed term by term.
+/// - A recurrence whose step also reads n, another sequence at n, or a tuple
+///   at a position in n (`q_{n+1} = step(q_n, D[n + 1])`) is no single map:
+///   it draws its terms as dots, computed term by term.
 /// - The seed is the constant `a_0` when defined, else 1/2.
 ///
 /// The whole subscripted symbol (`a_n`) is one token, so these rows are
 /// recognized by their text before definition scanning.
 ///
-/// Not ported: tuple-valued recurrences (a step that pushes, pops or is a
-/// tuple; `s_0 = ()`), and steps that read a list or a tuple by position
-/// (`D[n + 1]`). Both need lists; their rows say they are not supported.
+/// Tuple-valued recurrences (a step that pushes, pops or is a tuple;
+/// `s_0 = ()`) are SequenceTuples.swift.
 
 /// How a sequence row reads (lib/seq.ts `SeqScan`).
 struct SeqScan: Equatable {
@@ -220,7 +220,7 @@ func scanSequences(_ texts: [String]) -> [SeqScan?] {
 
 /// The names a term reads by position (`w` in `w[n+1]`): tuples and lists,
 /// which a step that reads n indexes term by term (`indexedNames`).
-private func indexedNames(_ e: Expr) -> Set<String> {
+func indexedNames(_ e: Expr) -> Set<String> {
   var out: Set<String> = []
   func walk(_ e: Expr) {
     if case .index(.var(let name), _) = e { out.insert(name) }
@@ -279,12 +279,24 @@ final class SequenceResolver {
   var addKnown: (String) -> Void = { _ in }
   var protectedNames: Set<String> = []
   var hasConst: (String) -> Bool = { _ in false }
+  /// A named point's dimension, and whether a name is a list: what a
+  /// tuple-valued recurrence may start from.
+  var pointDim: (String) -> Int? = { _ in nil }
+  var hasList: (String) -> Bool = { _ in false }
   var defineConstant: (String, Expr) -> Void = { _, _ in }
   /// Notes a chain constant's value now, when everything it reads has one.
   var setValue: (String, Double) -> Void = { _, _ in }
 
   private var resolving: [String] = []
   private var tupleValued: [String: Bool] = [:]
+  /// Tuple-valued recurrences' terms so far, and the error a run stopped at.
+  struct Run {
+    var terms: [[Double]] = []
+    var reads = NameSet()
+    var end: LanguageError?
+  }
+  var runs: [String: Run] = [:]
+  var computing: Set<String> = []
 
   init(_ scans: [SeqScan], rawNames: [String]) {
     var first: [String: SeqScan] = [:]
@@ -304,11 +316,13 @@ final class SequenceResolver {
     hasConst = { _ in false }
     defineConstant = { _, _ in }
     setValue = { _, _ in }
+    pointDim = { _ in nil }
+    hasList = { _ in false }
   }
 
   private func chained(_ name: String, _ i: Int) -> String { "\(prefix)_\(name)_\(i)" }
 
-  private func parse(_ scan: SeqScan) throws -> Expr {
+  func parse(_ scan: SeqScan) throws -> Expr {
     try parseExpr(scan.rhs, userFns: fnNames(), listNames: allIndexNames(), valueNames: opts.valueNames)
   }
 
@@ -317,7 +331,7 @@ final class SequenceResolver {
   private func allIndexNames() -> Set<String> { indexNames().union(sequences.keys.map { $0 + "_" }) }
 
   /// A sequence's source resolved: at whole n, a case may test equality.
-  private func resolveSeq(_ e: Expr, _ extra: (inout ResolveOpts) -> Void = { _ in }) throws -> Expr {
+  func resolveSeq(_ e: Expr, _ extra: (inout ResolveOpts) -> Void = { _ in }) throws -> Expr {
     var o = opts
     extra(&o)
     o.exactConditions = true
@@ -381,19 +395,25 @@ final class SequenceResolver {
   private func steps(_ name: String, _ body: Expr) -> Bool {
     let index = sequences[name]!.index
     let indexed = indexedNames(body)
-    return freeVars(body).contains { $0 == index || indexed.contains($0) || otherTerm(name, $0) }
+    return freeVars(body).contains {
+      $0 == index || indexed.contains($0) || opts.isList($0) || otherTerm(name, $0)
+    }
   }
 
   private func isConstant(_ v: String) -> Bool { v == "t" || isKnown(v) || hasConst(v) }
 
-  /// Term k of sequence `name`.
-  func term(_ name: String, _ k: Double) throws -> Expr {
+  /// Term k of sequence `name`. `partial`: a recurrence whose chain breaks
+  /// before k (its step reads past the end of a tuple) stops there, and the
+  /// terms after it are missing rather than an error.
+  func term(_ name: String, _ k: Double, partial: Bool = false) throws -> Expr {
     guard JS.isInteger(k), k >= 0, k <= Double(seqMax) else {
       throw LanguageError("Sequence indices must be whole numbers from 0 to \(seqMax).")
     }
     let k = Int(k)
     let scan = sequences[name]!
-    if isTupleSeq(name) { throw Unsupported("tuple-valued recurrences") }
+    // A tuple-valued recurrence's terms are numbers once computed: the term
+    // is the tuple itself, as numbers (or missing, past where it stops).
+    if isTupleSeq(name) { return try tupleTerm(name, k, partial: partial).map(tupleExpr) ?? .num(.nan) }
     let key = "\(name)_\(k)"
     if protectedNames.contains(key) || hasConst(key) { return .var(key) }
     // A term the chain already holds: how a step that reads n, resolved term
@@ -421,8 +441,10 @@ final class SequenceResolver {
     }
     // A step that reads n is resolved once with n open, as its row is (its
     // own a_n the previous term, another sequence's b_n that term in n), and
-    // is that expression at each n.
+    // is that expression at each n. A tuple position cannot be read at an
+    // open n, so a step that reads one resolves its source per term.
     var open: Expr?
+    var byIndexAlone = false
     if stepped {
       let lookup = opts.sequenceTerm
       let own = "\(name)_"
@@ -434,14 +456,13 @@ final class SequenceResolver {
           return try lookup?(symbol, at, vars)
         }
       }
-      // (A step that reads a tuple by position resolves its source per term,
-      // through list lowering: not ported.)
-      if !indexedNames(open!).isEmpty || readsLists(open!, opts) {
-        throw Unsupported("a recurrence that reads a list")
-      }
-      for v in freeVars(open!)
-      where v != recVar && v != scan.index && !isConstant(v) && !v.hasPrefix("\(prefix)_") {
-        throw LanguageError("Sequence \(name) terms need constant parameters (found \(v)).")
+      let openIndexed = indexedNames(open!)
+      byIndexAlone = !freeVars(open!).contains { openIndexed.contains($0) || opts.isList($0) }
+      if byIndexAlone {
+        for v in freeVars(open!)
+        where v != recVar && v != scan.index && !isConstant(v) && !v.hasPrefix("\(prefix)_") {
+          throw LanguageError("Sequence \(name) terms need constant parameters (found \(v)).")
+        }
       }
     }
     /// Another recurrence's term k, read from its chain: built now if it is
@@ -451,6 +472,33 @@ final class SequenceResolver {
       let other = String(decoding: u[(prefix.utf16.count + 1)..<(u.count - 1)], as: UTF16.self)
       let constant = "\(chain)\(JS.string(k))"
       return hasConst(constant) || sequences[other] == nil ? .var(constant) : try term(other, k)
+    }
+    /// Step i of a recurrence that reads n: its source at n = i − 1, resolved
+    /// and its tuple positions read, so each term is its own expression.
+    func stepAt(_ i: Int) throws -> Expr {
+      if byIndexAlone, let open {
+        return try pinTerms(
+          substVars(open, [recVar: .var(chained(name, i - 1)), scan.index: .num(Double(i - 1))]), chainTerm)
+      }
+      let at = substIdx(substVars(parsed, [recVar: .var(chained(name, i - 1))]), scan.index, .num(Double(i - 1)))
+      let resolved = try resolveSeq(at)
+      // A step reading a stack runs as a tuple-valued one does: only the
+      // case that holds, so {count(s_n) = 0: 0, top(s_n)} is safe.
+      if stackCalls(resolved) {
+        guard case .one(let value) = try runTuple(resolved, tupleLeaf(name, noting: false)) else {
+          throw LanguageError("Each term of \(name) must be one number, not a tuple.")
+        }
+        return .num(value)
+      }
+      guard let getList = opts.getList else { throw Unsupported("lists") }
+      let value = try lowerLists(resolved, getList, opts)
+      if value.isList || value.isData {
+        throw LanguageError("Each term of \(name) must be one number, not a list.")
+      }
+      for v in freeVars(value.e) where !isConstant(v) {
+        throw LanguageError("Sequence \(name) terms need constant parameters (found \(v)).")
+      }
+      return value.e
     }
     // A chain is built from 0 without gaps, so past the first missing term
     // every later one is missing too.
@@ -463,11 +511,16 @@ final class SequenceResolver {
       if i == 0 {
         let seed = "\(name)_0"
         value = protectedNames.contains(seed) || hasConst(seed) ? .var(seed) : .num(0.5)
-      } else if let open {
-        value = try pinTerms(
-          substVars(open, [recVar: .var(chained(name, i - 1)), scan.index: .num(Double(i - 1))]), chainTerm)
-      } else {
+      } else if !stepped {
         value = substVars(body, [recVar: .var(chained(name, i - 1))])
+      } else {
+        do {
+          value = try stepAt(i)
+        } catch where partial && haltsRun(error) {
+          // Only a run off the end of a tuple (its own, or one another
+          // sequence it reads steps over) ends the chain quietly.
+          return .num(.nan)
+        }
       }
       defineConstant(link, value)
       addKnown(link)
@@ -487,12 +540,15 @@ final class SequenceResolver {
   /// only as a chain from its seed.
   private func inline(_ name: String, _ at: Expr, _ open: Set<String>) throws -> Expr {
     let scan = sequences[name]!
-    if isTupleSeq(name) { throw Unsupported("tuple-valued recurrences") }
+    // A tuple at an open n has no expression in n: left as the term it is,
+    // s_[n], which a step reading it resolves term by term (stepAt).
+    if isTupleSeq(name) { return .index(.var("\(name)_"), at) }
     if scan.rec {
-      // No closed form: read the chain that computes its terms, all of them.
-      // Read from another recurrence's step, it is read term by term
-      // instead, as that chain grows: so two recurrences may read each other.
-      if resolving.isEmpty { _ = try term(name, Double(seqMax)) }
+      // No closed form: read the chain that computes its terms, all of them
+      // (or up to where a step that reads a tuple runs off its end). Read
+      // from another recurrence's step, it is read term by term instead, as
+      // that chain grows: so two recurrences may read each other.
+      if resolving.isEmpty { _ = try term(name, Double(seqMax), partial: true) }
       let body = try resolveSeq(try parse(scan))
       // The trailing inputs are names the row depends on: the step's
       // constants, not its index, its own term or other sequences'.
@@ -500,7 +556,7 @@ final class SequenceResolver {
       let indexed = indexedNames(body)
       var inputs = freeVars(body).list.filter { v in
         v != "\(name)_\(scan.index)"
-          && (!stepped || (v != scan.index && !indexed.contains(v) && !otherTerm(name, v)))
+          && (!stepped || (v != scan.index && !opts.isList(v) && !indexed.contains(v) && !otherTerm(name, v)))
       }
       let seed = "\(name)_0"
       if protectedNames.contains(seed) || hasConst(seed) { inputs.append(seed) }
@@ -524,7 +580,8 @@ final class SequenceResolver {
   func resolve(_ symbol: String, _ index: Expr?, _ open: Set<String>) throws -> Expr? {
     guard let index else {
       if let hit = termName(symbol) { return sequences[hit.name] != nil ? try term(hit.name, hit.k) : nil }
-      // a_k: the term at a slider, unless a_k is a name of its own.
+      // a_k or a_N: the term at a slider, or one per element of a list —
+      // unless a_k is a name of its own.
       guard let named = namedTerm(symbol), let scan = sequences[named.name], !protectedNames.contains(symbol),
         !isKnown(symbol)
       else { return nil }
@@ -533,7 +590,7 @@ final class SequenceResolver {
       // previous term a_n for itself: see classifySeqRec).
       if open.contains(k) { return try inline(named.name, .var(k), open) }
       if k == scan.index { return nil }
-      if opts.consts(k) == nil { return nil }
+      if !opts.isList(k), opts.consts(k) == nil { return nil }
       return try resolve("\(named.name)_", .var(k), open)
     }
     guard symbol.hasSuffix("_") else { return nil }
@@ -543,20 +600,24 @@ final class SequenceResolver {
     // a_n, as when written plainly.
     if scan.rec, case .var(scan.index) = index, !open.contains(scan.index) { return .var("\(name)_\(scan.index)") }
     if freeVars(index).contains(where: open.contains) { return try inline(name, index, open) }
-    // One term per index of a list or a range, which needs lists.
-    func listed(_ e: Expr) -> Bool {
-      switch e {
-      case .range, .list, .data, .index, .lazy: true
-      default: childrenOf(e).contains(where: listed)
+    func one(_ e: Expr) throws -> Expr {
+      var env: [String: Double] = [:]
+      for n in freeVars(e) {
+        opts.boundConsts?.names.insert(n)
+        if let v = opts.consts(n) { env[n] = v }
       }
+      return try term(name, try evaluate(e, env))
     }
-    if listed(index) { throw Unsupported("lists") }
-    var env: [String: Double] = [:]
-    for n in freeVars(index) {
-      opts.boundConsts?.names.insert(n)
-      if let v = opts.consts(n) { env[n] = v }
+    guard let getList = opts.getList else { return try one(index) }
+    var input = index
+    if case .range = index { input = .list([index]) }
+    let indices = try lowerLists(input, getList, opts)
+    // One term per index, so a_[n] runs over the same instances n does.
+    if case .list(let items) = indices.e { return settledNode(Low(.list(try items.map(one)), indices.own)) }
+    if case .data(let values) = indices.e {
+      return settledNode(Low(.list(try values.map { try term(name, $0) }), indices.own))
     }
-    return try term(name, try evaluate(index, env))
+    return try one(indices.e)
   }
 }
 
@@ -570,7 +631,9 @@ func classifySeqRec(
   if reservedNames.contains(index) {
     throw LanguageError("\"\(index)\" is reserved; index sequences with n, k, or m.")
   }
-  if scan.rec, resolver.isTupleSeq(name) { throw Unsupported("tuple-valued recurrences") }
+  if scan.rec, let run = try resolver.tupleRun(name) {
+    return classifyTupleRun(scan, run, constNames: constNames())
+  }
   // Σ/Π with constant bounds expand here, as anywhere else. A bound that
   // uses the index (a_n = Σ(s=1..n, s)) stays a sum; evaluate() runs it at each n.
   var opts = ropts
@@ -594,12 +657,15 @@ func classifySeqRec(
   // Terms are at whole n, so a case may test equality: {mod(n, 2) = 0: …}.
   opts.exactConditions = true
   let parsed = exactCases(try Resolver(getFn: getFn, opts: opts).resolve(source))
-  // (A term that reads a list or a tuple by position, or reduces one, goes
-  // through list lowering on the site: not ported for sequences.)
-  if readsLists(parsed, opts) { throw Unsupported("a sequence that reads a list") }
   var vars = freeVars(parsed)
-  // (lib/complex.ts `usesComplex`; complex numbers are not ported.)
-  if vars.contains("i") || vars.contains("w") { throw Unsupported("complex numbers") }
+  // A list may be named w, which is otherwise the complex variable.
+  let indexed = indexedNames(parsed)
+  let lists = vars.list.filter { ropts.isList($0) || indexed.contains($0) }
+  var zeroLists: [String: Expr] = [:]
+  for v in lists { zeroLists[v] = .num(0) }
+  if usesComplex(substVars(parsed, zeroLists)) {
+    throw LanguageError("Sequences are real-valued; use re(…) or im(…).")
+  }
 
   // (The names with a value now: resolving may have written a chain.)
   let defined = constNames()
@@ -630,16 +696,19 @@ func classifySeqRec(
       }
       throw LanguageError("A sequence term may only use \(index), t, and constants (found \(v)).")
     }
-    return done(.sequence(term: parsed, index: index))
+    // (A list written in the term is a plain one again: the marks of
+    // identity are list lowering's, which a term never reaches.)
+    return done(.sequence(term: plainLists(parsed), index: index))
   }
 
   let bifurcation = vars.remove("x")
   vars.remove(recVar)
   if vars.contains("y") { throw LanguageError("Put the recurrence parameter on the x-axis (use x, not y).") }
-  // A step that reads n (directly, or through another sequence's term at n)
-  // is no single map to draw as a cobweb: the row draws its terms instead,
-  // read from the chain that computes them.
-  let stepped = vars.remove(index)
+  // A step that reads n (directly, through another sequence's term at n, or
+  // as a position in a tuple, w[n+1]) is no single map to draw as a cobweb:
+  // the row draws its terms instead, read from the chain that computes them.
+  let stepped = vars.remove(index) || !lists.isEmpty
+  for v in lists { vars.remove(v) }
   if stepped {
     if bifurcation {
       throw LanguageError("A recurrence that reads \(index) or a tuple draws its terms; it cannot also take x.")

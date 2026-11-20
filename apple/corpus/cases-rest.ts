@@ -20,6 +20,33 @@ export const REST_CASES: string[] = [
   'graph(1, 2); grid(on); ---; graph(1, 2); y = x; ---; graph(2, 2); 1 + 1; mark(2)',
   'view(x = 1..100, x = 10^X); graph(1, 2); mark(1)',
   'graph(i, 2); graph(1.5, 2.25, -0.5); graph((1, 2), 3); graph([1, 2], [3, 4, 5]); graph(1, 2) # note',
+  // Tuple-valued recurrences: a stack over time, the orbit of a point.
+  's_0 = (); s_{n+1} = push(s_n, n); s_3; count(s_3); top(s_4); s_2[1]; s_0; count(s_0); s_1; pop(s_3); top(s_0)',
+  'p_0 = (0, 0); a = 1.4; b = 0.3; p_{n+1} = (1 - a p_n[1]^2 + p_n[2], b p_n[1]); p_3; p_2[1]; (p_5[1], p_5[2])',
+  'p_0 = (1, 2, 3); p_{n+1} = (p_n[2], p_n[3], p_n[1]); p_2; q_{n+1} = (q_n[1] + 1, 2); q_3; q_0',
+  'D = (1, 2, 1, 3, 4, 2, 2, 4, 4, 3); s_0 = (); ' +
+    's_{n+1} = {D[n + 1] <= 2: push(s_n, D[n + 1]), top(s_n) = D[n + 1] - 2: pop(s_n)}; s_4; count(s_10); s_11; top(s_2)',
+  'D = (1, 1, 1, 2, 2, 2); s_0 = (); s_{n+1} = {D[n + 1] = 1: push(s_n, 1), pop(s_n)}; ' +
+    'step(q, a) = {q = 0: {a = 1: 0, 1}, q = 1: {a = 2: 1, 2}, 2}; q_0 = 0; q_{n+1} = step(q_n, D[n + 1]); ' +
+    'N = floor(clamp(0, 0, 6)); mark(q_N); q_N; q_6; q_7; s_N; count(s_N)',
+  's_0 = (); s_0 = (); s_{n+1} = push(s_n, 1); ---; r_0 = 2; r_0 = (); r_{n+1} = push(r_n, 1); r_2; ---; u_0 = ()',
+  's_{n+1} = push(s_n, t); r_{n+1} = push(r_n, x); k = 2; u_0 = (1, 2, 3, 4); u_{n+1} = k u_n; u_2; u_1[4]',
+  'v_0 = (1, 2); v_{n+1} = v_n + (1, 1); v_3; w_0 = (1, 2, 3); w_{n+1} = -pop(w_n); w_1; w_3; w_4',
+  'h_{h+1} = push(h_h, h); h_2; L = [1, 2, 3]; s_{n+1} = push(s_n, L); r_{n+1} = push(r_n, sort(L)[1]); r_2',
+  's_0 = (); s_{n+1} = push(s_n, n); a_n = top(s_n); b_{n+1} = b_n + top(s_n); b_0 = 0; b_3; ' +
+    'c_{n+1} = {count(s_n) = 0: 0, top(s_n)}; c_4; d_{n+1} = d_n + count(s_n); d_3',
+  'push((1, 2), 3); pop((1, 2, 3)); top((1, 2, 3)); push(1, 2); pop(1); top(()); push(); pop((1, 2), 3); push((1, 2), x)',
+  'push((1, 2, 3), 4, 5); pop((1, 2, 3, 4, 5)); f(s) = top(s) + 1; f((1, 2)); g(s) = push(s, 0); g((1, 2)); count(pop((1, 2)))',
+  // Sequences and recurrences over lists and tuples.
+  'a_n = n^2; L = [1, 2, 3]; a_L; a_[L]; a_[1..4]; K = a_[2..5]; K; mean(K); a_[1, 3]; a_[L + 1]; y = a_L x',
+  'a_n = n^2; N = 3; a_N; a_[N]; a_[0..N]; a_[N..5]; a_[1.5]; a_[-1]; a_[1..2000]; hist(a_[1..30])',
+  'D = (1, 1, 0, 1); step(q, s) = mod(2q + s, 3); q_0 = 0; q_{n+1} = step(q_n, D[n + 1]); q_4; q_5; q_[0..4]; ' +
+    'N = 2; q_N; r_{n+1} = r_n + q_n; r_3; r_6',
+  'w = (1, 2, 3); a_{n+1} = a_n + w[n + 1]; a_2; a_4; b_n = w[n]; L = [1, 2]; c_{n+1} = c_n + L; d_{n+1} = d_n mean(L)',
+  'a_{n+1} = b_n + 1; b_{n+1} = a_n; a_0 = 1; b_0 = 2; a_3; b_3; a_[0..3]; (a_2, b_2)',
+  'a_{n+1} = 2 a_n; b_n = a_n + 1; b_3; c_{n+1} = c_n + a_n; s_n = sum(k=0..n, a_k); s_3; b_[1..3]; c_4',
+  'a_n = [1, 2, 3][n]; b_n = mean([n, 2n]); c_{n+1} = [1, 2][1] c_n; L = [3, 1, 2]; d_n = L[n]; e_n = n count(L)',
+  'L = [3, 1, 4, 1, 5]; b_0 = 0; b_{n+1} = b_n + L[n + 1]; b_3; b_5; b_6; b_9; T = sort(L); c_{n+1} = c_n T[n + 1]; c_2',
 ];
 
 /** What web/scene.ts draws of a graph's plan, from lib/graph.ts: its vertices, its arrows as they read, and

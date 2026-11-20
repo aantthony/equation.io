@@ -268,12 +268,8 @@ func prepareDocument(_ sources: [String], files: DataFiles? = nil) -> PreparedDo
       // Any other `~` is not a row the port reads.
       blocked[i] = "this use of ~"
       tildeNames.formUnion(writtenNames(text))
-    } else if let scan = seqScans[i] {
+    } else if seqScans[i] != nil {
       // Sequence and recurrence rows (a_n = …, a_{n+1} = …) are plots, not definitions.
-      if scan.emptyTuple {
-        blocked[i] = "tuple-valued recurrences"
-        poison.insert(scan.name)
-      }
     } else {
       scanned[i] = scanDefinition(text)
     }
@@ -462,6 +458,8 @@ public func analyze(_ sources: [String], files: DataFiles? = nil) -> DocumentAna
   sequences.hasConst = { built.consts.has($0) }
   sequences.defineConstant = { built.consts[$0] = $1 }
   sequences.setValue = { boundVals[$0] = $1 }
+  sequences.pointDim = { built.pointDims[$0] }
+  sequences.hasList = { built.lists.has($0) }
 
   // Each panel's rows are read with its view's maps and its surface; a panel
   // whose view the port cannot read is left alone.
@@ -596,6 +594,16 @@ public func analyze(_ sources: [String], files: DataFiles? = nil) -> DocumentAna
         // A seed row draws nothing of its own; the rule row carries it.
         rows[i].classified = try classifyAutomatonRow(
           document.seqScans, i, fnNames: fnNames, getFn: getFn, constNames: constNames, ropts: ropts)
+        continue
+      }
+      // `s_0 = ()`: the empty tuple its recurrence starts from, drawn there.
+      // A recurrence has one seed: not this and a constant s_0 too.
+      if let seq = document.seqScans[i], seq.emptyTuple {
+        let seed = "\(seq.name)_0"
+        let earlier = document.seqScans.firstIndex { $0?.emptyTuple == true && $0?.name == seq.name }.map { $0 < i }
+        if earlier == true || raw.contains(where: { $0.name == seed }) {
+          throw LanguageError("\(seed) is already defined.")
+        }
         continue
       }
       if let seq = document.seqScans[i] {
@@ -811,7 +819,7 @@ public func analyze(_ sources: [String], files: DataFiles? = nil) -> DocumentAna
         latticeAxes.append([])
       }
       switch rows[i].cpu {
-      case .automaton(_, _, _, _, let axes)?, .lattice(_, let axes)?: latticeAxes[panelAt] += axes
+      case .automaton(_, _, _, _, let axes)?, .lattice(_, let axes, _)?: latticeAxes[panelAt] += axes
       default: break
       }
       if rows[i].unsupported != nil, !rows[i].comment { unknown.insert(panelAt) }
