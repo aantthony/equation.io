@@ -26,10 +26,10 @@ func graph3D(_ path: String) -> Graph3D? {
 /// arrows for `# arrows` (the site keeps those toggles outside the text;
 /// apple/tools/scene3d.ts reads the same notes).
 func spaceGraph(_ rows: [String], theme: GraphTheme, time: Double, explain: Bool) -> Graph3D? {
-  let analysis = analyze(rows)
+  let analysis = analyze(rows, files: shotFiles)
   guard Graph.kind(of: analysis) == .space else { return nil }
   for (row, text) in zip(analysis.rows, rows) {
-    if let problem = row.error ?? row.unsupported {
+    if let problem = row.error ?? row.unsupported ?? row.dataLocal {
       FileHandle.standardError.write(Data("not drawn: \(text): \(problem)\n".utf8))
     }
   }

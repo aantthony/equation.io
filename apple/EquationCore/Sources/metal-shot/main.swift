@@ -19,6 +19,8 @@ import UniformTypeIdentifiers
 //   --view cx,cy,upp the window (upp in math units per device pixel); default the opening window
 //   --time 1.5       seconds since the graph opened (t)
 //   --explain        print what the language made of each row
+//   --file a.csv     a data file the rows may open (any number of them): a row finds it by its hash,
+//                    or by its name when it pins none — `p = open("a.csv")`
 //
 // Set a shot beside the site's (apple/tools/web-shot.ts takes the same
 // rows, size and theme) to see whether the two renderers agree; --diff
@@ -62,6 +64,8 @@ var arguments = Array(CommandLine.arguments.dropFirst())
 var options: [String: String] = [:]
 var flags: Set<String> = []
 var rest: [String] = []
+/// The data files `--file` names, as the app's documents hold theirs; nil without any.
+nonisolated(unsafe) var shotFiles: DataFiles?
 while !arguments.isEmpty {
   let argument = arguments.removeFirst()
   switch argument {
@@ -69,6 +73,19 @@ while !arguments.isEmpty {
   case "--out", "--scene", "--size", "--scale", "--view", "--time":
     guard !arguments.isEmpty else { fail("\(argument) needs a value.") }
     options[argument] = arguments.removeFirst()
+  case "--file":
+    guard !arguments.isEmpty else { fail("--file needs a path.") }
+    let url = URL(fileURLWithPath: arguments.removeFirst())
+    guard let bytes = try? Data(contentsOf: url) else { fail("Can't read \(url.path).") }
+    do {
+      // (As the site decodes a dropped file: UTF-8, what is not becoming U+FFFD.)
+      let table = try parseCsv(String(decoding: bytes, as: UTF8.self))
+      var files = shotFiles ?? DataFiles()
+      files.add(DataFile(name: rowSafeFileName(url.lastPathComponent), table: table), hash: sha256Hex(bytes))
+      shotFiles = files
+    } catch {
+      fail("\(url.lastPathComponent): \((error as? LanguageError)?.message ?? "\(error)")")
+    }
   case "--diff":
     guard arguments.count >= 2 else { fail("--diff needs two images.") }
     options["--diff"] = arguments.removeFirst()
@@ -166,9 +183,9 @@ if let path = options["--scene"] {
   }
 } else {
   // The rows as the app draws them: analyzed, colored in palette order, at --time.
-  let analysis = analyze(rest)
+  let analysis = analyze(rest, files: shotFiles)
   for (row, text) in zip(analysis.rows, rest) {
-    if let problem = row.error ?? row.unsupported {
+    if let problem = row.error ?? row.unsupported ?? row.dataLocal {
       FileHandle.standardError.write(Data("not drawn: \(text): \(problem)\n".utf8))
     }
   }
