@@ -22,7 +22,7 @@ import Foundation
 ///
 /// Nothing here leaves the device: a file is read, hashed and parsed in
 /// place, and written only into the document that opened it.
-public struct GraphFile: Equatable, Sendable {
+public struct GraphDocumentFile: Equatable, Sendable {
   public var rows: [String]
   public var data: DocumentData
 
@@ -156,22 +156,32 @@ extension DocumentData: Equatable {
   }
 }
 
-extension GraphFile {
+/// What became of a file someone gave (the site's notice): what arrived and
+/// under what name, or why it could not be read.
+public struct DataNotice: Equatable, Sendable {
+  public var text: String
+  /// The file did not do what giving it meant to: it could not be read, or
+  /// a row that names it is pinned to other bytes and stays as it was.
+  public var problem: Bool
+}
+
+extension GraphDocumentFile {
   /// Bring files into the document and wire them into its rows (web/main.ts
   /// `openDataFiles`, lib side in EquationCore `rowsOpening`): each is
   /// parsed, hashed and kept, a row that names it is pinned to its bytes, and
   /// one that no row names gets a row of its own. Returns what to tell the
-  /// person, a line per file: what arrived, or why a file could not be read.
-  public mutating func open(_ picked: [(name: String, bytes: Data)]) -> [String] {
-    var notices: [String] = []
+  /// person, a notice per file.
+  public mutating func open(_ picked: [(name: String, bytes: Data)]) -> [DataNotice] {
+    var notices: [DataNotice] = []
     for (name, bytes) in picked {
       do {
         let loaded = try data.ingest(name: name, bytes: bytes)
         let opened = rowsOpening(file: loaded.file.name, hash: loaded.hash, table: loaded.file.table, in: rows)
         rows = opened.rows
-        notices.append(opened.notice)
+        notices.append(DataNotice(text: opened.notice, problem: opened.kept > 0))
       } catch {
-        notices.append("\(name): \((error as? LanguageError)?.message ?? error.localizedDescription)")
+        let why = (error as? LanguageError)?.message ?? error.localizedDescription
+        notices.append(DataNotice(text: "\(name): \(why)", problem: true))
       }
     }
     // A row typed by hand before its file came is pinned to it now.

@@ -162,15 +162,15 @@ private func pinned(_ text: String, file: String, hash: String) -> String? {
 ///
 /// A row pinned to a different hash named those exact bytes on purpose:
 /// repointing it is the substitution the pin exists to prevent, so it keeps
-/// its hash, and the new bytes arrive as a row of their own. `notice` says
-/// what happened, as the site's does.
+/// its hash, and the new bytes arrive as a row of their own (`kept` counts
+/// such rows). `notice` says what happened, as the site's does.
 ///
 /// Port: a row whose hash these bytes answer is satisfied whatever the file
 /// is called now (the site asks for the same name too, and gives a renamed
 /// file a second row beside the one that already reads it).
 public func rowsOpening(
   file: String, hash: String, table: CsvTable, in rows: [String]
-) -> (rows: [String], notice: String) {
+) -> (rows: [String], notice: String, kept: Int) {
   var rows = rows
   var known = false
   var pinnedElsewhere = 0
@@ -193,7 +193,7 @@ public func rowsOpening(
   }
   if known {
     notice.append("\(file) reloaded")
-    return (rows, notice.joined(separator: " · "))
+    return (rows, notice.joined(separator: " · "), pinnedElsewhere)
   }
   // A name no definition has claimed, by the rows' text (web/main.ts `rowNameFor`).
   let taken = Set(rows.compactMap { scanDefinition(jsTrimmed(stripNote($0)))?.name })
@@ -206,7 +206,7 @@ public func rowsOpening(
     rows.append("(\(name).\(nums[0].name), \(name).\(nums[1].name))")
   }
   notice.append("\(file): \(table.rows) rows as \(name)")
-  return (rows, notice.joined(separator: " · "))
+  return (rows, notice.joined(separator: " · "), pinnedElsewhere)
 }
 
 /// The rows with every table row that names a file without a hash pinned to
