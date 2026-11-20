@@ -88,8 +88,7 @@ enum ChatModel {
   }
 
   // The instructions (instructions, referenceInstructions) are in
-  // Instructions.swift, generated from lib/assistant-instructions.ts, which
-  // the web voice prototype shares.
+  // Instructions.swift, generated from lib/assistant-instructions.ts.
 
   /// How every reply is generated, in the app and the evals: greedy, the
   /// likeliest token each time, so a request gets the same answer each time.
@@ -153,9 +152,9 @@ enum ChatModel {
 /// What the chat's tools do to a graph: in the app, the open document and
 /// its Metal view (GraphAccess, in Chat.swift); in the evals (apple/evals),
 /// a service running the site's analyzer. Each answers with JSON text, as
-/// the site's voice tools do (web/voice.ts).
+/// the site's voice tools did (its voice mode, since removed).
 @MainActor protocol GraphTools: AnyObject, Sendable {
-  /// The voice prototype's get_graph: every row's status and meaning, and the window or camera.
+  /// get_graph, as the site's voice mode had it: every row's status and meaning, and the window or camera.
   func graph() async -> String
   /// Replace the rows, and read the graph back once it is drawn.
   func set(_ rows: [String]) async -> String
@@ -172,7 +171,7 @@ enum ChatModel {
 }
 
 /// Seconds a tool may take: long enough to see, short enough that a slip
-/// can't hold the view for minutes (as in web/voice.ts).
+/// can't hold the view for minutes (as the site's voice mode held it).
 private func seconds(_ value: Double?, default fallback: Double) -> Double {
   guard let value, value.isFinite else { return fallback }
   return min(30, max(0, value))
@@ -186,7 +185,7 @@ private func tidy(_ row: String) -> String {
   return row
 }
 
-// MARK: - Tools (the voice prototype's, lib/voice-agent.ts)
+// MARK: - Tools (first written for the site's voice mode, since removed)
 
 struct GetGraph: Tool {
   let access: any GraphTools

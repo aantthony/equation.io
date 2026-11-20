@@ -13,9 +13,10 @@ import FoundationModels
 //
 //   pnpm app:eval:pcc                     # Apple's server model on Private Cloud Compute (a signed build)
 //   pnpm app:eval --model openai          # a hosted baseline (gpt-5.5; --openai-model to change)
-//   pnpm app:eval --model openai --reference web/public/llms.txt
-//                                          # the whole reference in its instructions, in place
-//                                          # of the lookup tools (too long for the device's 8K)
+//   pnpm app:eval --model openai --reference reference.txt
+//                                          # the whole reference (scripts/reference.ts --llms) in
+//                                          # its instructions, in place of the lookup tools (too
+//                                          # long for the device's 8K)
 //
 // Results land in apple/evals/results/, one JSON file per invocation.
 

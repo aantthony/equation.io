@@ -15,8 +15,17 @@ app doesn't do yet.
   ported from `lib/assistant-tools.ts`.
 - `tools/` — `app-data.ts`, the data the app bundles; `web-shot.ts`, a picture
   of a graph as the site draws it.
-- `corpus/` — records what the TypeScript suite asks the parser, so the Swift
+- `corpus/` — records what the TypeScript suite asks the parser, and what the
+  analyzer makes of every example and of targeted documents, so the Swift
   port is held to the same answers.
+- `evals/` — Ask's evals: the tasks, the service that grades them, the runner.
+
+The TypeScript the Apple side adds outside `apple/` is what Ask answers from:
+`docs/reference/` (the language reference its lookups and instructions are
+generated from), `lib/reference.ts`, `lib/assistant-tools.ts`,
+`lib/assistant-instructions.ts` and `scripts/reference.ts`. The site does not
+use them: its own reference, `web/public/llms.txt`, is written by hand, so a
+change to the language is described in both.
 
 ## Build
 
@@ -32,6 +41,12 @@ copies as they are: `examples.json`, the Examples menu (`web/examples.ts`);
 `docs/reference`, with the menu's examples by kind and by function); and
 `language.json`, what they read from the language itself (the function
 table, each kind's meaning). Run it again after changing any of those.
+
+`pnpm reference` (`scripts/reference.ts`) writes
+`Equation/Sources/Instructions.swift`, Ask's instructions, from
+`lib/assistant-instructions.ts` and the reference's list of kinds; it is
+checked in, and `lib/reference.test.ts` fails while it is out of date. Every
+change to that text is a change to measure (see Ask evals).
 
 Debug builds open straight onto a graph, skipping the document browser, with
 `EQUATION_SCRATCH` set (rows separated by `;`):
@@ -87,8 +102,7 @@ TypeScript does, which a fixture can check to the byte.
 `Render2D.swift` has the site's scene types (`View2D`, `Layers2D`, …) field
 for field, and `Renderer2D.render` draws them in the site's order. What is
 drawn with a 2D context over the shader passes (axis numbers, a lattice's
-labels, points, polylines, clouds, bars, regions, glyphs, a graph's vertices,
-text) is `Overlay2D.swift`, in CoreGraphics and CoreText; a `Scene2D` carries
+labels, points, polylines, clouds, bars, regions, a graph's vertices, text) is `Overlay2D.swift`, in CoreGraphics and CoreText; a `Scene2D` carries
 it as `overlay`. A mapped axis (`view(x = 10^X)`) is the core's
 `AxisMap.swift`, which also rewrites a row for one; its ticks are
 `AxisTicks.swift`, and `MapOverlay.swift` carries a row's overlay through one.
@@ -113,7 +127,7 @@ swift run metal-shot --diff web.png metal.png --out diff.png
 its scene types, and its vertex and fragment shaders (`Frag3D.swift`)
 compiled as Metal by `GLSL3D.swift`. A document with a row in space
 (`Graph.kind(of:)`) is drawn through `Document3D.swift`, which builds the
-scene from the rows' plans as `web/main.ts` `renderPanel` does: shaders for
+scene from the rows' plans as `web/scene.ts` `renderPanel` does: shaders for
 surfaces and clouds, and what the site samples, traces or solves on the CPU
 (curves and tubes, a field's streamlines, intersections, systems).
 
@@ -141,6 +155,14 @@ and say so where the code departs.
 pnpm swift:test    # re-record the corpus from the TypeScript suite, then swift test
 ```
 
+The fixtures are recorded from the checkout's own `lib/` and `web/examples.ts`,
+so the port is held to the language of the commit it is built from: after
+merging `main`, re-record, and port what differs. `AnalysisConformanceTests`
+prints the coverage (rows the port reads of all it is shown, by example row
+and by whole example document) and what holds the rest back;
+`ANALYSIS_WHY=<text>` and `ANALYSIS_UNSUPPORTED=<name prefix>` list the rows.
+A row is either read as the site reads it or reported as not supported yet.
+
 The corpus includes what Ask's lookups answer in TypeScript to a few thousand
 requests (`corpus/lookups.ts`: every kind, shape and function by each of its
 names, with misspellings, phrases and misses), which `EquationAssist` must
@@ -155,7 +177,8 @@ pnpm app:eval                     # every task in apple/evals/tasks.ts, 5 runs e
 pnpm app:eval --runs 1 --task unit-cube
 pnpm app:eval --sampling greedy   # as the app answers; evals sample by default
 pnpm app:eval --model openai              # hosted baseline, gpt-5.5 (--openai-model to change)
-pnpm app:eval --model openai --reference web/public/llms.txt   # the whole reference in context, no lookups
+node --experimental-transform-types scripts/reference.ts --llms > reference.txt   # the reference as one file
+pnpm app:eval --model openai --reference reference.txt   # the whole reference in context, no lookups
 node --experimental-transform-types apple/evals/report.ts apple/evals/results/a.json apple/evals/results/b.json
 ```
 

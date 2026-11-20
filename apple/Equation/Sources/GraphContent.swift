@@ -143,7 +143,7 @@ struct GraphContent: Equatable {
         out.space = SpaceGraph(document: document)
       }
       if out.space != nil {
-        // (The first such row, as web/main.ts `viewportRow` finds it.)
+        // (The first such row, as web/scene.ts `viewportRow` finds it.)
         out.frameRow = rows[k].first { frames($0, camera: true) }
         if let row = out.frameRow,
           case .camera(let theta, let phi, let radius, let target, let spin, let locked)? = analysis.rows[row].view
@@ -215,7 +215,7 @@ struct GraphContent: Equatable {
   }
 
   /// The points of panel `k` a drag can move, where the panel draws them: on
-  /// a panel with mapped axes, in its screen's coordinates (web/main.ts `carry`).
+  /// a panel with mapped axes, in its screen's coordinates (web/scene.ts `carry`).
   func grabPoints(panel k: Int, rows: Range<Int>? = nil, time: Double, run: StateStepper?) -> [GrabPoint] {
     let panel = panels.panels[k]
     var env = panel.graph.environment(at: time, run: run)

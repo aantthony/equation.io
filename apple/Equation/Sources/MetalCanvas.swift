@@ -125,7 +125,7 @@ final class MetalCanvas: MTKView, MTKViewDelegate {
 
   /// Bring the panels' states in step with the document: one each, and a
   /// view(…) or camera(…) row that changed under a panel is a new framing
-  /// for it (web/main.ts `applyViewportRows`).
+  /// for it (web/scene.ts `applyViewportRows`).
   private func reconcile() {
     guard let content else { return }
     var states = viewport.states
@@ -249,7 +249,7 @@ final class MetalCanvas: MTKView, MTKViewDelegate {
 
   /// Turn each spinning camera by its spin since the last frame. A hand on
   /// the panel or a move in flight holds it, and it resumes from there
-  /// (web/main.ts `advanceSpin`).
+  /// (web/scene.ts `advanceSpin`).
   private func turn() {
     let now = CACurrentMediaTime()
     let dt = lastFrame.map { min(0.1, now - $0) } ?? 0
@@ -331,7 +331,7 @@ final class MetalCanvas: MTKView, MTKViewDelegate {
   }
 
   /// Rewrite the moved panels' view(…) and camera(…) rows to the picture on
-  /// screen (web/main.ts `writebackViewport`, `panelViewText`). A panel
+  /// screen (web/scene.ts `writebackViewport`, `panelViewText`). A panel
   /// without such a row has nothing to write: its framing is not part of
   /// the document. The rewrites of one gesture are one undo step.
   func flushWriteback() {
@@ -515,7 +515,7 @@ final class MetalCanvas: MTKView, MTKViewDelegate {
 
   /// Set the first panel's spin, in radians a second, easing it in from
   /// rest, and save it in the panel's camera(…) row — written at the end of
-  /// the panel's rows if it has none (web/main.ts `setCameraSpin`).
+  /// the panel's rows if it has none (the site's former voice mode's `setCameraSpin`).
   func setSpin(_ spin: Double) {
     guard let content, let model, spatial(0), let framing = content.framing.first,
       let panel = content.panels.panels.first

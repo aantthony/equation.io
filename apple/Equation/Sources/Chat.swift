@@ -26,14 +26,14 @@ import SwiftUI
   private static let noLookups = #"{"error":"the app's reference is missing from this build"}"#
   private static let notReady = #"{"error":"the graph isn't ready"}"#
 
-  /// lib/row-kind.ts `KIND_MEANINGS`, as `pnpm app:data` bundles it (language.json).
+  /// lib/assistant-tools.ts `KIND_MEANINGS`, as `pnpm app:data` bundles it (language.json).
   private static let kindMeanings: [String: String] = {
     struct Language: Decodable { var kindMeanings: [String: String] }
     guard let data = try? Data(contentsOf: AppData.url("language")) else { return [:] }
     return (try? JSONDecoder().decode(Language.self, from: data).kindMeanings) ?? [:]
   }()
 
-  /// The voice prototype's get_graph: every row's status and meaning, and the window or camera.
+  /// get_graph, as the site's voice mode had it: every row's status and meaning, and the window or camera.
   func graph() async -> String {
     guard let model else { return Self.notReady }
     return Self.state(rows: rows(), theme: model.theme, framing: model.metal?.framing)
@@ -48,7 +48,7 @@ import SwiftUI
     return Self.state(rows: rows, theme: model.theme, framing: model.metal?.framing)
   }
 
-  /// move_view (web/main.ts `movePanelView`): ease the first panel's window
+  /// move_view (the site's former voice mode's `movePanelView`): ease the first panel's window
   /// or camera to a new framing, answering once it is there.
   func moveView(_ target: [String: Any], seconds: Double) async -> String {
     guard let canvas = model?.metal, let framing = canvas.framing else { return Self.notReady }
@@ -92,7 +92,7 @@ import SwiftUI
   private static let stopped =
     #"{"stopped":"the view was taken over before the move finished; call get_graph for where it is"}"#
 
-  /// animate_slider (web/main.ts `animateSlider`): glide a slider's row to a
+  /// animate_slider (the site's former voice mode's `animateSlider`): glide a slider's row to a
   /// value at a steady rate, by rewriting it. It answers as the glide
   /// starts, saying where it will stop.
   func animateSlider(_ name: String, to: Double, from: Double?, seconds: Double) async -> String {
@@ -100,7 +100,8 @@ import SwiftUI
     let lines = rows()
     let analysis = analyze(lines)
     let sliders = analysis.rows.indices.filter { analysis.rows[$0].slider != nil && analysis.rows[$0].error == nil }
-    let named = { (index: Int) in analysis.rows[index].definition?.name }
+    // (A redefined built-in, `e := 0.6`, by the name its row wrote.)
+    let named = { (index: Int) in (analysis.rows[index].definition?.name).map(writtenName) }
     guard let index = sliders.first(where: { named($0) == name }),
       case .constant(_, let rhs, _)? = analysis.rows[index].definition,
       let form = sliderForm(rhs.trimmingCharacters(in: .whitespaces)), let slider = analysis.rows[index].slider
@@ -112,7 +113,7 @@ import SwiftUI
     // The slider's own value now; and where its range lets it stop.
     let start = from ?? slider.value
     let goal = form.whole ? to.rounded() : to
-    let end = sliderValue(form, goal, sliderBounds(form, analysis.env))
+    let end = sliderValue(form, goal, sliderBounds(form, analysis.env, valueNames: analysis.valueNames))
     glides[name]?.cancel()
     glides[name] = Task { @MainActor [weak self] in
       let began = CACurrentMediaTime()
@@ -193,8 +194,8 @@ import SwiftUI
     ])
   }
 
-  /// The graph as the tools report it (the site's `GraphState`, web/main.ts
-  /// `panelGraph`): the mode, the first panel's window or camera, and every
+  /// The graph as the tools report it (the `GraphState` of the site's former
+  /// voice mode, its `panelGraph`): the mode, the first panel's window or camera, and every
   /// row as `rowStatus` describes it (EquationRender `describe`, the port
   /// of lib/assistant-tools.ts `describeRow`) with the color it draws in.
   /// Not reported: a curve's intercepts in view (`points`).
