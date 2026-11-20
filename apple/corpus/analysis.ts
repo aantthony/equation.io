@@ -60,6 +60,7 @@ import { parseCsv, type Table } from '../../lib/csv.ts';
 import { shortHash } from '../../lib/hash.ts';
 import { MEASURE_CASES } from './cases-measure.ts';
 import { REST_CASES, recordGraph, recordPath } from './cases-rest.ts';
+import { LAST_CASES } from './cases-last.ts';
 
 const fixtures = new URL('../EquationCore/Tests/EquationCoreTests/Fixtures/', import.meta.url);
 
@@ -1160,6 +1161,7 @@ function cloudError(plot: import('../../lib/compiler.ts').CpuPlan | undefined): 
 
 MEASURE_CASES.forEach((text, k) => docs.push({ name: `case measure ${k + 1}`, rows: splitStatements(text) }));
 REST_CASES.forEach((text, k) => docs.push({ name: `case rest ${k + 1}`, rows: splitStatements(text) }));
+LAST_CASES.forEach((text, k) => docs.push({ name: `case last ${k + 1}`, rows: splitStatements(text) }));
 randomDocs(Number(process.env.RANDOM_DOCS ?? 600)).forEach((text, k) =>
   docs.push({ name: `case random ${k + 1}`, rows: splitStatements(text) }),
 );

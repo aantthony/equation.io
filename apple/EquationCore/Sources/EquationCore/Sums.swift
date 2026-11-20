@@ -283,6 +283,16 @@ func foldNums(_ e: Expr, calls: Bool = false) -> Expr {
   }
 }
 
+/// `e` with each Σ/Π of four arguments replaced by `expand` of it. (The walk
+/// is not the resolver's method: one that hands itself on holds a copy of
+/// the resolver in every frame.)
+private func mapSumCalls(_ e: Expr, _ expand: (Expr, [Expr]) throws -> Expr) rethrows -> Expr {
+  if case .call(let name, let args) = e, name == "sum" || name == "prod", args.count == 4 {
+    return try expand(e, args)
+  }
+  return try mapChildren(e) { try mapSumCalls($0, expand) }
+}
+
 extension Resolver {
   /// Expand a Σ/Π into an explicit sum/product of per-index terms
   /// (lib/defs.ts `expandSum`).
@@ -359,14 +369,13 @@ extension Resolver {
   /// open here — on an enclosing function's parameter or a sequence index —
   /// waits as before (lib/sums.ts `expandClosedSums`).
   func expandClosedSums(_ e: Expr) throws -> Expr {
-    if case .call(let name, let args) = e, name == "sum" || name == "prod", args.count == 4 {
+    try mapSumCalls(e) { sum, args in
       func open(_ b: Expr) -> Bool {
         freeVars(b).contains { opts.params?.contains($0) == true || opts.openVars.contains($0) }
       }
-      if open(args[1]) || open(args[2]) { return e }
-      return try expandSum(e, args[3])
+      if open(args[1]) || open(args[2]) { return sum }
+      return try expandSum(sum, args[3])
     }
-    return try mapChildren(e) { try expandClosedSums($0) }
   }
 
   /// A Σ up to a clamped whole-number slider, `N = round(clamp(19, 1, 50))`,

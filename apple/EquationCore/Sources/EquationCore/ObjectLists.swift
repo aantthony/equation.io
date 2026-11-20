@@ -30,31 +30,33 @@ private let MEMBER = "[member]"
 /// an argument list or a case counts as one too. A list the port has marked
 /// or settled counts as the TypeScript's node does.
 func exceedsListNodes(_ e: Expr, _ limit: Int, settledAreLeaves: Bool = false) -> Bool {
+  // (Over a stack of its own, not the thread's: the count is the same in any
+  // order, and this is asked of rows before anything has said they are small.)
   var n = 0
-  func walk(_ x: Expr) -> Bool {
-    if let literal = listLiteral(x), case .call = x { return walk(.list(literal.items)) }
-    if let settled = settledList(x) { return settledAreLeaves ? count(1) : walk(settled.e) }
-    switch x {
-    case .num, .var, .str: return count(1)
-    case .neg, .bin, .eq, .ineq, .comp: return count(1) || childrenOf(x).contains(where: walk)
-    case .data, .text: return count(2)
-    case .hist: return count(3)
-    case .piecewise(let cases, let otherwise):
-      _ = otherwise
-      return count(2 + cases.count) || childrenOf(x).contains(where: walk)
-    case .lazy(let cols, _): return count(2 + 2 * cols.count) || childrenOf(x).contains(where: walk)
-    case .figure(_, _, _, let over):
-      return count(2 + (over.map { 1 + 2 * $0.count } ?? 0)) || childrenOf(x).contains(where: walk)
-    case .loop: return count(3) || childrenOf(x).contains(where: walk)
-    case .call, .index, .range, .eqtest, .vec, .list, .trail, .label, .family:
-      return count(2) || childrenOf(x).contains(where: walk)
+  var pending = [e]
+  while let x = pending.popLast() {
+    if let literal = listLiteral(x), case .call = x {
+      pending.append(.list(literal.items))
+      continue
     }
+    if let settled = settledList(x) {
+      if settledAreLeaves { n += 1 } else { pending.append(settled.e) }
+      if n > limit { return true }
+      continue
+    }
+    switch x {
+    case .num, .var, .str, .neg, .bin, .eq, .ineq, .comp: n += 1
+    case .data, .text: n += 2
+    case .hist, .loop: n += 3
+    case .piecewise(let cases, _): n += 2 + cases.count
+    case .lazy(let cols, _): n += 2 + 2 * cols.count
+    case .figure(_, _, _, let over): n += 2 + (over.map { 1 + 2 * $0.count } ?? 0)
+    case .call, .index, .range, .eqtest, .vec, .list, .trail, .label, .family: n += 2
+    }
+    if n > limit { return true }
+    pending.append(contentsOf: childrenOf(x))
   }
-  func count(_ k: Int) -> Bool {
-    n += k
-    return n > limit
-  }
-  return walk(e)
+  return false
 }
 
 // MARK: - Named lists (lib/defs.ts listGetter, pointColumn, indexIssue)
@@ -200,6 +202,14 @@ private func recover<T>(_ run: () throws -> T) throws -> T? {
   }
 }
 
+/// `n` with every index in it replaced by `indexed` of it. (Not a function
+/// nested in `lowerObjects`: one that walks by handing itself on holds a
+/// copy of all it captures in every frame.)
+private func mapIndices(_ n: Expr, _ indexed: (Expr) throws -> Expr) rethrows -> Expr {
+  guard case .index = n else { return try mapChildren(n) { try mapIndices($0, indexed) } }
+  return try indexed(n)
+}
+
 func lowerObjects(_ e: Expr, _ defs: BuiltDefs, _ opts: ResolveOpts, named: Bool = false) throws -> Low {
   var e = e
   func plotVariable(_ v: String) -> Bool { ["x", "y", "z", "u", "v"].contains(v) || defs.fields.has(v) }
@@ -225,8 +235,8 @@ func lowerObjects(_ e: Expr, _ defs: BuiltDefs, _ opts: ResolveOpts, named: Bool
     default: false
     }
   }
-  func indices(_ n: Expr) throws -> Expr {
-    guard case .index(let target, let idx) = n else { return try mapChildren(n, indices) }
+  func indexed(_ n: Expr) throws -> Expr {
+    guard case .index(let target, let idx) = n else { return n }
     if ofTensor(target) { return n }
     // A named point is a tuple of its coordinates: T[2] of T = (3, 1, 2) is 1.
     if case .var(let name) = target, defs.points.contains(name), let names = comps(name) {
@@ -235,7 +245,7 @@ func lowerObjects(_ e: Expr, _ defs: BuiltDefs, _ opts: ResolveOpts, named: Bool
     }
     return settledNode(try lowerLists(n, get, opts, named: true))
   }
-  if !exceedsListNodes(e, 32768) { e = try indices(e) }
+  if !exceedsListNodes(e, 32768) { e = try mapIndices(e, indexed) }
   let isList: (String) -> Bool = { name in ((try? get(name)) ?? nil) != nil }
   // A list of points beside a matrix (R P) is a multiset of points, not a
   // matrix scaled by a list: it is taken point by point (`matrixRows`).
@@ -1174,6 +1184,15 @@ func exactCases(_ e: Expr, keepingLists isList: (String) -> Bool) -> Expr {
 /// each member reduced alone, which reads like a wrapper for mean(L)
 /// (lib/analysis.ts `perMemberNote`).
 func perMemberNote(_ e: Expr, _ isList: (String) -> Bool) -> String? {
+  if case .call(MAP, _) = e, let note = mapMemberNote(e, isList) { return note }
+  for c in childrenOf(e) {
+    if let note = perMemberNote(c, isList) { return note }
+  }
+  return nil
+}
+
+/// The note of one [map] call, if it has one (the walk down the row is `perMemberNote`).
+private func mapMemberNote(_ e: Expr, _ isList: (String) -> Bool) -> String? {
   if case .call(MAP, let args) = e, case .str(let fn)? = args.first, args.count >= 2 {
     var members: Set<String> = []
     for a in args.dropFirst(2) {
@@ -1211,9 +1230,6 @@ func perMemberNote(_ e: Expr, _ isList: (String) -> Bool) -> String? {
       return "\(fn) applies per member, so its \(lone) sees one member at a time; "
         + "for the whole list, write \(lone)(…) in the row"
     }
-  }
-  for c in childrenOf(e) {
-    if let note = perMemberNote(c, isList) { return note }
   }
   return nil
 }

@@ -199,6 +199,7 @@ struct Resolver {
         e = div(
           sub(substVars(e, [v: add(vv, h)]), substVars(e, [v: sub(vv, h)])), .num(2 * Resolver.fdH))
       }
+      try notTooDeep(e)
     }
     return e
   }
@@ -267,84 +268,163 @@ struct Resolver {
 
   // MARK: rx
 
+  // (One small function a kind: a debug build gives a function a frame for all
+  // its cases' temporaries at once, and this one recurses as deep as the row.)
   func resolve(_ e: Expr) throws -> Expr {
     switch e {
-    case .num:
+    case .num, .str, .data, .text:
+      // (Packed columns hold nothing to resolve.)
       return e
-    case .var(let name):
-      if let term = try opts.sequenceTerm?(name, nil, opts.openVars) { return term }
-      if let value = try namedInterval(name) { return value }
-      if let value = opts.complex(name) { return value }
-      if let value = opts.multivector(name) { return value }
-      if let value = unitVector(name, opts) { return value }
-      return pointCoord(name) ?? e
-    case .neg(let a):
-      return .neg(try resolve(a))
-    case .bin(let op, let lhs, let rhs, let glyph):
-      // `∇f`, `∇·F`, `∇×F`, `∇²f` (VectorCalculus.swift).
-      if op == .mul || op == .div, let nabla = try splitNablaChain(e) { return try resolve(nabla) }
-      // Σ/∫ headers capture their trailing product chain before it resolves.
-      if op == .mul || op == .div, let m = splitSumChain(e) {
-        let body = try isSumHeader(m.header) ? expandSum(m.header, m.body) : expandInt(intBounds(m.header), m.body)
-        return try m.coeff.map { .bin(m.op, try resolve($0), body) } ?? body
-      }
-      let a = try resolve(lhs)
-      let b = try resolve(rhs)
-      if op == .div, let d = try matchDeriv(a, b) { return d }
-      if glyph != nil { return .bin(op, a, b, glyph: glyph) }
-      if op == .mul, case .bin(.div, let top, let bottom, _) = a {
-        // The parenthesized form (d/dx)(expr): the quotient is bare.
-        if let head = numeratorWrap(top), let dx = dxOrder(bottom), head.order == dx.order {
-          return head.wrap(try applyDiff(b, dx.v, head.order))
-        }
-      }
-      return .bin(op, a, b)
-    case .index(let target, let at):
-      if case .var(let name) = target, let term = try opts.sequenceTerm?(name, at, opts.openVars) { return term }
-      if case .var(let name) = target, let element = try tupleTermElement(name, at) { return element }
-      return try mapChildren(e, resolve)
-    case .eqtest:
-      return try mapChildren(e, resolve)
+    case .var:
+      return try resolveVar(e)
+    case .bin:
+      return try resolveBin(e)
+    case .index:
+      return try resolveIndex(e)
     case .range:
       throw LanguageError(structuralDiagnostic(e))
-    case .call(let name, let rawArgs):
-      return try resolveCall(name, rawArgs)
-    case .eq(let l, let r):
-      return .eq(try resolve(l), try resolve(r))
-    case .ineq(let op, let l, let r, let grouped):
-      return .ineq(op, try resolve(l), try resolve(r), grouped: grouped)
-    case .vec(let items):
-      return .vec(try items.map(resolve))
-    case .list(let items):
-      return try resolveList(items)
-    case .str:
-      return e
-    case .data, .text:
-      // Packed columns hold nothing to resolve.
-      return e
-    case .comp, .figure, .lazy, .trail, .label, .hist, .family, .loop:
-      return try mapChildren(e, resolve)
-    case .piecewise(let cases, let otherwise):
-      for c in cases {
-        guard case .eq = c.cond else { continue }
-        // A lattice row may test equality, and so may a function body for
-        // the lattice rows that call it (life(c, s) = {s = 3: 1, …}); the
-        // lattice rewrites the case (`exactCases`), and any other row
-        // inlining it fails to compile.
-        if !opts.inDefinition && !opts.exactConditions {
-          throw LanguageError(equalityCaseMessage)
-        }
-      }
-      return .piecewise(
-        try cases.map {
-          Expr.Case(
-            cond: try writtenCondition($0.cond, try resolve($0.cond)), value: try resolve($0.value), bare: $0.bare)
-        },
-        otherwise: try otherwise.map(resolve))
+    case .call:
+      return try resolveCallNode(e)
+    case .neg, .eq, .ineq:
+      return try resolveSides(e)
+    case .vec, .list:
+      return try resolveItems(e)
+    case .eqtest, .comp, .figure, .lazy, .trail, .label, .hist, .family, .loop:
+      return try resolveChildren(e)
+    case .piecewise:
+      return try resolvePiecewise(e)
     }
   }
 
+  private func resolveVar(_ e: Expr) throws -> Expr {
+    guard case .var(let name) = e else { return e }
+    return try resolveName(name) ?? e
+  }
+
+  private func resolveCallNode(_ e: Expr) throws -> Expr {
+    guard case .call(let name, let rawArgs) = e else { return e }
+    return try resolveCall(name, rawArgs)
+  }
+
+  private func resolveSides(_ e: Expr) throws -> Expr {
+    switch e {
+    case .neg(let a): return .neg(try resolve(a))
+    case .eq(let l, let r): return .eq(try resolve(l), try resolve(r))
+    case .ineq(let op, let l, let r, let grouped): return .ineq(op, try resolve(l), try resolve(r), grouped: grouped)
+    default: return e
+    }
+  }
+
+  private func resolveItems(_ e: Expr) throws -> Expr {
+    switch e {
+    case .vec(let items):
+      var out: [Expr] = []
+      for item in items { out.append(try resolve(item)) }
+      return .vec(out)
+    case .list(let items): return try resolveList(items)
+    default: return e
+    }
+  }
+
+  private func resolveChildren(_ e: Expr) throws -> Expr { try mapChildren(e, resolve) }
+
+  private func resolveName(_ name: String) throws -> Expr? {
+    if let term = try opts.sequenceTerm?(name, nil, opts.openVars) { return term }
+    if let value = try namedInterval(name) { return value }
+    if let value = opts.complex(name) { return value }
+    if let value = opts.multivector(name) { return value }
+    if let value = unitVector(name, opts) { return value }
+    return pointCoord(name)
+  }
+
+  private func resolveBin(_ e: Expr) throws -> Expr {
+    guard case .bin(let op, let lhs, let rhs, let glyph) = e else { return e }
+    if op == .mul || op == .div, let headed = try resolveHeaded(e, op) { return try notTooDeep(headed) }
+    let a = try resolve(lhs)
+    let b = try resolve(rhs)
+    return try joinBin(op, a, b, glyph)
+  }
+
+  /// A product or quotient led by ∇, Σ or ∫, which reads the chain after it.
+  private func resolveHeaded(_ e: Expr, _ op: BinOp) throws -> Expr? {
+    // `∇f`, `∇·F`, `∇×F`, `∇²f` (VectorCalculus.swift).
+    if let nabla = try splitNablaChain(e) { return try resolve(nabla) }
+    // Σ/∫ headers capture their trailing product chain before it resolves.
+    if let m = splitSumChain(e) {
+      let body = try isSumHeader(m.header) ? expandSum(m.header, m.body) : expandInt(intBounds(m.header), m.body)
+      return try m.coeff.map { .bin(m.op, try resolve($0), body) } ?? body
+    }
+    return nil
+  }
+
+  private func joinBin(_ op: BinOp, _ a: Expr, _ b: Expr, _ glyph: ProductGlyph?) throws -> Expr {
+    if op == .div, let d = try matchDeriv(a, b) { return d }
+    if glyph != nil { return .bin(op, a, b, glyph: glyph) }
+    if op == .mul, case .bin(.div, let top, let bottom, _) = a {
+      // The parenthesized form (d/dx)(expr): the quotient is bare.
+      if let head = numeratorWrap(top), let dx = dxOrder(bottom), head.order == dx.order {
+        return head.wrap(try applyDiff(b, dx.v, head.order))
+      }
+    }
+    return .bin(op, a, b)
+  }
+
+  private func resolveIndex(_ e: Expr) throws -> Expr {
+    guard case .index(let target, let at) = e else { return e }
+    if case .var(let name) = target, let term = try opts.sequenceTerm?(name, at, opts.openVars) { return term }
+    if case .var(let name) = target, let element = try tupleTermElement(name, at) { return element }
+    return try mapChildren(e, resolve)
+  }
+
+  private func resolvePiecewise(_ e: Expr) throws -> Expr {
+    guard case .piecewise(let cases, let otherwise) = e else { return e }
+    try refuseEqualityCases(cases)
+    var written: [Expr.Case] = []
+    for c in cases { written.append(try resolveCase(c)) }
+    return .piecewise(written, otherwise: try otherwise.map(resolve))
+  }
+
+  private func resolveCase(_ c: Expr.Case) throws -> Expr.Case {
+    let cond = try resolve(c.cond)
+    return Expr.Case(cond: try writtenCondition(c.cond, cond), value: try resolve(c.value), bare: c.bare)
+  }
+
+  private func refuseEqualityCases(_ cases: [Expr.Case]) throws {
+    for c in cases {
+      guard case .eq = c.cond else { continue }
+      // A lattice row may test equality, and so may a function body for
+      // the lattice rows that call it (life(c, s) = {s = 3: 1, …}); the
+      // lattice rewrites the case (`exactCases`), and any other row
+      // inlining it fails to compile.
+      if !opts.inDefinition && !opts.exactConditions {
+        throw LanguageError(equalityCaseMessage)
+      }
+    }
+  }
+
+  // (In pieces, so that the frame under a call's arguments — which resolve as deep as
+  // the row nests — is not every kind of call's at once.)
   private func resolveCall(_ name: String, _ rawArgs: [Expr]) throws -> Expr {
+    // (What a Σ writes out, and a function's body around its arguments, is
+    // deeper than what was written: measured before it is walked, Depth.swift.)
+    if let reduced = try resolveBinderCall(name, rawArgs) { return try notTooDeep(reduced) }
+    if let fn = try getFn(name) { return try notTooDeep(try resolveUserCall(name, fn, rawArgs)) }
+    if let signal = try resolveSignalCall(name, rawArgs) { return signal }
+    // (A label's text is not math: it passes through as written.)
+    // (A loop, here and below, not a map: a closure holds a copy of the resolver in its frame.)
+    var args: [Expr] = []
+    for arg in legacyCallArgs(name, rawArgs) {
+      if name == "label", case .str = arg {
+        args.append(arg)
+      } else {
+        args.append(try resolve(arg))
+      }
+    }
+    return try resolveBuiltin(name, args)
+  }
+
+  /// Σ, Π, ∫ and the reductions of one argument, which read their argument unresolved.
+  private func resolveBinderCall(_ name: String, _ rawArgs: [Expr]) throws -> Expr? {
     // (A list literal a Σ marked before its terms were written out.)
     if let marked = try resolveMarkedList(name, rawArgs) { return marked }
     if name == "sum" || name == "prod" {
@@ -364,38 +444,49 @@ struct Resolver {
     if rawArgs.count == 1, ["count", "total", "mean", "min", "max", "stdev", "median", "hist"].contains(name) {
       return try resolveReduction(name, rawArgs[0])
     }
-    if let fn = try getFn(name) {
-      // Port: a body holding an interval, called where one is not read (Interval.swift).
-      if !opts.intervals, hasInterval(fn.body) { throw Unsupported("interval(…)") }
-      let n = fn.params.count
-      // A function's arguments are as written when they fill its parameters:
-      // only a mismatch spreads tuples, f((a, b)) ≡ f(a, b).
-      let args = try (!fn.recursive && rawArgs.count == n ? rawArgs : legacyCallArgs("", rawArgs)).map(resolve)
-      if fn.recursive { return try resolveRecur(name, n, args) }
-      var env: [String: Expr] = [:]
-      if args.count == 1, n >= 2, !isNum(args[0]) {
-        // f(P) ≡ f(P_1, …, P_n): one argument that is an n-component point,
-        // or a list of them.
-        return try resolvePointCall(name, fn, args[0])
-      }
-      if args.count != n { throw LanguageError("\(name) takes \(n) argument\(n == 1 ? "" : "s").") }
-      // A body that reduces takes a list argument one member at a time.
-      if let map = try resolveMap(name, fn, args) { return map }
-      for (p, arg) in zip(fn.params, args) { env[p] = arg }
-      // The coordinates of point parameters the body reads, `p.x`, as the
-      // argument's own (`coordParams`).
-      for (key, value) in try coordParams(name, fn.body, Array(zip(fn.params, args))) { env[key] = value }
-      let inlined = try expandClosedSums(substVars(freshLists(fn.body, replacing: Set(env.keys)), env))
-      // The body's named conditions, now that its parameters are its
-      // arguments and cannot capture their variables.
-      return opts.params != nil ? inlined : writeConditions(inlined, namedCondition)
+    return nil
+  }
+
+  private func resolveUserCall(_ name: String, _ fn: FnDef, _ rawArgs: [Expr]) throws -> Expr {
+    // Port: a body holding an interval, called where one is not read (Interval.swift).
+    if !opts.intervals, hasInterval(fn.body) { throw Unsupported("interval(…)") }
+    let n = fn.params.count
+    // A function's arguments are as written when they fill its parameters:
+    // only a mismatch spreads tuples, f((a, b)) ≡ f(a, b).
+    var args: [Expr] = []
+    for arg in !fn.recursive && rawArgs.count == n ? rawArgs : legacyCallArgs("", rawArgs) {
+      args.append(try resolve(arg))
     }
-    if let signal = try resolveSignalCall(name, rawArgs) { return signal }
-    // (A label's text is not math: it passes through as written.)
-    let args = try legacyCallArgs(name, rawArgs).map { arg in
-      if name == "label", case .str = arg { return arg }
-      return try resolve(arg)
+    return try applyFn(name, fn, args)
+  }
+
+  /// A user function's body with its parameters filled by resolved arguments.
+  private func applyFn(_ name: String, _ fn: FnDef, _ args: [Expr]) throws -> Expr {
+    let n = fn.params.count
+    if fn.recursive { return try resolveRecur(name, n, args) }
+    var env: [String: Expr] = [:]
+    if args.count == 1, n >= 2, !isNum(args[0]) {
+      // f(P) ≡ f(P_1, …, P_n): one argument that is an n-component point,
+      // or a list of them.
+      return try resolvePointCall(name, fn, args[0])
     }
+    if args.count != n { throw LanguageError("\(name) takes \(n) argument\(n == 1 ? "" : "s").") }
+    // A body that reduces takes a list argument one member at a time.
+    if let map = try resolveMap(name, fn, args) { return map }
+    for (p, arg) in zip(fn.params, args) { env[p] = arg }
+    // The coordinates of point parameters the body reads, `p.x`, as the
+    // argument's own (`coordParams`).
+    for (key, value) in try coordParams(name, fn.body, Array(zip(fn.params, args))) { env[key] = value }
+    // (Port: measured before it is written out, Depth.swift.)
+    if substitutionExceedsDepth(fn.body, env) { throw LanguageError(stackExceeded) }
+    let inlined = try expandClosedSums(substVars(freshLists(fn.body, replacing: Set(env.keys)), env))
+    // The body's named conditions, now that its parameters are its
+    // arguments and cannot capture their variables.
+    return opts.params != nil ? inlined : writeConditions(inlined, namedCondition)
+  }
+
+  /// A call to a builtin, its arguments resolved.
+  private func resolveBuiltin(_ name: String, _ args: [Expr]) throws -> Expr {
     if stackFns.contains(name) { return try stackCall(name, args) ?? .call(name, args) }
     if vectorOps.contains(name) { return try vectorCalculus(name, args) }
     if curveOps.contains(name) { return try curveGeometry(name, args) }
@@ -564,8 +655,9 @@ func lowerGeomObjects(
   }
 }
 
+// (A function a kind: this walk is a frame per level of the row, and a debug
+// build's frame holds every case's temporaries at once.)
 func lowerPoints(_ e: Expr, _ comps: (String) -> [String]?, _ context: GeomContext) throws -> Lowered {
-  func lo(_ n: Expr) throws -> Lowered { try lowerPoints(n, comps, context) }
   // A multivector, or a point, line or plane of projective geometry (GeomAlgebra.swift).
   let outer = context.enterAlgebra(e)
   defer { context.algebra.clean = outer }
@@ -576,173 +668,257 @@ func lowerPoints(_ e: Expr, _ comps: (String) -> [String]?, _ context: GeomConte
   case .num, .str, .data, .text:
     // (Data and text lists hold no geometry: they pass straight through.)
     return .scalar(e)
-  case .list(let items):
-    // Items lower independently; a named point becomes its (A_x, A_y) tuple,
-    // so [A, B] scatters named points like [(1, 2), (3, 4)] does literals.
-    if let multiset = try context.algebraList(items) { return .scalar(multiset) }
-    return .scalar(.list(try items.map { try lo($0).expr }))
+  case .list:
+    return try lowerPointsList(e, comps, context)
   case .index, .range, .eqtest, .figure, .lazy, .trail, .label, .hist, .family:
-    // A point among a structural node's children is written out as a tuple.
-    return .scalar(
-      try mapChildren(e) { n in
-        switch try lo(n) {
-        case .vec(let items): .vec(items)
-        case .scalar(let a): a
-        }
-      })
-  case .comp(let value, let index, let arity, let functionName):
-    // (A list of points waits for list lowering, which reads the coordinate
-    // of every point in it.)
-    if try context.compMatrix(value) { throw Unsupported("a matrix read as a list of its rows") }
-    if let waiting = try waitingComp(e, isList: context.isList, lo) { return .scalar(waiting) }
-    return try lowerComp(value, index, arity, functionName, context)
-  case .loop(let params, let seeds, let loopBody, let limit):
-    return .scalar(try lowerLoop(params, seeds, loopBody, limit, lo, context))
-  case .var(let name):
-    try context.refuseMatrixName(name)
-    guard let names = comps(name) else { return .scalar(e) }
-    return .vec(names.map { .var($0) })
-  case .neg(let inner):
-    try context.refuseMatrixValue(e)
-    switch try lo(inner) {
-    case .vec(let items): return .vec(items.map(neg))
-    case .scalar(let a): return .scalar(.neg(a))
-    }
-  case .bin(let op, let lhs, let rhs, let glyph):
-    // The matvec M v: a matrix as the direct left factor of a product.
-    if let applied = try context.matrixProduct(e, op, lhs, rhs) { return applied }
-    if let glyph, glyph != .dot, glyph != .cross { throw Unsupported("the \(glyph.rawValue) product") }
-    let a = try lo(lhs)
-    let b = try lo(rhs)
-    switch (a, b) {
-    case (.scalar(let x), .scalar(let y)):
-      // Untouched scalar subtrees pass through unchanged; a rebuilt product
-      // loses the glyph it was written with, as the TypeScript's does.
-      return .scalar(x == lhs && y == rhs ? e : .bin(op, x, y))
-    case (.vec(let x), .vec(let y)):
-      switch op {
-      case .add, .sub:
-        if x.count != y.count {
-          throw LanguageError(
-            "Cannot \(op == .add ? "add" : "subtract") a \(x.count)-component and a \(y.count)-component vector.")
-        }
-        return .vec(zip(x, y).map { op == .add ? add($0, $1) : sub($0, $1) })
-      case .mul:
-        // A · B and A × B, as written; a plain * between points has no one meaning.
-        if let glyph { return try lo(.call(glyph.rawValue, [lhs, rhs])) }
-        throw LanguageError("Use A · B or A × B (or dot(A, B), cross(A, B)) to multiply points.")
-      case .div: throw LanguageError("Cannot divide by a point.")
-      case .pow: throw LanguageError("Cannot raise a point to a power — |A| is its length.")
+    return try lowerPointsWithin(e, comps, context)
+  case .comp:
+    return try lowerPointsComp(e, comps, context)
+  case .loop:
+    return try lowerPointsLoop(e, comps, context)
+  case .var:
+    return try lowerPointsVar(e, comps, context)
+  case .neg:
+    return try lowerPointsNeg(e, comps, context)
+  case .bin:
+    return try lowerPointsBin(e, comps, context)
+  case .call:
+    return try lowerPointsCall(e, comps, context)
+  case .eq:
+    return try lowerPointsEq(e, comps, context)
+  case .ineq:
+    return try lowerPointsIneq(e, comps, context)
+  case .vec:
+    return try lowerPointsVec(e, comps, context)
+  case .piecewise:
+    return try lowerPointsPiecewise(e, comps, context)
+  }
+}
+
+private func lowerPointsList(_ e: Expr, _ comps: (String) -> [String]?, _ context: GeomContext) throws -> Lowered {
+  guard case .list(let items) = e else { return .scalar(e) }
+  func lo(_ n: Expr) throws -> Lowered { try lowerPoints(n, comps, context) }
+  // Items lower independently; a named point becomes its (A_x, A_y) tuple,
+  // so [A, B] scatters named points like [(1, 2), (3, 4)] does literals.
+  if let multiset = try context.algebraList(items) { return .scalar(multiset) }
+  return .scalar(.list(try items.map { try lo($0).expr }))
+}
+
+private func lowerPointsComp(_ e: Expr, _ comps: (String) -> [String]?, _ context: GeomContext) throws -> Lowered {
+  guard case .comp(let value, let index, let arity, let functionName) = e else { return .scalar(e) }
+  func lo(_ n: Expr) throws -> Lowered { try lowerPoints(n, comps, context) }
+  // (A list of points waits for list lowering, which reads the coordinate
+  // of every point in it.)
+  if try context.compMatrix(value) { throw Unsupported("a matrix read as a list of its rows") }
+  if let waiting = try waitingComp(e, isList: context.isList, lo) { return .scalar(waiting) }
+  return try lowerComp(value, index, arity, functionName, context)
+}
+
+private func lowerPointsLoop(_ e: Expr, _ comps: (String) -> [String]?, _ context: GeomContext) throws -> Lowered {
+  guard case .loop(let params, let seeds, let loopBody, let limit) = e else { return .scalar(e) }
+  func lo(_ n: Expr) throws -> Lowered { try lowerPoints(n, comps, context) }
+  return .scalar(try lowerLoop(params, seeds, loopBody, limit, lo, context))
+}
+
+private func lowerPointsVar(_ e: Expr, _ comps: (String) -> [String]?, _ context: GeomContext) throws -> Lowered {
+  guard case .var(let name) = e else { return .scalar(e) }
+  func lo(_ n: Expr) throws -> Lowered { try lowerPoints(n, comps, context) }
+  try context.refuseMatrixName(name)
+  guard let names = comps(name) else { return .scalar(e) }
+  return .vec(names.map { .var($0) })
+}
+
+private func lowerPointsNeg(_ e: Expr, _ comps: (String) -> [String]?, _ context: GeomContext) throws -> Lowered {
+  guard case .neg(let inner) = e else { return .scalar(e) }
+  func lo(_ n: Expr) throws -> Lowered { try lowerPoints(n, comps, context) }
+  try context.refuseMatrixValue(e)
+  switch try lo(inner) {
+  case .vec(let items): return .vec(items.map(neg))
+  case .scalar(let a): return .scalar(.neg(a))
+  }
+}
+
+/// A sum, product, quotient or power of two lowered values (`lowerPoints`, case .bin).
+private func joinPoints(
+  _ e: Expr, _ op: BinOp, _ lhs: Expr, _ rhs: Expr, _ glyph: ProductGlyph?, _ a: Lowered, _ b: Lowered,
+  _ lo: (Expr) throws -> Lowered
+) throws -> Lowered {
+  switch (a, b) {
+  case (.scalar(let x), .scalar(let y)):
+    // Untouched scalar subtrees pass through unchanged; a rebuilt product
+    // loses the glyph it was written with, as the TypeScript's does.
+    return .scalar(x == lhs && y == rhs ? e : .bin(op, x, y))
+  case (.vec(let x), .vec(let y)):
+    switch op {
+    case .add, .sub:
+      if x.count != y.count {
+        throw LanguageError(
+          "Cannot \(op == .add ? "add" : "subtract") a \(x.count)-component and a \(y.count)-component vector.")
       }
-    case (.vec(let x), .scalar(let y)):
-      switch op {
-      case .add, .sub: throw LanguageError("Cannot \(op == .add ? "add" : "subtract") a point and a number.")
-      case .mul: return .vec(x.map { mul($0, y) })
-      case .div: return .vec(x.map { div($0, y) })
-      case .pow: throw LanguageError("Cannot raise a point to a power — |A| is its length.")
-      }
-    case (.scalar(let x), .vec(let y)):
-      switch op {
-      case .add, .sub: throw LanguageError("Cannot \(op == .add ? "add" : "subtract") a point and a number.")
-      case .mul: return .vec(y.map { mul(x, $0) })
-      case .div: throw LanguageError("Cannot divide by a point.")
-      case .pow: throw LanguageError("Cannot raise a point to a power — |A| is its length.")
-      }
+      return .vec(zip(x, y).map { op == .add ? add($0, $1) : sub($0, $1) })
+    case .mul:
+      // A · B and A × B, as written; a plain * between points has no one meaning.
+      if let glyph { return try lo(.call(glyph.rawValue, [lhs, rhs])) }
+      throw LanguageError("Use A · B or A × B (or dot(A, B), cross(A, B)) to multiply points.")
+    case .div: throw LanguageError("Cannot divide by a point.")
+    case .pow: throw LanguageError("Cannot raise a point to a power — |A| is its length.")
     }
-  case .call(let name, let args):
-    // A list lowered already holds no geometry; a function applied per
-    // member of lists is list lowering's to run.
-    if name == LIST_SEQ { return .scalar(e) }
-    if name == MAP { return .scalar(try lowerMapPoints(args) { try lo($0).expr }) }
-    if let geometry = try lowerGeomCall(e, name, args, context) { return geometry }
-    let lowered = try args.map(lo)
-    // sort(P, P.x) orders points by a key, and count, total and mean take
-    // any multiset, points included: list lowering does the work, and a
-    // point stays one value there.
-    var pointArg = false
-    if args.count == 1, case .vec = lowered[0] { pointArg = true }
-    if name == "sort" || (pointArg && ["count", "total", "mean"].contains(name)) {
-      return .scalar(.call(name, lowered.map(\.expr)))
+  case (.vec(let x), .scalar(let y)):
+    switch op {
+    case .add, .sub: throw LanguageError("Cannot \(op == .add ? "add" : "subtract") a point and a number.")
+    case .mul: return .vec(x.map { mul($0, y) })
+    case .div: return .vec(x.map { div($0, y) })
+    case .pow: throw LanguageError("Cannot raise a point to a power — |A| is its length.")
     }
-    var flat: [Expr] = []
-    for arg in lowered {
-      if case .scalar(let a) = arg {
-        flat.append(a)
-        continue
-      }
-      throw LanguageError("\(name) is not defined for points.")
+  case (.scalar(let x), .vec(let y)):
+    switch op {
+    case .add, .sub: throw LanguageError("Cannot \(op == .add ? "add" : "subtract") a point and a number.")
+    case .mul: return .vec(y.map { mul(x, $0) })
+    case .div: throw LanguageError("Cannot divide by a point.")
+    case .pow: throw LanguageError("Cannot raise a point to a power — |A| is its length.")
     }
-    return .scalar(.call(name, flat))
-  case .eq(let l, let r):
-    let taken: String? = if case .var(let name) = l { takenNames[name] } else { nil }
-    do {
-      let left = try lo(l)
-      let right = try lo(r)
-      switch (left, right) {
-      case (.scalar(let a), .scalar(let b)): return .scalar(.eq(a, b))
-      case (.vec(let a), .vec(let b)): return .scalar(.eq(.vec(a), .vec(b)))
-      default: throw LanguageError("One side is a point and the other is a number.")
-      }
-    } catch let error as LanguageError {
-      // `v = (1, 2, 3)` reads as an equation in v, not a definition.
-      guard let taken, case .var(let name) = l else { throw error }
-      throw LanguageError("\(name) is \(taken), so it cannot name a value — pick another name, like q.")
+  }
+}
+
+private func lowerPointsBin(_ e: Expr, _ comps: (String) -> [String]?, _ context: GeomContext) throws -> Lowered {
+  guard case .bin(let op, let lhs, let rhs, let glyph) = e else { return .scalar(e) }
+  func lo(_ n: Expr) throws -> Lowered { try lowerPoints(n, comps, context) }
+  // The matvec M v: a matrix as the direct left factor of a product.
+  if let applied = try context.matrixProduct(e, op, lhs, rhs) { return applied }
+  if let glyph, glyph != .dot, glyph != .cross { throw Unsupported("the \(glyph.rawValue) product") }
+  let a = try lo(lhs)
+  let b = try lo(rhs)
+  return try joinPoints(e, op, lhs, rhs, glyph, a, b, lo)
+}
+
+private func lowerPointsCall(_ e: Expr, _ comps: (String) -> [String]?, _ context: GeomContext) throws -> Lowered {
+  guard case .call(let name, let args) = e else { return .scalar(e) }
+  func lo(_ n: Expr) throws -> Lowered { try lowerPoints(n, comps, context) }
+  // A list lowered already holds no geometry; a function applied per
+  // member of lists is list lowering's to run.
+  if name == LIST_SEQ { return .scalar(e) }
+  if name == MAP { return .scalar(try lowerMapPoints(args) { try lo($0).expr }) }
+  if let geometry = try lowerGeomCall(e, name, args, context) { return geometry }
+  var lowered: [Lowered] = []
+  for arg in args { lowered.append(try lowerPoints(arg, comps, context)) }
+  return try callOfLowered(name, args, lowered)
+}
+
+/// A call of lowered arguments that is no geometry's (`lowerPoints`, case .call).
+private func callOfLowered(_ name: String, _ args: [Expr], _ lowered: [Lowered]) throws -> Lowered {
+  // sort(P, P.x) orders points by a key, and count, total and mean take
+  // any multiset, points included: list lowering does the work, and a
+  // point stays one value there.
+  var pointArg = false
+  if args.count == 1, case .vec = lowered[0] { pointArg = true }
+  if name == "sort" || (pointArg && ["count", "total", "mean"].contains(name)) {
+    return .scalar(.call(name, lowered.map(\.expr)))
+  }
+  var flat: [Expr] = []
+  for arg in lowered {
+    if case .scalar(let a) = arg {
+      flat.append(a)
+      continue
     }
-  case .ineq(let op, let l, let r, let grouped):
-    // (Both sides lower before either is refused: the right side's own
-    // error comes first, as it does on the site.)
+    throw LanguageError("\(name) is not defined for points.")
+  }
+  return .scalar(.call(name, flat))
+}
+
+private func lowerPointsEq(_ e: Expr, _ comps: (String) -> [String]?, _ context: GeomContext) throws -> Lowered {
+  guard case .eq(let l, let r) = e else { return .scalar(e) }
+  func lo(_ n: Expr) throws -> Lowered { try lowerPoints(n, comps, context) }
+  let taken: String? = if case .var(let name) = l { takenNames[name] } else { nil }
+  do {
     let left = try lo(l)
     let right = try lo(r)
-    guard case .scalar(let a) = left, case .scalar(let b) = right else {
-      throw LanguageError("Points cannot be compared — compare |A - B| instead.")
+    switch (left, right) {
+    case (.scalar(let a), .scalar(let b)): return .scalar(.eq(a, b))
+    case (.vec(let a), .vec(let b)): return .scalar(.eq(.vec(a), .vec(b)))
+    default: throw LanguageError("One side is a point and the other is a number.")
     }
-    return .scalar(.ineq(op, a, b, grouped: grouped))
-  case .vec(let items):
-    var flat: [Expr] = []
-    var rows: [[Expr]] = []
-    for item in items {
-      switch try lo(item) {
-      case .scalar(let a): flat.append(a)
-      case .vec(let row): rows.append(row)
-      }
-    }
-    // A tuple of points is a matrix, or a tuple of points in order.
-    if !rows.isEmpty && rows.count == items.count { return try context.tupleOfPoints(e, rows) }
-    if !rows.isEmpty { throw LanguageError("A point cannot be a component of a vector.") }
-    return items.count == 2 || items.count == 3 ? .vec(flat) : .scalar(.vec(flat))
-  case .piecewise(let cases, let otherwise):
-    func one(_ n: Expr) throws -> Expr {
-      guard case .scalar(let a) = try lo(n) else {
-        throw LanguageError("Points cannot appear in a piecewise expression.")
-      }
-      return a
-    }
-    // Point-valued cases are a point of cases, coordinate by coordinate.
-    let values = try cases.map { try lo($0.value) } + (try otherwise.map { [try lo($0)] } ?? [])
-    let pointValued = values.contains { if case .vec = $0 { true } else { false } }
-    if pointValued {
-      var rows: [[Expr]] = []
-      for v in values {
-        guard case .vec(let items) = v, items.count == (rows.first?.count ?? items.count) else {
-          throw LanguageError("Every case of a piecewise point must be a point of the same dimension.")
-        }
-        rows.append(items)
-      }
-      let conds = try cases.map { try one($0.cond) }
-      return .vec(
-        (0..<rows[0].count).map { k in
-          .piecewise(
-            conds.enumerated().map { j, cond in Expr.Case(cond: cond, value: rows[j][k]) },
-            otherwise: otherwise == nil ? nil : rows[conds.count][k])
-        })
-    }
-    // (A rebuilt piecewise does not keep which conditions were written bare.)
-    let rebuilt = Expr.piecewise(
-      try cases.enumerated().map { j, c in Expr.Case(cond: try one(c.cond), value: values[j].expr) },
-      otherwise: otherwise == nil ? nil : values[cases.count].expr)
-    let same = Expr.piecewise(cases.map { Expr.Case(cond: $0.cond, value: $0.value) }, otherwise: otherwise)
-    return .scalar(rebuilt == same ? e : rebuilt)
+  } catch let error as LanguageError {
+    // `v = (1, 2, 3)` reads as an equation in v, not a definition.
+    guard let taken, case .var(let name) = l else { throw error }
+    throw LanguageError("\(name) is \(taken), so it cannot name a value — pick another name, like q.")
   }
+}
+
+private func lowerPointsIneq(_ e: Expr, _ comps: (String) -> [String]?, _ context: GeomContext) throws -> Lowered {
+  guard case .ineq(let op, let l, let r, let grouped) = e else { return .scalar(e) }
+  func lo(_ n: Expr) throws -> Lowered { try lowerPoints(n, comps, context) }
+  // (Both sides lower before either is refused: the right side's own
+  // error comes first, as it does on the site.)
+  let left = try lo(l)
+  let right = try lo(r)
+  guard case .scalar(let a) = left, case .scalar(let b) = right else {
+    throw LanguageError("Points cannot be compared — compare |A - B| instead.")
+  }
+  return .scalar(.ineq(op, a, b, grouped: grouped))
+}
+
+private func lowerPointsVec(_ e: Expr, _ comps: (String) -> [String]?, _ context: GeomContext) throws -> Lowered {
+  guard case .vec(let items) = e else { return .scalar(e) }
+  func lo(_ n: Expr) throws -> Lowered { try lowerPoints(n, comps, context) }
+  var flat: [Expr] = []
+  var rows: [[Expr]] = []
+  for item in items {
+    switch try lo(item) {
+    case .scalar(let a): flat.append(a)
+    case .vec(let row): rows.append(row)
+    }
+  }
+  // A tuple of points is a matrix, or a tuple of points in order.
+  if !rows.isEmpty && rows.count == items.count { return try context.tupleOfPoints(e, rows) }
+  if !rows.isEmpty { throw LanguageError("A point cannot be a component of a vector.") }
+  return items.count == 2 || items.count == 3 ? .vec(flat) : .scalar(.vec(flat))
+}
+
+private func lowerPointsPiecewise(_ e: Expr, _ comps: (String) -> [String]?, _ context: GeomContext) throws -> Lowered {
+  guard case .piecewise(let cases, let otherwise) = e else { return .scalar(e) }
+  func lo(_ n: Expr) throws -> Lowered { try lowerPoints(n, comps, context) }
+  func one(_ n: Expr) throws -> Expr {
+    guard case .scalar(let a) = try lo(n) else {
+      throw LanguageError("Points cannot appear in a piecewise expression.")
+    }
+    return a
+  }
+  // Point-valued cases are a point of cases, coordinate by coordinate.
+  let values = try cases.map { try lo($0.value) } + (try otherwise.map { [try lo($0)] } ?? [])
+  let pointValued = values.contains { if case .vec = $0 { true } else { false } }
+  if pointValued {
+    var rows: [[Expr]] = []
+    for v in values {
+      guard case .vec(let items) = v, items.count == (rows.first?.count ?? items.count) else {
+        throw LanguageError("Every case of a piecewise point must be a point of the same dimension.")
+      }
+      rows.append(items)
+    }
+    let conds = try cases.map { try one($0.cond) }
+    return .vec(
+      (0..<rows[0].count).map { k in
+        .piecewise(
+          conds.enumerated().map { j, cond in Expr.Case(cond: cond, value: rows[j][k]) },
+          otherwise: otherwise == nil ? nil : rows[conds.count][k])
+      })
+  }
+  // (A rebuilt piecewise does not keep which conditions were written bare.)
+  let rebuilt = Expr.piecewise(
+    try cases.enumerated().map { j, c in Expr.Case(cond: try one(c.cond), value: values[j].expr) },
+    otherwise: otherwise == nil ? nil : values[cases.count].expr)
+  let same = Expr.piecewise(cases.map { Expr.Case(cond: $0.cond, value: $0.value) }, otherwise: otherwise)
+  return .scalar(rebuilt == same ? e : rebuilt)
+}
+
+private func lowerPointsWithin(_ e: Expr, _ comps: (String) -> [String]?, _ context: GeomContext) throws -> Lowered {
+  // A point among a structural node's children is written out as a tuple.
+  .scalar(
+    try mapChildren(e) { n in
+      switch try lowerPoints(n, comps, context) {
+      case .vec(let items): .vec(items)
+      case .scalar(let a): a
+      }
+    })
 }
 
 /// A loop under point lowering (lib/geom.ts `lower`, case 'loop'). A

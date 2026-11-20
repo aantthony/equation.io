@@ -706,6 +706,9 @@ func buildDefs(
       }
       return recursiveMarker(params)
     }
+    // (Port: a chain of functions each defined below the one that calls it is read one
+    // inside the next, Depth.swift.)
+    if resolving.count >= maxDefinitionNesting { throw LanguageError(stackExceeded) }
     resolving.append(name)
     defer { resolving.removeLast() }
     // A parameter shadows a document name of the same name.
@@ -778,184 +781,190 @@ func buildDefs(
     }
   }
 
+  // (One definition, in a function of its own: a debug build's frame holds every case's
+  // temporaries at once, and each definition's expression is resolved beneath this one.)
+  func define(_ d: Definition) throws {
+    switch d {
+    case .function(let name, let params, _):
+      if Set(params).count != params.count { throw LanguageError("Duplicate parameter names.") }
+      _ = try getFn(name)
+    case .table(let name, let file, let hash):
+      try openTable(name, file, hash, files, &defs)
+    case .regression(_, let lhs, let rhs):
+      let source = try parseFit(
+        lhs, rhs, userFns: fnNames, valueNames: valueNames,
+        listNames: Set(defs.pointDims.keys).union(defs.mats.keys).union(defs.tensors.keys).union(seqIndexNames)
+          .union(defs.lists.keys).union(tableListNames(defs)))
+      parsed[d.key] = .eq(source.lhs, source.rhs)
+      var parameters: [String] = []
+      let fit: FitResult
+      do {
+        fit = try fitRow(
+          source, defs, numEnv, getFn: getFn, opts: options(), isRow: { byName[$0] != nil },
+          stateNames: states.names, parameters: &parameters)
+      } catch let error as LanguageError where error.missingData {
+        // (A fit whose data is elsewhere still claims its coefficients.)
+        for name in parameters { defs.missingData[name] = MissingValue(message: error.message, list: false) }
+        throw error
+      }
+      defs.fits[d.name] = fit
+      for (name, value) in fit.coefficients {
+        defs.consts[name] = .num(value)
+        numEnv[name] = value
+        fitOwner[name] = d.name
+      }
+    case .state(let name, _):
+      let opts = options()
+      states.derivs[name] = try withoutStateFamily(
+        try Resolver(getFn: getFn, opts: opts).resolve(try parse(d)), opts)
+    case .initial(let name, _):
+      let opts = options()
+      // (A list of starting values is a family of runs: StateFamilies.swift.)
+      states.inits[name] = try Resolver(getFn: getFn, opts: opts).resolve(try parse(d))
+    case .constant(let name, _, let draw):
+      // (A value may hold an interval: Interval.swift.)
+      var valueOpts = options()
+      valueOpts.intervals = true
+      let resolved = try Resolver(getFn: getFn, opts: valueOpts).resolve(try parse(d))
+      defs.conditions[name] = nil
+      // u and v take only an interval: the range they run over.
+      if paramVars.contains(name) {
+        guard case .call(INTERVAL, _) = resolved else {
+          throw LanguageError(
+            "\(name) can only be defined as an interval, the range it runs over: \(name) = interval(0, 2pi).")
+        }
+      }
+      // `r = interval(1, 2)`, or anything built from one: not a number but a
+      // hidden parameter, which every row using the name shares.
+      if hasInterval(resolved) {
+        if draw { throw LanguageError("\(name) ∈ … draws from a list; that is an interval.") }
+        defs.intervals[name] = resolved
+        return
+      }
+      // Lowering expands point arithmetic; a pair result names a point.
+      // Point-ness flows in definition order, so `C = B + D` needs B and D
+      // defined above (a stray point name below is reported after the loop).
+      // (`L = line(A, B)` names the line as a value of projective geometry.)
+      // `M = ((a, b), (c, d))`, `R = e^(a J)`, `N = 2 M`: a tuple of rows,
+      // or matrix algebra, names a matrix.
+      let getMat: GetMat = { defs.mats[$0] }
+      let getTensor = tensorGetter(defs)
+      // A binder draws from a list; the other named values below are not one.
+      func notDrawn(_ what: String) throws {
+        if draw { throw LanguageError("\(name) ∈ … draws from a list; that is \(what).") }
+      }
+      // M Q with Q a multiset of points is those points moved, never a
+      // matrix: the object expansion applies M to each.
+      let ofPoints = readsPointList(resolved, defs)
+      if !ofPoints,
+        let computed = try lowerMatrix(resolved, comps: comps, getMat: getMat, getTensor: getTensor)
+      {
+        try notDrawn("a matrix")
+        defs.mats[name] = computed.map { row in row.map { hoist(name, $0) } }
+        return
+      }
+      // `T = e_x ⊗ e_y ⊗ e_z`: a tensor of any other shape.
+      if !ofPoints,
+        let tensor = try lowerTensorValue(resolved, comps: comps, getMat: getMat, getTensor: getTensor)
+      {
+        try notDrawn("a tensor")
+        defs.tensors[name] = Tensor(shape: tensor.shape, data: tensor.data.map { hoist(name, $0) })
+        return
+      }
+      // `L = join(A, B)`, `R = e^(-t/2 e_xy)`, `q = quat(1, 2, 3, 4)`: a
+      // line, plane, motor or multivector, written into every row that
+      // names it; `X = meet(L, M)` names the point it is (GeomAlgebra.swift).
+      var value = resolved
+      if !ofPoints, holdsAlgebra(resolved) {
+        switch try namedAlgebra(
+          resolved, comps: comps, getMat: getMat, getTensor: getTensor, isList: { defs.lists.has($0) },
+          hoist: { hoist(name, $0) })
+        {
+        case .named(let node, let what):
+          try notDrawn(what)
+          defs.multivectors[name] = node
+          return
+        case .value(let e):
+          value = e
+        }
+      } else if ofPoints, case .call("line", let args) = resolved {
+        // `N = line(P, A)` over a list names the lines, as join does.
+        value = .call("join", args)
+      }
+      // `adults = person[person.age >= 18]` names a cut of a data file (Tables.swift).
+      if let cut = try tableCut(name, value, draw: draw, defs, options(), comps: comps) {
+        // Registered first, so rows below report the file rather than an
+        // unknown name — then the row says what is missing, as the `open()`
+        // row it cuts does.
+        defs.tables[name] = cut
+        if let missing = cut.missing, files != nil { throw missingDataError(missing) }
+        return
+      }
+      // A list, a tuple of more than 3 values or a scatter of columns names
+      // a list: the name is its values, over instances of its own.
+      let listed = try namedList(name, value, draw: draw, ofPoints: ofPoints, defs, options(), comps: comps)
+      // A tuple of computed points that is square, `A = (2 P, Q + R)`:
+      // one tensor, named as a matrix when it is square.
+      if let reduced = tensorOfNode(listed.e), reduced.shape.count >= 2 {
+        try notDrawn("a tensor")
+        if let m = toMat(reduced) { defs.mats[name] = m } else { defs.tensors[name] = reduced }
+        return
+      }
+      if listed.isSeq || isDataScatter(listed.e) {
+        defs.lists[name] = listed
+        return
+      }
+      let e = listed.e
+      // `within = r < R`, or another name for one: a condition.
+      var alias: Expr?
+      if case .var(let other) = e { alias = defs.conditions[other] }
+      if case .ineq = e { alias = alias ?? e }
+      if let alias {
+        if draw { throw LanguageError("\(name) ∈ … draws from a list; that is a condition.") }
+        defs.conditions[name] = alias
+        return
+      }
+      var store: [(String, Expr)] = [(name, e)]
+      if case .vec(let items) = e {
+        if items.count != 2 && items.count != 3 {
+          throw LanguageError("A named point needs 2 or 3 components.")
+        }
+        let names = pointComps(name, items.count)
+        for c in names where byName[c] != nil {
+          throw LanguageError("Cannot name a point \(name): \(c) is already defined.")
+        }
+        defs.points.append(name)
+        defs.pointDims[name] = items.count
+        store = []
+        for (c, item) in zip(names, items) {
+          compOwner[c] = name
+          store.append((c, item))
+        }
+      }
+      for (n, expr) in store {
+        defs.consts[n] = expr
+        // Its value now, when everything it reads has one.
+        var env: [String: Double] = [:]
+        var known = true
+        for fv in freeVars(expr) {
+          guard let v = numEnv[fv] else {
+            known = false
+            break
+          }
+          env[fv] = v
+        }
+        if known, let v = try? evaluate(expr, env), v.isFinite { numEnv[n] = v }
+      }
+    }
+  }
+
   for d in raw {
     if skip.contains(d.key) {
       defs.unsupported[d.key] = "a name that is not supported yet"
       continue
     }
     do {
-      switch d {
-      case .function(let name, let params, _):
-        if Set(params).count != params.count { throw LanguageError("Duplicate parameter names.") }
-        _ = try getFn(name)
-      case .table(let name, let file, let hash):
-        try openTable(name, file, hash, files, &defs)
-      case .regression(_, let lhs, let rhs):
-        let source = try parseFit(
-          lhs, rhs, userFns: fnNames, valueNames: valueNames,
-          listNames: Set(defs.pointDims.keys).union(defs.mats.keys).union(defs.tensors.keys).union(seqIndexNames)
-            .union(defs.lists.keys).union(tableListNames(defs)))
-        parsed[d.key] = .eq(source.lhs, source.rhs)
-        var parameters: [String] = []
-        let fit: FitResult
-        do {
-          fit = try fitRow(
-            source, defs, numEnv, getFn: getFn, opts: options(), isRow: { byName[$0] != nil },
-            stateNames: states.names, parameters: &parameters)
-        } catch let error as LanguageError where error.missingData {
-          // (A fit whose data is elsewhere still claims its coefficients.)
-          for name in parameters { defs.missingData[name] = MissingValue(message: error.message, list: false) }
-          throw error
-        }
-        defs.fits[d.name] = fit
-        for (name, value) in fit.coefficients {
-          defs.consts[name] = .num(value)
-          numEnv[name] = value
-          fitOwner[name] = d.name
-        }
-      case .state(let name, _):
-        let opts = options()
-        states.derivs[name] = try withoutStateFamily(
-          try Resolver(getFn: getFn, opts: opts).resolve(try parse(d)), opts)
-      case .initial(let name, _):
-        let opts = options()
-        // (A list of starting values is a family of runs: StateFamilies.swift.)
-        states.inits[name] = try Resolver(getFn: getFn, opts: opts).resolve(try parse(d))
-      case .constant(let name, _, let draw):
-        // (A value may hold an interval: Interval.swift.)
-        var valueOpts = options()
-        valueOpts.intervals = true
-        let resolved = try Resolver(getFn: getFn, opts: valueOpts).resolve(try parse(d))
-        defs.conditions[name] = nil
-        // u and v take only an interval: the range they run over.
-        if paramVars.contains(name) {
-          guard case .call(INTERVAL, _) = resolved else {
-            throw LanguageError(
-              "\(name) can only be defined as an interval, the range it runs over: \(name) = interval(0, 2pi).")
-          }
-        }
-        // `r = interval(1, 2)`, or anything built from one: not a number but a
-        // hidden parameter, which every row using the name shares.
-        if hasInterval(resolved) {
-          if draw { throw LanguageError("\(name) ∈ … draws from a list; that is an interval.") }
-          defs.intervals[name] = resolved
-          continue
-        }
-        // Lowering expands point arithmetic; a pair result names a point.
-        // Point-ness flows in definition order, so `C = B + D` needs B and D
-        // defined above (a stray point name below is reported after the loop).
-        // (`L = line(A, B)` names the line as a value of projective geometry.)
-        // `M = ((a, b), (c, d))`, `R = e^(a J)`, `N = 2 M`: a tuple of rows,
-        // or matrix algebra, names a matrix.
-        let getMat: GetMat = { defs.mats[$0] }
-        let getTensor = tensorGetter(defs)
-        // A binder draws from a list; the other named values below are not one.
-        func notDrawn(_ what: String) throws {
-          if draw { throw LanguageError("\(name) ∈ … draws from a list; that is \(what).") }
-        }
-        // M Q with Q a multiset of points is those points moved, never a
-        // matrix: the object expansion applies M to each.
-        let ofPoints = readsPointList(resolved, defs)
-        if !ofPoints,
-          let computed = try lowerMatrix(resolved, comps: comps, getMat: getMat, getTensor: getTensor)
-        {
-          try notDrawn("a matrix")
-          defs.mats[name] = computed.map { row in row.map { hoist(name, $0) } }
-          continue
-        }
-        // `T = e_x ⊗ e_y ⊗ e_z`: a tensor of any other shape.
-        if !ofPoints,
-          let tensor = try lowerTensorValue(resolved, comps: comps, getMat: getMat, getTensor: getTensor)
-        {
-          try notDrawn("a tensor")
-          defs.tensors[name] = Tensor(shape: tensor.shape, data: tensor.data.map { hoist(name, $0) })
-          continue
-        }
-        // `L = join(A, B)`, `R = e^(-t/2 e_xy)`, `q = quat(1, 2, 3, 4)`: a
-        // line, plane, motor or multivector, written into every row that
-        // names it; `X = meet(L, M)` names the point it is (GeomAlgebra.swift).
-        var value = resolved
-        if !ofPoints, holdsAlgebra(resolved) {
-          switch try namedAlgebra(
-            resolved, comps: comps, getMat: getMat, getTensor: getTensor, isList: { defs.lists.has($0) },
-            hoist: { hoist(name, $0) })
-          {
-          case .named(let node, let what):
-            try notDrawn(what)
-            defs.multivectors[name] = node
-            continue
-          case .value(let e):
-            value = e
-          }
-        } else if ofPoints, case .call("line", let args) = resolved {
-          // `N = line(P, A)` over a list names the lines, as join does.
-          value = .call("join", args)
-        }
-        // `adults = person[person.age >= 18]` names a cut of a data file (Tables.swift).
-        if let cut = try tableCut(name, value, draw: draw, defs, options(), comps: comps) {
-          // Registered first, so rows below report the file rather than an
-          // unknown name — then the row says what is missing, as the `open()`
-          // row it cuts does.
-          defs.tables[name] = cut
-          if let missing = cut.missing, files != nil { throw missingDataError(missing) }
-          continue
-        }
-        // A list, a tuple of more than 3 values or a scatter of columns names
-        // a list: the name is its values, over instances of its own.
-        let listed = try namedList(name, value, draw: draw, ofPoints: ofPoints, defs, options(), comps: comps)
-        // A tuple of computed points that is square, `A = (2 P, Q + R)`:
-        // one tensor, named as a matrix when it is square.
-        if let reduced = tensorOfNode(listed.e), reduced.shape.count >= 2 {
-          try notDrawn("a tensor")
-          if let m = toMat(reduced) { defs.mats[name] = m } else { defs.tensors[name] = reduced }
-          continue
-        }
-        if listed.isSeq || isDataScatter(listed.e) {
-          defs.lists[name] = listed
-          continue
-        }
-        let e = listed.e
-        // `within = r < R`, or another name for one: a condition.
-        var alias: Expr?
-        if case .var(let other) = e { alias = defs.conditions[other] }
-        if case .ineq = e { alias = alias ?? e }
-        if let alias {
-          if draw { throw LanguageError("\(name) ∈ … draws from a list; that is a condition.") }
-          defs.conditions[name] = alias
-          continue
-        }
-        var store: [(String, Expr)] = [(name, e)]
-        if case .vec(let items) = e {
-          if items.count != 2 && items.count != 3 {
-            throw LanguageError("A named point needs 2 or 3 components.")
-          }
-          let names = pointComps(name, items.count)
-          for c in names where byName[c] != nil {
-            throw LanguageError("Cannot name a point \(name): \(c) is already defined.")
-          }
-          defs.points.append(name)
-          defs.pointDims[name] = items.count
-          store = []
-          for (c, item) in zip(names, items) {
-            compOwner[c] = name
-            store.append((c, item))
-          }
-        }
-        for (n, expr) in store {
-          defs.consts[n] = expr
-          // Its value now, when everything it reads has one.
-          var env: [String: Double] = [:]
-          var known = true
-          for fv in freeVars(expr) {
-            guard let v = numEnv[fv] else {
-              known = false
-              break
-            }
-            env[fv] = v
-          }
-          if known, let v = try? evaluate(expr, env), v.isFinite { numEnv[n] = v }
-        }
-      }
+      try define(d)
     } catch let error as Unsupported {
       defs.unsupported[d.key] = error.what
     } catch let error as LanguageError {
@@ -1090,12 +1099,17 @@ func buildDefs(
     if let hit = defs.fields[name] { return hit }
     let shown = compOwner[name] ?? name
     if fieldVisiting.contains(name) { throw LanguageError("\(shown) is defined in terms of itself.") }
+    // (Port: fields read one inside another, and one written into the next, Depth.swift.)
+    if fieldVisiting.count >= maxDefinitionNesting { throw LanguageError(stackExceeded) }
     fieldVisiting.insert(name)
     defer { fieldVisiting.remove(name) }
     var e = pendingFields[name]!
     var sub: [String: Expr] = [:]
     for fv in freeVars(e) where pendingFields.has(fv) { sub[fv] = try resolveField(fv) }
-    if !sub.isEmpty { e = substVars(e, sub) }
+    if !sub.isEmpty {
+      if substitutionExceedsDepth(e, sub) { throw LanguageError(stackExceeded) }
+      e = substVars(e, sub)
+    }
     // A field lives over the plane or space, or over the parameters.
     let vars = freeVars(e).list
     let param = vars.first(where: paramVars.contains)
@@ -1239,6 +1253,21 @@ func buildDefs(
   }
 
   // Trial-evaluate to surface cycles and unsupported calls at definition time.
+  // (Port: the TypeScript's `check` calls itself for each name a constant
+  // reads, a frame per link of a chain of definitions, and checks a name
+  // again under every name that reads it. Here the walk keeps its own stack,
+  // so a document of a thousand constants each defined by the last is read
+  // on any thread's; and a name found sound is not walked again — it was
+  // sound whatever was being visited, or it would have been a cycle.)
+  struct Check {
+    var name: String
+    var expr: Expr
+    var reads: [String]
+    var next = 0
+    var env: [String: Double]
+  }
+  var walk: [Check] = []
+  var sound: Set<String> = []
   func check(_ name: String, _ visiting: inout Set<String>) throws {
     guard let e = defs.consts[name] else {
       // A surviving matrix or tensor name means it was defined below its
@@ -1258,18 +1287,31 @@ func buildDefs(
     var env: [String: Double] = ["t": 0]
     // States are leaves here: the integrator supplies their values, so they
     // stand in as 0 and never recurse.
-    for fv in freeVars(e) where fv != "t" {
-      if !states.names.contains(fv) { try check(fv, &visiting) }
-      env[fv] = 0
+    let reads = freeVars(e).list.filter { $0 != "t" }
+    for fv in reads { env[fv] = 0 }
+    walk.append(Check(name: name, expr: e, reads: reads, env: env))
+  }
+  func checkAll(_ root: String) throws {
+    var visiting: Set<String> = []
+    walk = []
+    try check(root, &visiting)
+    while var top = walk.popLast() {
+      if top.next < top.reads.count {
+        let fv = top.reads[top.next]
+        top.next += 1
+        walk.append(top)
+        if !states.names.contains(fv), !sound.contains(fv) { try check(fv, &visiting) }
+        continue
+      }
+      visiting.remove(top.name)
+      _ = try evaluate(top.expr, top.env)
+      sound.insert(top.name)
     }
-    visiting.remove(name)
-    _ = try evaluate(e, env)
   }
   var bad: [String] = []
   for name in defs.consts.keys {
-    var visiting: Set<String> = []
     do {
-      try check(name, &visiting)
+      try checkAll(name)
     } catch {
       defs.errors[name] = (error as? LanguageError)?.message ?? "\(error)"
       bad.append(name)
@@ -1456,18 +1498,42 @@ func animatedConstNames(_ defs: BuiltDefs) -> Set<String> {
 func evaluateFrame(_ defs: BuiltDefs, time: Double, states: [String: Double] = [:]) throws -> [String: Double] {
   var out = states
   var visiting: Set<String> = []
-  func get(_ name: String) throws -> Double {
-    if let value = out[name] { return value }
+  // (Port: lib/env.ts `evaluateFrame`'s `get` calls itself for each name a
+  // constant reads; here the walk keeps its own stack, so a long chain of
+  // definitions — a recurrence's terms are one — costs none of the thread's.)
+  struct Pending {
+    var name: String
+    var expr: Expr
+    var reads: [String]
+    var next = 0
+    var vars: [String: Double]
+  }
+  var walk: [Pending] = []
+  func enter(_ name: String) throws {
     guard let expr = defs.consts[name] else { throw LanguageError("\(name) is not defined.") }
     if visiting.contains(name) { throw LanguageError("\(name) is defined in terms of itself.") }
     visiting.insert(name)
-    defer { visiting.remove(name) }
-    var vars: [String: Double] = ["t": time]
-    for fv in freeVars(expr) where fv != "t" { vars[fv] = try get(fv) }
-    let value = try evaluate(expr, vars)
-    out[name] = value
-    return value
+    walk.append(
+      Pending(name: name, expr: expr, reads: freeVars(expr).list.filter { $0 != "t" }, vars: ["t": time]))
   }
-  for name in defs.consts.keys { _ = try get(name) }
+  for name in defs.consts.keys where out[name] == nil {
+    try enter(name)
+    while var top = walk.popLast() {
+      if top.next < top.reads.count {
+        let fv = top.reads[top.next]
+        if let value = out[fv] {
+          top.vars[fv] = value
+          top.next += 1
+          walk.append(top)
+        } else {
+          walk.append(top)
+          try enter(fv)
+        }
+        continue
+      }
+      out[top.name] = try evaluate(top.expr, top.vars)
+      visiting.remove(top.name)
+    }
+  }
   return out
 }

@@ -1648,6 +1648,17 @@ private func lowerLiteral(_ raw: [Expr], id: String?, _ ctx: Ctx) throws -> Low 
   return Low(out, [own, positions])
 }
 
+/// Two lowered sides under an operator (the `bin` case of `lowerNode`).
+private func lowerBinOp(_ op: BinOp, _ a: Low, _ b: Low, _ ctx: Ctx) throws -> Low {
+  if let scaled = try scaleHist(op, a.e, b.e, ctx) { return Low(scaled) }
+  let f = binOp(op)
+  if let fast = try fastMap([a, b], { f($0[0], $0[1]) }, ctx) { return fast }
+  if let lazy = try lazyMap([a, b], { .bin(op, $0[0], $0[1]) }, ctx) { return lazy }
+  return try zipN([try expand(a), try expand(b)], { .bin(op, $0[0], $0[1]) }, ctx)
+}
+
+// (A function a kind, below: this walk is a frame per level of the row, and
+// a debug build's frame holds every case's temporaries at once.)
 private func lowerNode(_ e: Expr, _ ctx: Ctx) throws -> Low {
   switch e {
   case .range:
@@ -1664,25 +1675,12 @@ private func lowerNode(_ e: Expr, _ ctx: Ctx) throws -> Low {
         if child.isSeq { throw LanguageError("Lists cannot appear inside \(what)(…).") }
         return child.e
       })
-  case .var(let name):
-    guard let hit = try ctx.getList(name) else { return Low(e) }
-    // (A scatter of columns is a `vec`: a value to name, not a list.)
-    guard hit.isSeq else { return hit }
-    if hit.none { ctx.none = true }
-    return Low(hit.isList ? try listOf(hit.items, ctx) : hit.e, namedAxes(name, hit.own))
-  case .neg(let inner):
-    let a = try lower(inner, ctx)
-    if let fast = try fastMap([a], { -$0[0] }, ctx) { return fast }
-    if let lazy = try lazyMap([a], { .neg($0[0]) }, ctx) { return lazy }
-    return try zipN([try expand(a)], { .neg($0[0]) }, ctx)
-  case .bin(let op, let lhs, let rhs, _):
-    let a = try lower(lhs, ctx)
-    let b = try lower(rhs, ctx)
-    if let scaled = try scaleHist(op, a.e, b.e, ctx) { return Low(scaled) }
-    let f = binOp(op)
-    if let fast = try fastMap([a, b], { f($0[0], $0[1]) }, ctx) { return fast }
-    if let lazy = try lazyMap([a, b], { .bin(op, $0[0], $0[1]) }, ctx) { return lazy }
-    return try zipN([try expand(a), try expand(b)], { .bin(op, $0[0], $0[1]) }, ctx)
+  case .var:
+    return try lowerNodeVar(e, ctx)
+  case .neg:
+    return try lowerNodeNeg(e, ctx)
+  case .bin:
+    return try lowerNodeBin(e, ctx)
   case .eqtest, .eq, .ineq:
     return try comparisonValue(e, ctx)
   case .index(let target, let idx):
@@ -1695,60 +1693,105 @@ private func lowerNode(_ e: Expr, _ ctx: Ctx) throws -> Low {
     return try lowerVec(try items.map { try lower($0, ctx) }, ctx)
   case .list(let items):
     return try lowerLiteral(items, id: nil, ctx)
-  case .piecewise(let rawCases, let rawOtherwise):
-    // Over a list, a case may test equality, {A.y = B.x: …}: members are
-    // decided by `==` (decideMembers). Each side lowers once, and a side
-    // that is a list makes it a test per member.
-    func cond(_ c: Expr) throws -> Low {
-      guard case .eq(let left, let right) = c else { return try lowerCond(c, ctx) }
-      let l = try lower(left, ctx)
-      let r = try lower(right, ctx)
-      if l.isSeq || r.isSeq {
-        return try zipN([try expand(l), try expand(r)], { .eqtest(.eq, $0[0], $0[1]) }, ctx)
-      }
-      return Low(ctx.opts.exactConditions ? exactCase(l.e, r.e) : .eq(l.e, r.e))
-    }
-    var raw: [Low] = []
-    for c in rawCases {
-      raw.append(try cond(c.cond))
-      raw.append(try lower(c.value, ctx))
-    }
-    let otherwise = try rawOtherwise.map { try lower($0, ctx) }
-    if let otherwise { raw.append(otherwise) }
-    if !raw.contains(where: \.isSeq) {
-      return Low(
-        .piecewise(
-          rawCases.indices.map { Expr.Case(cond: raw[2 * $0].e, value: raw[2 * $0 + 1].e) },
-          otherwise: otherwise?.e))
-    }
-    // Over lists, one piecewise per member, like any other operation. A
-    // member no case holds for is undefined.
-    let (parts, axes) = try align(try raw.map { try expand($0.isSeq ? try settle($0, ctx) : $0) })
-    let n = parts.first(where: \.isSeq)!.count
-    let columns = parts.map { $0.isList ? $0.items : nil }
-    func at(_ p: Int, _ k: Int) -> Expr { columns[p]?[k] ?? parts[p].e }
-    let items = (0..<n).map { k in
-      Expr.piecewise(
-        rawCases.indices.map { j in Expr.Case(cond: at(2 * j, k), value: at(2 * j + 1, k)) },
-        otherwise: otherwise == nil ? nil : at(parts.count - 1, k))
-    }
-    return try decideMembers(items, axes ?? [], ctx)
-  case .loop(let params, let rawSeeds, let rawBody, let limit):
-    // The params are the loop's own names: in the body they shadow any
-    // document list spelled the same.
-    let seeds = try rawSeeds.map { try lower($0, ctx) }
-    let getList = ctx.getList
-    ctx.getList = { name in params.contains(name) ? nil : try getList(name) }
-    defer { ctx.getList = getList }
-    let body = try lower(rawBody, ctx)
-    if body.isSeq || seeds.contains(where: \.isSeq) {
-      throw LanguageError("Lists are not supported in a recursive function yet.")
-    }
-    return Low(.loop(params: params, seeds: seeds.map(\.e), body: body.e, limit: limit))
+  case .piecewise:
+    return try lowerNodePiecewise(e, ctx)
+  case .loop:
+    return try lowerNodeLoop(e, ctx)
   }
 }
 
+private func lowerNodeVar(_ e: Expr, _ ctx: Ctx) throws -> Low {
+  guard case .var(let name) = e else { return Low(e) }
+  guard let hit = try ctx.getList(name) else { return Low(e) }
+  // (A scatter of columns is a `vec`: a value to name, not a list.)
+  guard hit.isSeq else { return hit }
+  if hit.none { ctx.none = true }
+  return Low(hit.isList ? try listOf(hit.items, ctx) : hit.e, namedAxes(name, hit.own))
+}
+
+private func lowerNodeNeg(_ e: Expr, _ ctx: Ctx) throws -> Low {
+  guard case .neg(let inner) = e else { return Low(e) }
+  let a = try lower(inner, ctx)
+  if let fast = try fastMap([a], { -$0[0] }, ctx) { return fast }
+  if let lazy = try lazyMap([a], { .neg($0[0]) }, ctx) { return lazy }
+  return try zipN([try expand(a)], { .neg($0[0]) }, ctx)
+}
+
+private func lowerNodeBin(_ e: Expr, _ ctx: Ctx) throws -> Low {
+  guard case .bin(let op, let lhs, let rhs, _) = e else { return Low(e) }
+  let a = try lower(lhs, ctx)
+  let b = try lower(rhs, ctx)
+  return try lowerBinOp(op, a, b, ctx)
+}
+
+private func lowerNodePiecewise(_ e: Expr, _ ctx: Ctx) throws -> Low {
+  guard case .piecewise(let rawCases, let rawOtherwise) = e else { return Low(e) }
+  // Over a list, a case may test equality, {A.y = B.x: …}: members are
+  // decided by `==` (decideMembers). Each side lowers once, and a side
+  // that is a list makes it a test per member.
+  func cond(_ c: Expr) throws -> Low {
+    guard case .eq(let left, let right) = c else { return try lowerCond(c, ctx) }
+    let l = try lower(left, ctx)
+    let r = try lower(right, ctx)
+    if l.isSeq || r.isSeq {
+      return try zipN([try expand(l), try expand(r)], { .eqtest(.eq, $0[0], $0[1]) }, ctx)
+    }
+    return Low(ctx.opts.exactConditions ? exactCase(l.e, r.e) : .eq(l.e, r.e))
+  }
+  var raw: [Low] = []
+  for c in rawCases {
+    raw.append(try cond(c.cond))
+    raw.append(try lower(c.value, ctx))
+  }
+  let otherwise = try rawOtherwise.map { try lower($0, ctx) }
+  if let otherwise { raw.append(otherwise) }
+  if !raw.contains(where: \.isSeq) {
+    return Low(
+      .piecewise(
+        rawCases.indices.map { Expr.Case(cond: raw[2 * $0].e, value: raw[2 * $0 + 1].e) },
+        otherwise: otherwise?.e))
+  }
+  // Over lists, one piecewise per member, like any other operation. A
+  // member no case holds for is undefined.
+  let (parts, axes) = try align(try raw.map { try expand($0.isSeq ? try settle($0, ctx) : $0) })
+  let n = parts.first(where: \.isSeq)!.count
+  let columns = parts.map { $0.isList ? $0.items : nil }
+  func at(_ p: Int, _ k: Int) -> Expr { columns[p]?[k] ?? parts[p].e }
+  let items = (0..<n).map { k in
+    Expr.piecewise(
+      rawCases.indices.map { j in Expr.Case(cond: at(2 * j, k), value: at(2 * j + 1, k)) },
+      otherwise: otherwise == nil ? nil : at(parts.count - 1, k))
+  }
+  return try decideMembers(items, axes ?? [], ctx)
+}
+
+private func lowerNodeLoop(_ e: Expr, _ ctx: Ctx) throws -> Low {
+  guard case .loop(let params, let rawSeeds, let rawBody, let limit) = e else { return Low(e) }
+  // The params are the loop's own names: in the body they shadow any
+  // document list spelled the same.
+  let seeds = try rawSeeds.map { try lower($0, ctx) }
+  let getList = ctx.getList
+  ctx.getList = { name in params.contains(name) ? nil : try getList(name) }
+  defer { ctx.getList = getList }
+  let body = try lower(rawBody, ctx)
+  if body.isSeq || seeds.contains(where: \.isSeq) {
+    throw LanguageError("Lists are not supported in a recursive function yet.")
+  }
+  return Low(.loop(params: params, seeds: seeds.map(\.e), body: body.e, limit: limit))
+}
+
+// (In three: the calls that read their arguments unlowered, the arguments,
+// and the call of them — so the frame under the arguments, which lower as
+// deep as the row nests, is small.)
 private func lowerCall(_ e: Expr, _ name: String, _ rawArgs: [Expr], _ ctx: Ctx) throws -> Low {
+  if let whole = try lowerWholeCall(e, name, rawArgs, ctx) { return whole }
+  var args: [Low] = []
+  for arg in rawArgs { args.append(try lower(arg, ctx)) }
+  return try callOfLows(name, args, ctx)
+}
+
+/// A list literal or one settled already, [map], fourier, reconstruct and hist; nil for any other call.
+private func lowerWholeCall(_ e: Expr, _ name: String, _ rawArgs: [Expr], _ ctx: Ctx) throws -> Low? {
   if let literal = listLiteral(e) { return try lowerLiteral(literal.items, id: literal.id, ctx) }
   // A list lowered earlier (an index the object pass settled first) keeps
   // the instances it already had.
@@ -1787,7 +1830,12 @@ private func lowerCall(_ e: Expr, _ name: String, _ rawArgs: [Expr], _ ctx: Ctx)
     let xs = arg.isData ? arg.values : try numericItems(arg.items.filter { !holdsGap($0) }, ctx, "hist")
     return Low(try histogram(xs, bins, ctx))
   }
-  var args = try rawArgs.map { try lower($0, ctx) }
+  return nil
+}
+
+/// A call of lowered arguments: a sort, a reduction, or a builtin mapped over its lists.
+private func callOfLows(_ name: String, _ lowered: [Low], _ ctx: Ctx) throws -> Low {
+  var args = lowered
   if name == "sort", args.count == 2 {
     // A member with no value, in the list or its key, is left out of both.
     let (p, key) = (args[0], args[1])

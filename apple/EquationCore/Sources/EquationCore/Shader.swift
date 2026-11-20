@@ -450,6 +450,23 @@ public func uniformName(_ p: String) -> String {
   return "u_zz" + p.unicodeScalars.map { String($0.value, radix: 16) }.joined(separator: "z")
 }
 
+/// A power, its sides written already (the `pow` of `toGLSL`).
+private func powGLSL(_ lhs: Expr, _ rhs: Expr, _ a: String, _ b: String) -> String {
+  if case .num(let n) = rhs, n == n.rounded(), n >= 1, n <= 8 {
+    // Small integer powers: expand to products (fast, exact for negative
+    // bases). Only a name or a number is repeated, though: a compound
+    // base goes through a helper, so (Σ 40 terms)^2 evaluates — and
+    // spells out — its base once, not once per factor.
+    let count = Int(n)
+    var simple = count == 1
+    if case .var = lhs { simple = true }
+    if case .num = lhs { simple = true }
+    if simple { return "(\(Array(repeating: a, count: count).joined(separator: "*")))" }
+    return count == 2 ? "eq_sq(\(a))" : "eq_ipow(\(a), \(count))"
+  }
+  return "eq_pow(\(a), \(b))"
+}
+
 /// Emit a GLSL float expression (lib/glsl.ts `toGLSL`). Free variables
 /// compile to their own names, so the caller must declare them (as function
 /// parameters, say).
@@ -463,38 +480,10 @@ public func toGLSL(_ e: Expr) throws(ShaderError) -> String {
     return name
   case .neg(let a):
     return "(-\(try toGLSL(a)))"
-  case .bin(let op, let lhs, let rhs, _):
-    if let loop = try fourierLoop(e) { return "(\(try loop.call("0.0"))).x" }
-    let a = try toGLSL(lhs)
-    let b = try toGLSL(rhs)
-    guard op == .pow else { return "(\(a) \(op.rawValue) \(b))" }
-    if case .num(let n) = rhs, n == n.rounded(), n >= 1, n <= 8 {
-      // Small integer powers: expand to products (fast, exact for negative
-      // bases). Only a name or a number is repeated, though: a compound
-      // base goes through a helper, so (Σ 40 terms)^2 evaluates — and
-      // spells out — its base once, not once per factor.
-      let count = Int(n)
-      var simple = count == 1
-      if case .var = lhs { simple = true }
-      if case .num = lhs { simple = true }
-      if simple { return "(\(Array(repeating: a, count: count).joined(separator: "*")))" }
-      return count == 2 ? "eq_sq(\(a))" : "eq_ipow(\(a), \(count))"
-    }
-    return "eq_pow(\(a), \(b))"
-  case .call(let name, let arguments):
-    // No float32 twin, on purpose: a pmf is nonzero only AT the integers, a
-    // set of measure zero no fragment ever lands on. Rows draw it as stems.
-    if PMF_FNS.contains(name) {
-      throw ShaderError("A probability mass function is drawn as stems, not as a curve.")
-    }
-    // A Σ/Π is either expanded away or evaluated on the CPU (a sequence
-    // term). It has no shader form.
-    if name == "sum" || name == "prod" {
-      throw ShaderError("\(name == "sum" ? "Σ" : "Π") must be expanded before it can be drawn as a curve.")
-    }
-    var args: [String] = []
-    for argument in arguments { args.append(try toGLSL(argument)) }
-    return "\(fnGLSL[name] ?? name)(\(args.joined(separator: ", ")))"
+  case .bin:
+    return try glslBin(e)
+  case .call:
+    return try glslCall(e)
   case .eq(let l, let r):
     let left = try toGLSL(l)
     return "(\(left) - (\(try toGLSL(r))))"
@@ -509,8 +498,37 @@ public func toGLSL(_ e: Expr) throws(ShaderError) -> String {
   case .piecewise(let cases, let otherwise):
     return try piecewiseGLSL(cases, otherwise: otherwise, toGLSL)
   case .loop:
-    // Port: compileTyped (lib/complex.ts) emits loops, since it types the
-    // params; this is what lib/glsl.ts `toGLSL` itself says of one.
-    throw ShaderError("A recursive function cannot be used here yet.")
+    return try glslLoop(e)
   }
+}
+
+private func glslBin(_ e: Expr) throws(ShaderError) -> String {
+  guard case .bin(let op, let lhs, let rhs, _) = e else { return "" }
+  if let loop = try fourierLoop(e) { return "(\(try loop.call("0.0"))).x" }
+  let a = try toGLSL(lhs)
+  let b = try toGLSL(rhs)
+  return op == .pow ? powGLSL(lhs, rhs, a, b) : "(\(a) \(op.rawValue) \(b))"
+}
+
+private func glslCall(_ e: Expr) throws(ShaderError) -> String {
+  guard case .call(let name, let arguments) = e else { return "" }
+  // No float32 twin, on purpose: a pmf is nonzero only AT the integers, a
+  // set of measure zero no fragment ever lands on. Rows draw it as stems.
+  if PMF_FNS.contains(name) {
+    throw ShaderError("A probability mass function is drawn as stems, not as a curve.")
+  }
+  // A Σ/Π is either expanded away or evaluated on the CPU (a sequence
+  // term). It has no shader form.
+  if name == "sum" || name == "prod" {
+    throw ShaderError("\(name == "sum" ? "Σ" : "Π") must be expanded before it can be drawn as a curve.")
+  }
+  var args: [String] = []
+  for argument in arguments { args.append(try toGLSL(argument)) }
+  return "\(fnGLSL[name] ?? name)(\(args.joined(separator: ", ")))"
+}
+
+private func glslLoop(_ e: Expr) throws(ShaderError) -> String {
+  // Port: compileTyped (lib/complex.ts) emits loops, since it types the
+  // params; this is what lib/glsl.ts `toGLSL` itself says of one.
+  throw ShaderError("A recursive function cannot be used here yet.")
 }

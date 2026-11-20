@@ -272,12 +272,17 @@ public func evaluate(_ e: Expr, _ env: [String: Double]) throws -> Double {
   return try evaluate(e, &scope)
 }
 
+private func unbound(_ name: String) -> LanguageError { LanguageError("Unbound variable: \(name)") }
+
+// (Numbers, names and arithmetic here; a call and the rarer kinds in functions
+// of their own, so a frame of this walk — one per level of the expression —
+// is small.)
 func evaluate(_ e: Expr, _ env: inout [String: Double]) throws -> Double {
   switch e {
   case .num(let value):
     return value
   case .var(let name):
-    guard let value = env[name] else { throw LanguageError("Unbound variable: \(name)") }
+    guard let value = env[name] else { throw unbound(name) }
     return value
   case .neg(let a):
     return -(try evaluate(a, &env))
@@ -291,48 +296,79 @@ func evaluate(_ e: Expr, _ env: inout [String: Double]) throws -> Double {
     case .div: return a / b
     case .pow: return realPow(a, b)
     }
-  case .call(let name, let args):
-    if let index = boundSumIndex(e) { return try evalReduce(name, args, index, &env) }
-    if name == TERM_AT_FN {
-      // Term k of a recurrence, from the chain of constants that computes it:
-      // NaN past the chain or off the whole numbers.
-      let k = try evaluate(args.count > 1 ? args[1] : .num(.nan), &env)
-      guard case .str(let chain)? = args.first, JS.isInteger(k) else { return .nan }
-      return env["\(chain)\(JS.string(k))"] ?? .nan
-    }
-    guard let fn = evalFunctions[name] else {
-      // (A list as the resolver marks it: Expr.swift, "List identity".)
-      if name == LIST_ID || name == LIST_ORIGIN || name == LIST_SEQ {
-        throw LanguageError("List in scalar context.")
-      }
-      if name == INTERVAL {
-        throw LanguageError(
-          "An interval is a range of numbers, not one value: "
-            + "draw it in a row of its own, in a tuple, or beside x and y."
-        )
-      }
-      throw LanguageError("Unknown function: \(name)")
-    }
-    var values: [Double] = []
-    for a in args { values.append(try evaluate(a, &env)) }
-    return fn(values)
+  case .call:
+    return try evaluateCall(e, &env)
   case .eq(let l, let r):
     return try evaluate(l, &env) - evaluate(r, &env)
-  case .index, .range, .eqtest, .comp, .figure, .lazy, .trail, .label, .hist, .family:
-    throw LanguageError(structuralDiagnostic(e))
-  case .ineq:
-    throw LanguageError("Cannot evaluate an inequality.")
-  case .vec:
-    throw LanguageError("Vector in scalar context.")
-  case .list, .data:
-    throw LanguageError("List in scalar context.")
-  case .str, .text:
-    throw LanguageError("Text has no numeric value — it can only be compared, inside a filter.")
-  case .piecewise(let cases, let otherwise):
-    for c in cases where try conditionHolds(c.cond, &env) { return try evaluate(c.value, &env) }
-    return try otherwise.map { try evaluate($0, &env) } ?? .nan
+  case .piecewise:
+    return try evaluatePiecewise(e, &env)
   case .loop(let params, let seeds, let body, let limit):
     return try evalLoop(params, seeds, body, limit, &env)
+  default:
+    throw notANumber(e)
+  }
+}
+
+private func evaluatePiecewise(_ e: Expr, _ env: inout [String: Double]) throws -> Double {
+  guard case .piecewise(let cases, let otherwise) = e else { return .nan }
+  for c in cases where try conditionHolds(c.cond, &env) { return try evaluate(c.value, &env) }
+  guard let otherwise else { return .nan }
+  return try evaluate(otherwise, &env)
+}
+
+private func evaluateCall(_ e: Expr, _ env: inout [String: Double]) throws -> Double {
+  guard case .call(let name, let args) = e else { return .nan }
+  if name == "sum" || name == "prod" || name == TERM_AT_FN, let value = try evaluateBinder(e, name, args, &env) {
+    return value
+  }
+  guard let fn = evalFunctions[name] else { throw unknownFunction(name) }
+  var values: [Double] = []
+  for a in args { values.append(try evaluate(a, &env)) }
+  return fn(values)
+}
+
+/// A Σ/Π that survived resolve, or a recurrence's term; nil for a call that is neither.
+private func evaluateBinder(
+  _ e: Expr, _ name: String, _ args: [Expr], _ env: inout [String: Double]
+) throws -> Double? {
+  if let index = boundSumIndex(e) { return try evalReduce(name, args, index, &env) }
+  if name == TERM_AT_FN {
+    // Term k of a recurrence, from the chain of constants that computes it:
+    // NaN past the chain or off the whole numbers.
+    let k = try evaluate(args.count > 1 ? args[1] : .num(.nan), &env)
+    guard case .str(let chain)? = args.first, JS.isInteger(k) else { return .nan }
+    return env["\(chain)\(JS.string(k))"] ?? .nan
+  }
+  return nil
+}
+
+private func unknownFunction(_ name: String) -> LanguageError {
+  // (A list as the resolver marks it: Expr.swift, "List identity".)
+  if name == LIST_ID || name == LIST_ORIGIN || name == LIST_SEQ {
+    return LanguageError("List in scalar context.")
+  }
+  if name == INTERVAL {
+    return LanguageError(
+      "An interval is a range of numbers, not one value: "
+        + "draw it in a row of its own, in a tuple, or beside x and y."
+    )
+  }
+  return LanguageError("Unknown function: \(name)")
+}
+
+/// What `evaluate` says of a kind that has no value as a number.
+private func notANumber(_ e: Expr) -> LanguageError {
+  switch e {
+  case .ineq:
+    return LanguageError("Cannot evaluate an inequality.")
+  case .vec:
+    return LanguageError("Vector in scalar context.")
+  case .list, .data:
+    return LanguageError("List in scalar context.")
+  case .str, .text:
+    return LanguageError("Text has no numeric value — it can only be compared, inside a filter.")
+  default:
+    return LanguageError(structuralDiagnostic(e))
   }
 }
 

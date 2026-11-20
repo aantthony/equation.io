@@ -119,6 +119,120 @@ public indirect enum Expr: Equatable, Hashable, Sendable {
   }
 }
 
+extension Expr {
+  /// Equality and hashing are written out, not derived: a derived one's
+  /// frame holds every case's payload at once (about 2 KB in a debug build),
+  /// and comparing or hashing a row — a memo's key — is a frame per level of
+  /// it. Equality is the derived one's, field by field (so NaN is not NaN);
+  /// equal nodes feed the hasher the same things, which is all hashing asks.
+  public static func == (a: Expr, b: Expr) -> Bool {
+    switch (a, b) {
+    case (.num(let x), .num(let y)): return x == y
+    case (.var(let x), .var(let y)): return x == y
+    case (.neg(let x), .neg(let y)): return x == y
+    case (.bin(let op, let l, let r, let glyph), .bin(let op2, let l2, let r2, let glyph2)):
+      return op == op2 && glyph == glyph2 && l == l2 && r == r2
+    case (.call(let name, let args), .call(let name2, let args2)):
+      return name == name2 && sameItems(args, args2)
+    default:
+      return a.sameStructure(as: b)
+    }
+  }
+
+  private static func sameItems(_ a: [Expr], _ b: [Expr]) -> Bool {
+    guard a.count == b.count else { return false }
+    for k in a.indices where !(a[k] == b[k]) { return false }
+    return true
+  }
+
+  /// The rarer kinds of `==`.
+  private func sameStructure(as other: Expr) -> Bool {
+    switch (self, other) {
+    case (.index(let a, let b), .index(let a2, let b2)), (.range(let a, let b), .range(let a2, let b2)),
+      (.eq(let a, let b), .eq(let a2, let b2)):
+      return a == a2 && b == b2
+    case (.eqtest(let op, let a, let b), .eqtest(let op2, let a2, let b2)):
+      return op == op2 && a == a2 && b == b2
+    case (.ineq(let op, let a, let b, let grouped), .ineq(let op2, let a2, let b2, let grouped2)):
+      return op == op2 && grouped == grouped2 && a == a2 && b == b2
+    case (.vec(let a), .vec(let b)), (.list(let a), .list(let b)), (.trail(let a), .trail(let b)),
+      (.family(let a), .family(let b)):
+      return Expr.sameItems(a, b)
+    case (.str(let a), .str(let b)):
+      return a == b
+    case (.piecewise(let cases, let otherwise), .piecewise(let cases2, let otherwise2)):
+      return cases == cases2 && otherwise == otherwise2
+    case (.comp(let value, let index, let arity, let name), .comp(let value2, let index2, let arity2, let name2)):
+      return index == index2 && arity == arity2 && name == name2 && value == value2
+    case (.figure(let form, let dim, let vertices, let over), .figure(let form2, let dim2, let vertices2, let over2)):
+      return form == form2 && dim == dim2 && over == over2 && Expr.sameItems(vertices, vertices2)
+    case (.label(let coordinates, let text), .label(let coordinates2, let text2)):
+      return text == text2 && Expr.sameItems(coordinates, coordinates2)
+    case (.hist(let centers, let counts, let width), .hist(let centers2, let counts2, let width2)):
+      return centers == centers2 && counts == counts2 && width == width2
+    case (.data(let a), .data(let b)):
+      return a == b
+    case (.lazy(let cols, let body), .lazy(let cols2, let body2)):
+      return cols == cols2 && body == body2
+    case (.text(let a), .text(let b)):
+      return a == b
+    case (.loop(let params, let seeds, let body, let limit), .loop(let params2, let seeds2, let body2, let limit2)):
+      return params == params2 && limit == limit2 && Expr.sameItems(seeds, seeds2) && body == body2
+    default:
+      return false
+    }
+  }
+
+  public func hash(into hasher: inout Hasher) {
+    switch self {
+    case .num(let value):
+      hasher.combine(0)
+      hasher.combine(value)
+    case .var(let name):
+      hasher.combine(1)
+      hasher.combine(name)
+    case .neg(let a):
+      hasher.combine(2)
+      a.hash(into: &hasher)
+    case .bin(let op, let a, let b, let glyph):
+      hasher.combine(3)
+      hasher.combine(op)
+      hasher.combine(glyph)
+      a.hash(into: &hasher)
+      b.hash(into: &hasher)
+    case .call(let name, let args):
+      hasher.combine(4)
+      hasher.combine(name)
+      hasher.combine(args.count)
+      for arg in args { arg.hash(into: &hasher) }
+    default:
+      hashStructure(into: &hasher)
+    }
+  }
+
+  /// The rarer kinds: the kind, what it holds beside expressions that is
+  /// cheap to say, and its children.
+  private func hashStructure(into hasher: inout Hasher) {
+    hasher.combine(kind)
+    switch self {
+    case .str(let value): hasher.combine(value)
+    case .data(let values): hasher.combine(values)
+    case .text(let values): hasher.combine(values)
+    case .hist(let centers, let counts, let width):
+      hasher.combine(centers)
+      hasher.combine(counts)
+      hasher.combine(width)
+    case .comp(_, let index, let arity, _):
+      hasher.combine(index)
+      hasher.combine(arity)
+    default: break
+    }
+    let children = childrenOf(self)
+    hasher.combine(children.count)
+    for child in children { child.hash(into: &hasher) }
+  }
+}
+
 public enum BinOp: String, Sendable {
   case add = "+", sub = "-", mul = "*", div = "/", pow = "^"
 }
@@ -322,35 +436,75 @@ public func childrenOf(_ e: Expr) -> [Expr] {
 }
 
 /// Map one level of children, keeping everything else about the node.
+/// (A small function a shape: every walk of a tree stands on this one, a
+/// frame of it per level, and a debug build's frame holds every case's
+/// temporaries at once.)
 public func mapChildren(_ e: Expr, _ map: (Expr) throws -> Expr) rethrows -> Expr {
   switch e {
   case .num, .var, .str, .hist, .data, .text: return e
   case .neg(let a): return .neg(try map(a))
-  case .bin(let op, let a, let b, let glyph): return .bin(op, try map(a), try map(b), glyph: glyph)
+  case .bin: return try mapBin(e, map)
+  case .index, .range, .eqtest, .eq, .ineq: return try mapPair(e, map)
+  case .call(let name, let args): return .call(name, try mapEach(args, map))
+  case .vec, .list, .trail, .label, .family: return try mapItems(e, map)
+  case .piecewise(let cases, let otherwise): return try mapPiecewise(cases, otherwise, map)
+  case .comp, .figure, .lazy, .loop: return try mapBound(e, map)
+  }
+}
+
+private func mapBin(_ e: Expr, _ map: (Expr) throws -> Expr) rethrows -> Expr {
+  guard case .bin(let op, let a, let b, let glyph) = e else { return e }
+  return .bin(op, try map(a), try map(b), glyph: glyph)
+}
+
+private func mapPair(_ e: Expr, _ map: (Expr) throws -> Expr) rethrows -> Expr {
+  switch e {
   case .index(let a, let b): return .index(try map(a), try map(b))
   case .range(let a, let b): return .range(try map(a), try map(b))
   case .eqtest(let op, let a, let b): return .eqtest(op, try map(a), try map(b))
   case .eq(let l, let r): return .eq(try map(l), try map(r))
   case .ineq(let op, let l, let r, let grouped): return .ineq(op, try map(l), try map(r), grouped: grouped)
-  case .call(let name, let args): return .call(name, try args.map(map))
+  default: return e
+  }
+}
+
+/// `items.map(map)`, as a loop: `map` is a frame of its own, and a thunk's, per level.
+private func mapEach(_ items: [Expr], _ map: (Expr) throws -> Expr) rethrows -> [Expr] {
+  var out: [Expr] = []
+  out.reserveCapacity(items.count)
+  for item in items { out.append(try map(item)) }
+  return out
+}
+
+private func mapItems(_ e: Expr, _ map: (Expr) throws -> Expr) rethrows -> Expr {
+  switch e {
   case .vec(let items): return .vec(try items.map(map))
   case .list(let items): return .list(try items.map(map))
-  case .piecewise(let cases, let otherwise):
-    return .piecewise(
-      try cases.map { Expr.Case(cond: try map($0.cond), value: try map($0.value), bare: $0.bare) },
-      otherwise: try otherwise.map(map))
+  case .trail(let coordinates): return .trail(coordinates: try coordinates.map(map))
+  case .label(let coordinates, let text): return .label(coordinates: try coordinates.map(map), text: text)
+  case .family(let members): return .family(members: try members.map(map))
+  default: return e
+  }
+}
+
+private func mapPiecewise(_ cases: [Expr.Case], _ otherwise: Expr?, _ map: (Expr) throws -> Expr) rethrows -> Expr {
+  .piecewise(
+    try cases.map { Expr.Case(cond: try map($0.cond), value: try map($0.value), bare: $0.bare) },
+    otherwise: try otherwise.map(map))
+}
+
+private func mapBound(_ e: Expr, _ map: (Expr) throws -> Expr) rethrows -> Expr {
+  switch e {
   case .comp(let value, let index, let arity, let functionName):
     return .comp(value: try map(value), index: index, arity: arity, functionName: functionName)
   case .figure(let form, let dimension, let vertices, let over):
     return .figure(form: form, dimension: dimension, vertices: try vertices.map(map), over: over)
-  case .trail(let coordinates): return .trail(coordinates: try coordinates.map(map))
-  case .label(let coordinates, let text): return .label(coordinates: try coordinates.map(map), text: text)
-  case .family(let members): return .family(members: try members.map(map))
   case .lazy(let cols, let body): return .lazy(cols: cols, body: try map(body))
   case .loop(let params, let seeds, let body, let limit):
     // Seeds first, then the body, as `childrenOf` orders them.
     let mapped = try seeds.map(map)
     return .loop(params: params, seeds: mapped, body: try map(body), limit: limit)
+  default: return e
   }
 }
 
@@ -444,6 +598,19 @@ public func freeVars(_ e: Expr) -> NameSet {
 }
 
 private func collectFreeVars(_ e: Expr, _ out: inout NameSet) {
+  // (The plain kinds here, the binders apart: this walk is a frame per level of a row.)
+  switch e {
+  case .num, .str, .data, .text, .hist: break
+  case .var(let name): out.insert(name)
+  case .neg(let a): collectFreeVars(a, &out)
+  case .bin(_, let a, let b, _):
+    collectFreeVars(a, &out)
+    collectFreeVars(b, &out)
+  default: collectBoundFreeVars(e, &out)
+  }
+}
+
+private func collectBoundFreeVars(_ e: Expr, _ out: inout NameSet) {
   /// The names free in `parts` less those `bound` there, after what is in `out`.
   func scoped(_ parts: [Expr], binding bound: [String]) {
     var inner = NameSet()

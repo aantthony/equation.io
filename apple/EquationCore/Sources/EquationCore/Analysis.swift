@@ -353,7 +353,12 @@ func prepareDocument(_ sources: [String], files: DataFiles? = nil) -> PreparedDo
 /// `files`: the data files on hand, which `open(…)` rows read (Tables.swift);
 /// nil where there are none to be had, as for a link read off the device.
 public func analyze(_ sources: [String], files: DataFiles? = nil) -> DocumentAnalysis {
-  let document = prepareDocument(sources, files: files)
+  // (In two, so the definitions are not read on top of the rows' frame.)
+  analyzeRows(sources, prepareDocument(sources, files: files))
+}
+
+/// The rows of a document whose definitions are read (lib/analysis.ts `analyzeRows`, from pass 2).
+private func analyzeRows(_ sources: [String], _ document: PreparedDocument) -> DocumentAnalysis {
   let (texts, blocked, tildeNames) = (document.texts, document.blocked, document.tildeNames)
   let (raw, owner, duplicates) = (document.raw, document.owner, document.duplicates)
   // (A recurrence's chain of terms is written into the constants as rows resolve.)
@@ -475,7 +480,8 @@ public func analyze(_ sources: [String], files: DataFiles? = nil) -> DocumentAna
   var panelMaps: [Int: AxisMaps] = [:]
   // And the surface a panel's rows are drawn on (SurfaceMap.swift).
   var panelSurfaces: [Int: SurfaceMap] = [:]
-  do {
+  /// Each panel's maps and surface, from its view rows.
+  func readPanelViews() {
     var at = 0
     for (i, text) in texts.enumerated() where !text.isEmpty && rows[i].definition == nil && !rows[i].comment {
       if isDividerRow(text) {
@@ -494,6 +500,7 @@ public func analyze(_ sources: [String], files: DataFiles? = nil) -> DocumentAna
       }
     }
   }
+  readPanelViews()
 
   // Random variables next, so P(…) and bare-expression rows can reference
   // them regardless of row order.
@@ -527,246 +534,262 @@ public func analyze(_ sources: [String], files: DataFiles? = nil) -> DocumentAna
   var seenViewKinds: Set<String> = []
   var viewsUnknown = false
   var panel = 0
-  for i in 0..<count {
-    let text = texts[i]
-    if let why = blocked[i] {
-      rows[i].unsupported = notSupported(why)
-      // A view row the port could not read may have framed this panel.
-      if viewHead(text) != nil { viewsUnknown = true }
-      continue
-    }
-    if random.declares[i] != nil { continue }
-    if rows[i].definition != nil || rows[i].comment || rows[i].error != nil || text.isEmpty { continue }
-    do {
-      // A row that means to open a file and cannot says why (Tables.swift).
-      try refuseBadTableRow(text)
-      // A call to the user's own view/camera/grid function is theirs.
-      let head = viewHead(text)
-      if isDividerRow(text) || (head != nil && !fnNames.contains(head!)) {
-        if viewsUnknown && !isDividerRow(text) { throw Unsupported("a view row after one that is not supported") }
-        var latticeAxes: [String]?
-        if let view = try parseViewRow(
-          text, boundVals, documentNames: documentNames, valueNames: valueNames, mapDoc: viewDoc,
-          latticeAxes: &latticeAxes)
-        {
-          // Each panel frames itself: a divider starts a fresh set.
-          if case .split = view {
-            panel += 1
-            if panel >= maxPanels { throw LanguageError("A graph splits into at most \(maxPanels) panels.") }
-            seenViewKinds = []
-            viewsUnknown = false
-          } else if seenViewKinds.contains(view.kind) {
-            throw LanguageError(
-              "\(view.kind) is already set by another row\(panel > 0 ? " in this panel" : "")"
-                + (panel > 0 ? "." : " — a --- row starts a new panel with its own."))
-          }
-          if case .gridCoords(let names) = view {
-            for name in names {
-              if let problem = gridCoordinateProblem(name, gridFields: gridNames, fields: { built.fields.has($0) }) {
-                // A field the port could not read may be the coordinate meant.
-                if blocked.contains(where: { rows[$0.key].definition?.name == name }) {
-                  throw Unsupported("a grid of \(name), which is not supported yet")
-                }
-                throw LanguageError(problem)
+  // The row loop's body, in pieces: a debug build gives a function one frame for all its
+  // temporaries, and the rows' expressions are resolved and lowered beneath it.
+  /// A view row, a probability row or a sequence: true when the row was one.
+  func specialRow(_ i: Int, _ text: String) throws -> Bool {
+    // A row that means to open a file and cannot says why (Tables.swift).
+    try refuseBadTableRow(text)
+    // A call to the user's own view/camera/grid function is theirs.
+    let head = viewHead(text)
+    if isDividerRow(text) || (head != nil && !fnNames.contains(head!)) {
+      if viewsUnknown && !isDividerRow(text) { throw Unsupported("a view row after one that is not supported") }
+      var latticeAxes: [String]?
+      if let view = try parseViewRow(
+        text, boundVals, documentNames: documentNames, valueNames: valueNames, mapDoc: viewDoc,
+        latticeAxes: &latticeAxes)
+      {
+        // Each panel frames itself: a divider starts a fresh set.
+        if case .split = view {
+          panel += 1
+          if panel >= maxPanels { throw LanguageError("A graph splits into at most \(maxPanels) panels.") }
+          seenViewKinds = []
+          viewsUnknown = false
+        } else if seenViewKinds.contains(view.kind) {
+          throw LanguageError(
+            "\(view.kind) is already set by another row\(panel > 0 ? " in this panel" : "")"
+              + (panel > 0 ? "." : " — a --- row starts a new panel with its own."))
+        }
+        if case .gridCoords(let names) = view {
+          for name in names {
+            if let problem = gridCoordinateProblem(name, gridFields: gridNames, fields: { built.fields.has($0) }) {
+              // A field the port could not read may be the coordinate meant.
+              if blocked.contains(where: { rows[$0.key].definition?.name == name }) {
+                throw Unsupported("a grid of \(name), which is not supported yet")
               }
+              throw LanguageError(problem)
             }
           }
-          // A panel on a surface is 3D: framed by a camera, not a 2D window.
-          if (view.kind == "surface" && seenViewKinds.contains("view"))
-            || (view.kind == "view" && panelSurfaces[panel] != nil)
-          {
-            throw LanguageError(
-              "This panel draws on a surface (on(…)), so it is 3D: frame it with camera(…), not view(…).")
-          }
-          seenViewKinds.insert(view.kind)
-          rows[i].view = view
-          rows[i].viewAxes = latticeAxes
-          continue
         }
-      }
-      if panelBlocked.contains(panel) {
-        throw Unsupported("a panel whose view or surface is not supported")
-      }
-      // `P(…)` shades an area under a declared density — unless the user
-      // has defined P themselves. With no random variable there is none.
-      if try distributions.probabilityRow(&rows[i], text, index: i) { continue }
-      // `E(…)` is the mean of an expression in random variables — unless the
-      // user has defined E themselves.
-      if try distributions.expectationRow(&rows[i], text, index: i) { continue }
-      if let seq = document.seqScans[i], seq.lattice {
-        // A seed row draws nothing of its own; the rule row carries it.
-        rows[i].classified = try classifyAutomatonRow(
-          document.seqScans, i, fnNames: fnNames, getFn: getFn, constNames: constNames, ropts: ropts)
-        continue
-      }
-      // `s_0 = ()`: the empty tuple its recurrence starts from, drawn there.
-      // A recurrence has one seed: not this and a constant s_0 too.
-      if let seq = document.seqScans[i], seq.emptyTuple {
-        let seed = "\(seq.name)_0"
-        let earlier = document.seqScans.firstIndex { $0?.emptyTuple == true && $0?.name == seq.name }.map { $0 < i }
-        if earlier == true || raw.contains(where: { $0.name == seed }) {
-          throw LanguageError("\(seed) is already defined.")
+        // A panel on a surface is 3D: framed by a camera, not a 2D window.
+        if (view.kind == "surface" && seenViewKinds.contains("view"))
+          || (view.kind == "view" && panelSurfaces[panel] != nil)
+        {
+          throw LanguageError(
+            "This panel draws on a surface (on(…)), so it is 3D: frame it with camera(…), not view(…).")
         }
-        continue
+        seenViewKinds.insert(view.kind)
+        rows[i].view = view
+        rows[i].viewAxes = latticeAxes
+        return true
       }
-      if let seq = document.seqScans[i] {
-        let first = document.seqScans.firstIndex { $0?.name == seq.name && $0?.emptyTuple == false }
-        if let first, first < i { throw LanguageError("Sequence \(seq.name) is already defined.") }
-        rows[i].classified = try classifySeqRec(
-          seq, fnNames: fnNames, getFn: getFn, constNames: { constNames }, ropts: ropts, resolver: sequences,
-          indexNames: Set(built.points).union(built.lists.keys).union(tableNames))
-        continue
+    }
+    if panelBlocked.contains(panel) {
+      throw Unsupported("a panel whose view or surface is not supported")
+    }
+    // `P(…)` shades an area under a declared density — unless the user
+    // has defined P themselves. With no random variable there is none.
+    if try distributions.probabilityRow(&rows[i], text, index: i) { return true }
+    // `E(…)` is the mean of an expression in random variables — unless the
+    // user has defined E themselves.
+    if try distributions.expectationRow(&rows[i], text, index: i) { return true }
+    if let seq = document.seqScans[i], seq.lattice {
+      // A seed row draws nothing of its own; the rule row carries it.
+      rows[i].classified = try classifyAutomatonRow(
+        document.seqScans, i, fnNames: fnNames, getFn: getFn, constNames: constNames, ropts: ropts)
+      return true
+    }
+    // `s_0 = ()`: the empty tuple its recurrence starts from, drawn there.
+    // A recurrence has one seed: not this and a constant s_0 too.
+    if let seq = document.seqScans[i], seq.emptyTuple {
+      let seed = "\(seq.name)_0"
+      let earlier = document.seqScans.firstIndex { $0?.emptyTuple == true && $0?.name == seq.name }.map { $0 < i }
+      if earlier == true || raw.contains(where: { $0.name == seed }) {
+        throw LanguageError("\(seed) is already defined.")
       }
-      // `x := 3` claims what := cannot have; the parser only sees a stray `:`.
-      if let unclaimable = explicitDefinitionError(text) { throw LanguageError(unclaimable) }
-      // `d = 1` is no definition (d starts d/dx).
-      // (`e = 2` after `e := 1` is a claim about the document's e, which needs no advice about Euler's.)
-      let taken = takenDefinitionName(text).flatMap { valueNames.contains($0) ? nil : $0 }
-      if taken == "d" {
-        throw LanguageError(
-          "d is taken by derivatives (d/dx), so it cannot name a slider or function. Pick another name, like k.")
+      return true
+    }
+    if let seq = document.seqScans[i] {
+      let first = document.seqScans.firstIndex { $0?.name == seq.name && $0?.emptyTuple == false }
+      if let first, first < i { throw LanguageError("Sequence \(seq.name) is already defined.") }
+      rows[i].classified = try classifySeqRec(
+        seq, fnNames: fnNames, getFn: getFn, constNames: { constNames }, ropts: ropts, resolver: sequences,
+        indexNames: Set(built.points).union(built.lists.keys).union(tableNames))
+      return true
+    }
+    return false
+  }
+
+  /// A row that is an expression: parsed, resolved, lowered and classified.
+  func expressionRow(_ i: Int, _ text: String) throws {
+    // `x := 3` claims what := cannot have; the parser only sees a stray `:`.
+    if let unclaimable = explicitDefinitionError(text) { throw LanguageError(unclaimable) }
+    // `d = 1` is no definition (d starts d/dx).
+    // (`e = 2` after `e := 1` is a claim about the document's e, which needs no advice about Euler's.)
+    let taken = takenDefinitionName(text).flatMap { valueNames.contains($0) ? nil : $0 }
+    if taken == "d" {
+      throw LanguageError(
+        "d is taken by derivatives (d/dx), so it cannot name a slider or function. Pick another name, like k.")
+    }
+    // graph(from, to, label) reads as the tuple of its arguments: one edge
+    // per element of its multiset (Graphs.swift).
+    // (A document's own graph or mark function is that function.)
+    let graphArgs = fnNames.contains("graph") ? nil : wholeCall("graph", text)
+    // mark(v) is v, highlighted in the panel's graphs.
+    let markArg = fnNames.contains("mark") ? nil : wholeCall("mark", text)
+    let source = graphArgs.map { "(\($0))" } ?? markArg.map { "(\($0))" } ?? text
+    if let takenName = takenBinder(text, valueNames) { throw LanguageError(takenName) }
+    let rawParsed = try parseExpr(source, userFns: fnNames, listNames: listNames, valueNames: valueNames)
+    // `p(50..400)`: where p goes over that time.
+    if case .bin(.mul, let value, .range(let from, let to), _) = rawParsed {
+      func lower(_ e: Expr) throws -> Expr {
+        let low = try lowerObjects(try Resolver(getFn: getFn, opts: ropts).resolve(e), built, ropts)
+        // (One path per run of a family's list is not ported.)
+        if low.isSeq { throw Unsupported("orbits of a list") }
+        return low.e
       }
-      // graph(from, to, label) reads as the tuple of its arguments: one edge
-      // per element of its multiset (Graphs.swift).
-      // (A document's own graph or mark function is that function.)
-      let graphArgs = fnNames.contains("graph") ? nil : wholeCall("graph", text)
-      // mark(v) is v, highlighted in the panel's graphs.
-      let markArg = fnNames.contains("mark") ? nil : wholeCall("mark", text)
-      let source = graphArgs.map { "(\($0))" } ?? markArg.map { "(\($0))" } ?? text
-      if let takenName = takenBinder(text, valueNames) { throw LanguageError(takenName) }
-      let rawParsed = try parseExpr(source, userFns: fnNames, listNames: listNames, valueNames: valueNames)
-      // `p(50..400)`: where p goes over that time.
-      if case .bin(.mul, let value, .range(let from, let to), _) = rawParsed {
-        func lower(_ e: Expr) throws -> Expr {
-          let low = try lowerObjects(try Resolver(getFn: getFn, opts: ropts).resolve(e), built, ropts)
-          // (One path per run of a family's list is not ported.)
-          if low.isSeq { throw Unsupported("orbits of a list") }
-          return low.e
-        }
-        rows[i].classified = try classifyOrbit(
-          try lower(value), from: try lower(from), to: try lower(to), built, constNames: constNames)
-        continue
+      rows[i].classified = try classifyOrbit(
+        try lower(value), from: try lower(from), to: try lower(to), built, constNames: constNames)
+      return
+    }
+    // geodesic(S, start, direction): traced as it is drawn.
+    if case .call("geodesic", let args) = rawParsed, !fnNames.contains("geodesic") {
+      rows[i].classified = try geodesicRow(
+        args, panelSurfaces[panel], getFn, ropts, built, constNames, animated.union(built.states.keys))
+      return
+    }
+    // A row not drawn over the plane may test equality in a case: `f(2)`
+    // with f(m) = {mod(m, 2) = 0: …}.
+    func plane(_ e: Expr) -> Bool { freeVars(e).contains(where: ["x", "y", "z"].contains) }
+    let exact = graphArgs != nil || !plane(rawParsed)
+    var rowOpts = ropts
+    rowOpts.exactConditions = exact
+    // (A row's own expression may read an interval: Interval.swift.)
+    rowOpts.intervals = true
+    // On a panel drawn on a surface, gaussian(x, y) reads that surface.
+    rowOpts.surface = panelSurfaces[panel]?.embed
+    // gaussian(S) alone: S coloured by its curvature (SurfaceGeometry.swift).
+    let painted = curvaturePaint(rawParsed, fnNames) { arg in
+      if case .var(let name) = arg { return built.pointDims[name] == 2 }
+      // An expression of points, P + (0, 1): two components.
+      if case .vec = arg { return false }
+      if case .vec(let items)? = try? lowerGeom(arg, comps: comps) { return items.count == 2 }
+      return false
+    }
+    // (With the ∫ the row consists of, if it is exactly one: Integrals.swift.)
+    let (resolvedRow, integral) = try Resolver(getFn: getFn, opts: rowOpts).resolveRow(
+      graphArgs != nil ? exactCases(rawParsed) : painted.map { .call(PAINT_CALL, [$0, rawParsed]) } ?? rawParsed)
+    var resolved = try notTooDeep(resolvedRow)
+    memberNotes[i] = perMemberNote(resolved, ropts.isList)
+    if exact, graphArgs == nil {
+      // Over numbers a case is the tolerance form the evaluator runs; one
+      // whose side is a list stays an equation, for list lowering to
+      // decide member by member.
+      // (By what indexes, as the site asks it: the lists and the named points.)
+      let cases = exactCases(
+        resolved, keepingLists: { listNames.contains($0) || listNames.contains(dottedHead($0)) })
+      if cases != resolved && plane(resolved) {
+        throw LanguageError(equalityCaseMessage)
       }
-      // geodesic(S, start, direction): traced as it is drawn.
-      if case .call("geodesic", let args) = rawParsed, !fnNames.contains("geodesic") {
-        rows[i].classified = try geodesicRow(
-          args, panelSurfaces[panel], getFn, ropts, built, constNames, animated.union(built.states.keys))
-        continue
+      resolved = cases
+    }
+    // A bare expression in random variables plots that derived density; a
+    // real row in u and v alone is one too, drawn as the density of its values.
+    // (A surface painted by its curvature is a picture, whatever u and v it reads.)
+    if try distributions.expressionRow(
+      &rows[i], resolved, painted: painted != nil, text: text, index: i,
+      along: DistributionRows.alongCurve(rawParsed, fnNames))
+    {
+      return
+    }
+    // Expand point arithmetic: a point name A becomes (A_x, A_y).
+    // Lists then broadcast and reduce away.
+    let low = try lowerObjects(resolved, built, rowOpts)
+    let lowered = try notTooDeep(low.e)
+    var cls = try classifyRow(low, defined: constNames, fields: fieldEnv)
+    // A value row that is one definite integral also carries the area it shades.
+    // (An integral's area stands on y = 0, which a plane map bends into a
+    // curve: there it is a readout only.)
+    if case .value(let expr, _) = cls.object, let integral, panelMaps[panel]?.plane == nil,
+      let shade = lowerShade(integral, lower: { try lowerObjects($0, built, rowOpts).e }, known: constNames)
+    {
+      cls.object = .value(expr: expr, shade: shade)
+    }
+    // A mapped panel draws per-pixel rows in its screen coordinates (AxisMap.swift).
+    if let maps = panelMaps[panel] {
+      cls = try classifyMapped(cls, low, maps, defined: constNames, fields: fieldEnv)
+    }
+    // A panel on a surface paints or carries its 2D rows onto it; a row
+    // in space draws as it would in any 3D panel.
+    if panelSurfaces[panel] != nil, !cls.needs3D {
+      cls = try classifyOnSurface(cls)
+      rows[i].autoscale = shadedToItsSize(cls.object, rawParsed, fnNames)
+    }
+    if graphArgs != nil {
+      rows[i].classified = try graphObject(cls)
+      return
+    }
+    if markArg != nil {
+      guard case .value = cls.object else {
+        throw LanguageError("mark(v) highlights the vertex v of the graphs in its panel: give it one number.")
       }
-      // A row not drawn over the plane may test equality in a case: `f(2)`
-      // with f(m) = {mod(m, 2) = 0: …}.
-      func plane(_ e: Expr) -> Bool { freeVars(e).contains(where: ["x", "y", "z"].contains) }
-      let exact = graphArgs != nil || !plane(rawParsed)
-      var rowOpts = ropts
-      rowOpts.exactConditions = exact
-      // (A row's own expression may read an interval: Interval.swift.)
-      rowOpts.intervals = true
-      // On a panel drawn on a surface, gaussian(x, y) reads that surface.
-      rowOpts.surface = panelSurfaces[panel]?.embed
-      // gaussian(S) alone: S coloured by its curvature (SurfaceGeometry.swift).
-      let painted = curvaturePaint(rawParsed, fnNames) { arg in
-        if case .var(let name) = arg { return built.pointDims[name] == 2 }
-        // An expression of points, P + (0, 1): two components.
-        if case .vec = arg { return false }
-        if case .vec(let items)? = try? lowerGeom(arg, comps: comps) { return items.count == 2 }
-        return false
-      }
-      // (With the ∫ the row consists of, if it is exactly one: Integrals.swift.)
-      let (resolvedRow, integral) = try Resolver(getFn: getFn, opts: rowOpts).resolveRow(
-        graphArgs != nil ? exactCases(rawParsed) : painted.map { .call(PAINT_CALL, [$0, rawParsed]) } ?? rawParsed)
-      var resolved = resolvedRow
-      memberNotes[i] = perMemberNote(resolved, ropts.isList)
-      if exact, graphArgs == nil {
-        // Over numbers a case is the tolerance form the evaluator runs; one
-        // whose side is a list stays an equation, for list lowering to
-        // decide member by member.
-        // (By what indexes, as the site asks it: the lists and the named points.)
-        let cases = exactCases(
-          resolved, keepingLists: { listNames.contains($0) || listNames.contains(dottedHead($0)) })
-        if cases != resolved && plane(resolved) {
-          throw LanguageError(equalityCaseMessage)
-        }
-        resolved = cases
-      }
-      // A bare expression in random variables plots that derived density; a
-      // real row in u and v alone is one too, drawn as the density of its values.
-      // (A surface painted by its curvature is a picture, whatever u and v it reads.)
-      if try distributions.expressionRow(
-        &rows[i], resolved, painted: painted != nil, text: text, index: i,
-        along: DistributionRows.alongCurve(rawParsed, fnNames))
-      {
-        continue
-      }
-      // Expand point arithmetic: a point name A becomes (A_x, A_y).
-      // Lists then broadcast and reduce away.
-      let low = try lowerObjects(resolved, built, rowOpts)
-      let lowered = low.e
-      var cls = try classifyRow(low, defined: constNames, fields: fieldEnv)
-      // A value row that is one definite integral also carries the area it shades.
-      // (An integral's area stands on y = 0, which a plane map bends into a
-      // curve: there it is a readout only.)
-      if case .value(let expr, _) = cls.object, let integral, panelMaps[panel]?.plane == nil,
-        let shade = lowerShade(integral, lower: { try lowerObjects($0, built, rowOpts).e }, known: constNames)
-      {
-        cls.object = .value(expr: expr, shade: shade)
-      }
-      // A mapped panel draws per-pixel rows in its screen coordinates (AxisMap.swift).
-      if let maps = panelMaps[panel] {
-        cls = try classifyMapped(cls, low, maps, defined: constNames, fields: fieldEnv)
-      }
-      // A panel on a surface paints or carries its 2D rows onto it; a row
-      // in space draws as it would in any 3D panel.
-      if panelSurfaces[panel] != nil, !cls.needs3D {
-        cls = try classifyOnSurface(cls)
-        rows[i].autoscale = shadedToItsSize(cls.object, rawParsed, fnNames)
-      }
-      if graphArgs != nil {
-        rows[i].classified = try graphObject(cls)
-        continue
-      }
-      if markArg != nil {
-        guard case .value = cls.object else {
-          throw LanguageError("mark(v) highlights the vertex v of the graphs in its panel: give it one number.")
-        }
-        rows[i].mark = true
-        rows[i].classified = cls
-        continue
-      }
-      // A solid whose shape reads sliders is checked for folds at their values.
-      if let solid = cls.solid { try checkFolds(solid, ropts.consts) }
-      rows[i].info = curveHint(cls.object, text)
-      // `e = 0.6` parsed with e already a number; only the text still says e.
-      // `i = [0..9]` is a family of such claims, one per member.
-      func claimed(_ object: MathObject, by taken: String) -> MathObject? {
-        guard case .note(let expr, let variable, _, let identity) = object else { return nil }
-        return .note(expr: expr, variable: variable, constant: taken, identity: identity)
-      }
-      if let taken, let note = claimed(cls.object, by: taken) {
-        cls.object = note
-      } else if let taken, case .family(var members, let shared) = cls.object,
-        members.allSatisfy({ claimed($0.object, by: taken) != nil })
-      {
-        for k in members.indices { members[k].object = claimed(members[k].object, by: taken)! }
-        cls.object = .family(members: members, shared: shared)
-      }
+      rows[i].mark = true
       rows[i].classified = cls
-    } catch let error as Unsupported {
-      rows[i].unsupported = notSupported(error.what)
-      if viewHead(text) != nil { viewsUnknown = true }
-    } catch {
-      // A row reading a file that is not here is not broken (Tables.swift).
-      if needsFile(error, &rows[i]) { continue }
-      // (`u(x, y) = …` read as u times a point: say so.)
-      var text = reservedFnHint(texts[i]) ?? errorMessage(error)
-      // `i = 3` fails as a claim about i; the author meant a definition, so
-      // say why it is not one.
-      if let taken = takenDefinitionName(texts[i]), !valueNames.contains(taken), taken != "d" {
-        if text.hasSuffix(".") { text.removeLast() }
-        text = "\(text) — \(takenNameHint(taken))."
+      return
+    }
+    // A solid whose shape reads sliders is checked for folds at their values.
+    if let solid = cls.solid { try checkFolds(solid, ropts.consts) }
+    rows[i].info = curveHint(cls.object, text)
+    // `e = 0.6` parsed with e already a number; only the text still says e.
+    // `i = [0..9]` is a family of such claims, one per member.
+    func claimed(_ object: MathObject, by taken: String) -> MathObject? {
+      guard case .note(let expr, let variable, _, let identity) = object else { return nil }
+      return .note(expr: expr, variable: variable, constant: taken, identity: identity)
+    }
+    if let taken, let note = claimed(cls.object, by: taken) {
+      cls.object = note
+    } else if let taken, case .family(var members, let shared) = cls.object,
+      members.allSatisfy({ claimed($0.object, by: taken) != nil })
+    {
+      for k in members.indices { members[k].object = claimed(members[k].object, by: taken)! }
+      cls.object = .family(members: members, shared: shared)
+    }
+    rows[i].classified = cls
+  }
+
+  /// Pass 2 proper: every row that is not a definition.
+  func plotRows() {
+    for i in 0..<count {
+      let text = texts[i]
+      if let why = blocked[i] {
+        rows[i].unsupported = notSupported(why)
+        // A view row the port could not read may have framed this panel.
+        if viewHead(text) != nil { viewsUnknown = true }
+        continue
       }
-      rows[i].error = text
+      if random.declares[i] != nil { continue }
+      if rows[i].definition != nil || rows[i].comment || rows[i].error != nil || text.isEmpty { continue }
+      do {
+        if try !specialRow(i, text) { try expressionRow(i, text) }
+      } catch let error as Unsupported {
+        rows[i].unsupported = notSupported(error.what)
+        if viewHead(text) != nil { viewsUnknown = true }
+      } catch {
+        // A row reading a file that is not here is not broken (Tables.swift).
+        if needsFile(error, &rows[i]) { continue }
+        // (`u(x, y) = …` read as u times a point: say so.)
+        var text = reservedFnHint(texts[i]) ?? errorMessage(error)
+        // `i = 3` fails as a claim about i; the author meant a definition, so
+        // say why it is not one.
+        if let taken = takenDefinitionName(texts[i]), !valueNames.contains(taken), taken != "d" {
+          if text.hasSuffix(".") { text.removeLast() }
+          text = "\(text) — \(takenNameHint(taken))."
+        }
+        rows[i].error = text
+      }
     }
   }
+  plotRows()
 
   // A named point in space is a row that draws: the dot at its components.
   for i in 0..<count where blocked[i] == nil && rows[i].error == nil {
@@ -785,32 +808,37 @@ public func analyze(_ sources: [String], files: DataFiles? = nil) -> DocumentAna
   var readoutEnv = frameEnv
   for (name, value) in boundVals { readoutEnv[name] = value }
   readoutEnv["t"] = 0
-  for i in 0..<count {
-    guard let cls = rows[i].classified, rows[i].error == nil else { continue }
-    do {
-      let cpu = try compileCpu(cls)
-      rows[i].gpu = try compileGpu(cls)
-      rows[i].cpu = cpu
-      rows[i].readout = try compileReadout(cls)
-      if let info = try? plotReadout(rows[i].readout ?? cpu, readoutEnv) { rows[i].info = info }
-      rows[i].info = withNote(rows[i].info, memberNotes[i])
-    } catch let error as Unsupported {
-      rows[i].unsupported = notSupported(error.what)
-      rows[i].classified = nil
-      rows[i].info = nil
-    } catch {
-      rows[i].error = errorMessage(error)
-      rows[i].cpu = nil
-      rows[i].gpu = nil
+  /// Each classified row's plans and readout.
+  func compileRows() {
+    for i in 0..<count {
+      guard let cls = rows[i].classified, rows[i].error == nil else { continue }
+      do {
+        let cpu = try compileCpu(cls)
+        rows[i].gpu = try compileGpu(cls)
+        rows[i].cpu = cpu
+        rows[i].readout = try compileReadout(cls)
+        if let info = try? plotReadout(rows[i].readout ?? cpu, readoutEnv) { rows[i].info = info }
+        rows[i].info = withNote(rows[i].info, memberNotes[i])
+      } catch let error as Unsupported {
+        rows[i].unsupported = notSupported(error.what)
+        rows[i].classified = nil
+        rows[i].info = nil
+      } catch {
+        rows[i].error = errorMessage(error)
+        rows[i].cpu = nil
+        rows[i].gpu = nil
+      }
+      // More points than a scene in space draws (Tables.swift).
+      limitCloud(&rows[i])
     }
-    // More points than a scene in space draws (Tables.swift).
-    limitCloud(&rows[i])
   }
+  compileRows()
 
   // A view naming index axes (one, as a panel sharing the other writes it)
   // needs a lattice in its panel with those axes; on the plane it is a slip
   // for x and y: `view(X = -1..1, Y = -2..2)`.
-  do {
+  /// Index-axis views against their panels' lattices.
+  func checkLatticeViews() {
     var panelAt = 0
     var latticeAxes: [[String]] = [[]]
     var indexViews: [(row: Int, panel: Int, axes: [String])] = []
@@ -840,6 +868,7 @@ public func analyze(_ sources: [String], files: DataFiles? = nil) -> DocumentAna
       }
     }
   }
+  checkLatticeViews()
 
   // A slider that is a Σ/Π bound steps in whole numbers. A row the port
   // leaves alone never expands its sums, so which sliders it bounds one by is
@@ -870,80 +899,84 @@ public func analyze(_ sources: [String], files: DataFiles? = nil) -> DocumentAna
   let userFns = Set(built.fns.keys)
   // A whole-number parameter of a discrete law (the n of Binomial(n, p)) steps in whole numbers.
   let wholeParams = distributions.rvs.wholeParamNames()
-  for i in 0..<count {
-    var row = rows[i]
-    defer { rows[i] = row }
-    if row.unsupported != nil { continue }
-    if case .constant(let name, let rhs, false)? = row.definition, namedByUnsupported.contains(name),
-      let form = sliderForm(jsTrimmed(rhs), userFns: userFns), !form.whole, !boundConsts.names.contains(name)
-    {
-      row.unsupported = notSupported("a slider that a sum may step in whole numbers")
-      continue
-    }
-    let named = row.definition.map { built.points.contains($0.name) } ?? false
-    // A binder has no readout of its own: its note is its info.
-    if case .constant(let name, let rhs, true)? = row.definition, row.error == nil,
-      let note = pairDrawNote(name, rhs)
-    {
-      row.info = note
-    }
-    if row.comment {
-      row.kind = "comment (group heading)"
-    } else if let d = row.definition {
-      let valued =
-        built.mats.has(d.name)
-        ? "matrix" : built.tensors.has(d.name) ? "tensor" : built.multivectors[d.name].map(algebraKind)
-      let interval = built.intervals.has(d.name) ? "interval" : nil
-      let constant = interval ?? valued ?? (named ? "point" : built.lists.has(d.name) ? "list" : "const")
-      // (`adults = person[…]` scans as a constant, but what it defines is another data file.)
-      row.kind = "definition (\(d.kind == "const" ? constant : d.kind))"
-    } else if let view = row.view {
-      row.kind =
-        switch view {
-        case .split: "panel divider (the rows below it draw in a panel of their own)"
-        case .grid, .gridCoords: "grid (what draws behind its panel's plots)"
-        default: "viewport (\(view.kind))"
-        }
-    } else if let dist = row.dist {
-      row.kind = distributionKind(dist, row.cpu)
-    } else if let cls = row.classified {
-      row.kind = cls.rowKind
-    }
-    // Blank rows, definitions (other than named points), comments and view
-    // rows draw nothing, a value row shows only its readout, and a `#hex`
-    // note picks its own color. A row with an error does take one: it is
-    // usually a curve being typed.
-    var draws = true
-    switch row.cpu {
-    case .note, .value(_, nil): draws = false
-    default: break
-    }
-    row.takesColor =
-      !jsTrimmed(sources[i]).isEmpty && !row.comment && (row.definition == nil || named) && row.view == nil
-      && noteColor(sources[i]) == nil && draws
-    // A constant whose right-hand side is a number the user wrote is a slider.
-    if case .constant(let name, let rhs, false)? = row.definition, row.error == nil,
-      let form = sliderForm(jsTrimmed(rhs), userFns: userFns)
-    {
-      var value = form.literal
-      let lo: Double
-      let hi: Double
-      if let bounds = sliderBounds(form, frameEnv, userFns: userFns, valueNames: valueNames) {
-        (lo, hi) = bounds
-        value = sliderValue(form, value, bounds)
-      } else {
-        // No written range: one that fits the value.
-        lo = JS.min([-10, value.rounded(.down)])
-        hi = JS.max([10, value.rounded(.up)])
+  /// What each row shows beside its text: its kind, color and slider.
+  func finishRows() {
+    for i in 0..<count {
+      var row = rows[i]
+      defer { rows[i] = row }
+      if row.unsupported != nil { continue }
+      if case .constant(let name, let rhs, false)? = row.definition, namedByUnsupported.contains(name),
+        let form = sliderForm(jsTrimmed(rhs), userFns: userFns), !form.whole, !boundConsts.names.contains(name)
+      {
+        row.unsupported = notSupported("a slider that a sum may step in whole numbers")
+        continue
       }
-      // Whole-number sliders step one at a time; otherwise a round step
-      // (1, 2 or 5 × 10^k), so round values sit on it.
-      // (A slider that is a Σ/Π bound, or the index a term is read at, steps so too; and a
-      // whole-number parameter of a discrete law.)
-      let whole = form.whole || boundConsts.names.contains(name) || wholeParams.contains(name)
-      row.slider = Slider(min: lo, max: hi, step: whole ? 1 : niceSpacing((hi - lo) / 400, 1).major, value: value)
+      let named = row.definition.map { built.points.contains($0.name) } ?? false
+      // A binder has no readout of its own: its note is its info.
+      if case .constant(let name, let rhs, true)? = row.definition, row.error == nil,
+        let note = pairDrawNote(name, rhs)
+      {
+        row.info = note
+      }
+      if row.comment {
+        row.kind = "comment (group heading)"
+      } else if let d = row.definition {
+        let valued =
+          built.mats.has(d.name)
+          ? "matrix" : built.tensors.has(d.name) ? "tensor" : built.multivectors[d.name].map(algebraKind)
+        let interval = built.intervals.has(d.name) ? "interval" : nil
+        let constant = interval ?? valued ?? (named ? "point" : built.lists.has(d.name) ? "list" : "const")
+        // (`adults = person[…]` scans as a constant, but what it defines is another data file.)
+        row.kind = "definition (\(d.kind == "const" ? constant : d.kind))"
+      } else if let view = row.view {
+        row.kind =
+          switch view {
+          case .split: "panel divider (the rows below it draw in a panel of their own)"
+          case .grid, .gridCoords: "grid (what draws behind its panel's plots)"
+          default: "viewport (\(view.kind))"
+          }
+      } else if let dist = row.dist {
+        row.kind = distributionKind(dist, row.cpu)
+      } else if let cls = row.classified {
+        row.kind = cls.rowKind
+      }
+      // Blank rows, definitions (other than named points), comments and view
+      // rows draw nothing, a value row shows only its readout, and a `#hex`
+      // note picks its own color. A row with an error does take one: it is
+      // usually a curve being typed.
+      var draws = true
+      switch row.cpu {
+      case .note, .value(_, nil): draws = false
+      default: break
+      }
+      row.takesColor =
+        !jsTrimmed(sources[i]).isEmpty && !row.comment && (row.definition == nil || named) && row.view == nil
+        && noteColor(sources[i]) == nil && draws
+      // A constant whose right-hand side is a number the user wrote is a slider.
+      if case .constant(let name, let rhs, false)? = row.definition, row.error == nil,
+        let form = sliderForm(jsTrimmed(rhs), userFns: userFns)
+      {
+        var value = form.literal
+        let lo: Double
+        let hi: Double
+        if let bounds = sliderBounds(form, frameEnv, userFns: userFns, valueNames: valueNames) {
+          (lo, hi) = bounds
+          value = sliderValue(form, value, bounds)
+        } else {
+          // No written range: one that fits the value.
+          lo = JS.min([-10, value.rounded(.down)])
+          hi = JS.max([10, value.rounded(.up)])
+        }
+        // Whole-number sliders step one at a time; otherwise a round step
+        // (1, 2 or 5 × 10^k), so round values sit on it.
+        // (A slider that is a Σ/Π bound, or the index a term is read at, steps so too; and a
+        // whole-number parameter of a discrete law.)
+        let whole = form.whole || boundConsts.names.contains(name) || wholeParams.contains(name)
+        row.slider = Slider(min: lo, max: hi, step: whole ? 1 : niceSpacing((hi - lo) / 400, 1).major, value: value)
+      }
     }
   }
+  finishRows()
   // The kinds of the rows that are data files', or wait for one (Tables.swift).
   tableKinds(&rows, tables)
   // Messages name a redefined built-in (`#e`, internally) as its row wrote it.

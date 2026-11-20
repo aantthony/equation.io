@@ -369,31 +369,18 @@ public func inferScalarType(_ e: Expr, _ env: [String: ScalarType] = [:]) throws
     let a = try inferScalarType(lhs, env)
     let b = try inferScalarType(rhs, env)
     return a == .complex || b == .complex ? .complex : .real
-  case .call(let name, let args):
-    // (A list literal as the resolver marks it is the list: Expr.swift, "List identity".)
-    if name == LIST_ID || name == LIST_ORIGIN, let list = args.last { return try inferScalarType(list, env) }
-    var types: [ScalarType] = []
-    for a in args { types.append(try inferScalarType(a, env)) }
-    return try inferCallType(name, types)
-  case .eq(let l, let r):
-    var complex = try inferScalarType(l, env) == .complex
-    if !complex { complex = try inferScalarType(r, env) == .complex }
-    if complex { throw LanguageError("Complex equation: compare re(…) or im(…) instead.") }
-    return .real
+  case .call:
+    return try inferTypeCall(e, env)
+  case .eq:
+    return try inferTypeEq(e, env)
   case .ineq:
     throw LanguageError("Unexpected inequality.")
   case .vec:
     throw LanguageError("Vector in scalar context.")
   case .list:
     throw LanguageError("A list can only be plotted as its own row.")
-  case .piecewise(let cases, let otherwise):
-    var complex = false
-    for c in cases {
-      try realCondition(c.cond, env)
-      if try inferScalarType(c.value, env) == .complex { complex = true }
-    }
-    if let otherwise, try inferScalarType(otherwise, env) == .complex { complex = true }
-    return complex ? .complex : .real
+  case .piecewise:
+    return try inferTypePiecewise(e, env)
   case .loop(let params, let seeds, let body, _):
     return try loopTypes(params, seeds, body, env).result
   case .index, .range, .eqtest, .comp, .figure, .lazy, .trail, .label, .hist, .family:
@@ -401,4 +388,32 @@ public func inferScalarType(_ e: Expr, _ env: [String: ScalarType] = [:]) throws
   case .data, .str, .text:
     throw LanguageError("Expected a scalar expression.")
   }
+}
+
+private func inferTypeCall(_ e: Expr, _ env: [String: ScalarType]) throws(LanguageError) -> ScalarType {
+  guard case .call(let name, let args) = e else { return .real }
+  // (A list literal as the resolver marks it is the list: Expr.swift, "List identity".)
+  if name == LIST_ID || name == LIST_ORIGIN, let list = args.last { return try inferScalarType(list, env) }
+  var types: [ScalarType] = []
+  for a in args { types.append(try inferScalarType(a, env)) }
+  return try inferCallType(name, types)
+}
+
+private func inferTypeEq(_ e: Expr, _ env: [String: ScalarType]) throws(LanguageError) -> ScalarType {
+  guard case .eq(let l, let r) = e else { return .real }
+  var complex = try inferScalarType(l, env) == .complex
+  if !complex { complex = try inferScalarType(r, env) == .complex }
+  if complex { throw LanguageError("Complex equation: compare re(…) or im(…) instead.") }
+  return .real
+}
+
+private func inferTypePiecewise(_ e: Expr, _ env: [String: ScalarType]) throws(LanguageError) -> ScalarType {
+  guard case .piecewise(let cases, let otherwise) = e else { return .real }
+  var complex = false
+  for c in cases {
+    try realCondition(c.cond, env)
+    if try inferScalarType(c.value, env) == .complex { complex = true }
+  }
+  if let otherwise, try inferScalarType(otherwise, env) == .complex { complex = true }
+  return complex ? .complex : .real
 }

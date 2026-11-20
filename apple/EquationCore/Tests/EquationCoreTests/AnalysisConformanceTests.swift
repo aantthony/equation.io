@@ -3,28 +3,6 @@ import Testing
 
 @testable import EquationCore
 
-/// `body` on a thread with the main thread's stack (8 MB), where the app
-/// analyses a document. A test's own thread has 512 KB, which a debug build's
-/// frames fill on a deep row (a 50-term Σ, lowered a frame per term).
-func onMainStack<T>(_ body: @escaping () -> T) -> T {
-  let box = StackBox(body)
-  let done = DispatchSemaphore(value: 0)
-  let thread = Thread {
-    box.value = box.body()
-    done.signal()
-  }
-  thread.stackSize = 8 << 20
-  thread.start()
-  done.wait()
-  return box.value!
-}
-
-private final class StackBox<T>: @unchecked Sendable {
-  var value: T?
-  let body: () -> T
-  init(_ body: @escaping () -> T) { self.body = body }
-}
-
 /// Holds the Swift language trunk to the TypeScript one: for every example
 /// in the site's menu and a set of targeted documents, each row the port
 /// supports must come to what lib/analysis.ts says of it — its kind, error,
@@ -55,7 +33,7 @@ private final class StackBox<T>: @unchecked Sendable {
       let link = doc["link"] as? Bool == true
       // ANALYSIS_TRACE=1 names each document before it is read: the last is the one that crashed.
       if ProcessInfo.processInfo.environment["ANALYSIS_TRACE"] != nil { print("reading \(name)") }
-      let analysis = onMainStack { analyze(rows, files: link ? nil : files) }
+      let analysis = analyze(rows, files: link ? nil : files)
       #expect(analysis.rows.count == rows.count)
       var whole = true
       for (i, want) in results.enumerated() {

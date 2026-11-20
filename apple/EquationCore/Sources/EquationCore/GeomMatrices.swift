@@ -121,83 +121,108 @@ final class GeomContext {
     switch e {
     case .var(let name):
       return getTensor(name, false)
-    case .vec(let parts):
-      func some(_ test: (Expr) throws -> Bool) rethrows -> Bool {
-        for it in parts where try test(it) { return true }
-        return false
-      }
-      if !(try some { try lowerTensor($0) != nil || deepTupleRow($0) }) { return nil }
-      let t = try tupleTensor(parts)
-      // A tuple of points that is not square is a tuple of points.
-      let points = t.shape.count == 2 && (t.shape[1] == 2 || t.shape[1] == 3)
-      return try points && !some({ try lowerTensor($0) != nil }) ? nil : t
+    case .vec:
+      return try tensorOfVec(e)
     case .neg(let inner):
       return try lowerTensor(inner).map(tensorNeg)
-    case .bin(let op, let lhs, let rhs, let glyph):
-      if glyph == .outer { return try outer(anyTensor(lhs), anyTensor(rhs)) }
-      if glyph == .wedge { return try wedge(anyTensor(lhs), anyTensor(rhs)) }
-      let a = try lowerTensor(lhs)
-      let b = try lowerTensor(rhs)
-      if a == nil && b == nil {
-        // T Q with T a tuple of points: the consumer reads it as a matrix,
-        // n×k — the rectangular matvec and product. (Scaled, 2 T, it stays a
-        // tuple of points; on the right, M T, each of its points is moved.)
-        if op != .mul { return nil }
-        guard let l = try pointRows(lhs) else {
-          // v T, a vector on the left of a tuple of points that is not
-          // square: the contraction v_i T_ij, a vector of T's width.
-          guard let r = try pointRows(rhs), r.shape[0] != r.shape[1] else { return nil }
-          guard let v = items(try lo(lhs)) else { return nil }
-          return try product(vectorTensor(v), r)
-        }
-        if let r = try pointRows(rhs) { return try product(l, r) }
-        if let r = try lowerMat(rhs) { return try product(l, fromMat(r.m)) }
-        guard let v = items(try lo(rhs)) else { return nil }
-        return try product(l, vectorTensor(v))
-      }
-      switch op {
-      case .add, .sub:
-        return try tensorAdd(anyTensor(lhs), anyTensor(rhs), minus: op == .sub)
-      case .mul:
-        let l = try anyTensor(lhs)
-        let r = try anyTensor(rhs)
-        if l.shape.isEmpty { return tensorScale(r, l.data[0]) }
-        if r.shape.isEmpty { return tensorScale(l, r.data[0]) }
-        return try product(l, r)
-      case .div:
-        let r = try anyTensor(rhs)
-        guard let a, r.shape.isEmpty else { throw LanguageError("Cannot divide by a tensor.") }
-        return tensorScale(a, .bin(.div, .num(1), r.data[0]))
-      case .pow:
-        // (A power is matrix algebra: e^(th e_x ∧ e_y) is lowerMat's.)
-        return nil
-      }
-    case .index(let target, let at):
-      // T[k]: the k-th slice along the first index, as M[2] is a row.
-      guard let t = try lowerTensor(target) else { return nil }
-      let k = try constIndex(at, "A tensor index")
-      if k < 1 || k > t.shape[0] {
-        throw LanguageError("That tensor has \(t.shape[0]) rows along its first index; \(k) is not one.")
-      }
-      return rows(t)[k - 1]
-    case .call(let name, let args):
-      if !tensorOp(e) { return nil }
-      if name == TENSOR_CALL { return tensorOfNode(e) }
-      if name == "contract" {
-        if args.count != 3 {
-          throw LanguageError(
-            "contract takes a tensor and two of its indices: contract(T, 1, 2) sums T_ii… over i.")
-        }
-        return try contract(
-          anyTensor(args[0]), constIndex(args[1], "An index") - 1, constIndex(args[2], "An index") - 1)
-      }
-      if args.count < 2 {
-        throw LanguageError("\(name) takes two or more vectors or tensors: \(name)(a, b).")
-      }
-      var acc = try anyTensor(args[0])
-      for n in args.dropFirst() { acc = try name == "outer" ? outer(acc, anyTensor(n)) : wedge(acc, anyTensor(n)) }
-      return acc
+    case .bin:
+      return try tensorOfBin(e)
+    case .index:
+      return try tensorOfIndex(e)
+    case .call:
+      return try tensorOfCall(e)
     default:
+      return nil
+    }
+  }
+
+  private func tensorOfVec(_ e: Expr) throws -> Tensor? {
+    guard case .vec(let parts) = e else { return nil }
+    func some(_ test: (Expr) throws -> Bool) rethrows -> Bool {
+      for it in parts where try test(it) { return true }
+      return false
+    }
+    if !(try some { try lowerTensor($0) != nil || deepTupleRow($0) }) { return nil }
+    let t = try tupleTensor(parts)
+    // A tuple of points that is not square is a tuple of points.
+    let points = t.shape.count == 2 && (t.shape[1] == 2 || t.shape[1] == 3)
+    return try points && !some({ try lowerTensor($0) != nil }) ? nil : t
+  }
+
+  private func tensorOfBin(_ e: Expr) throws -> Tensor? {
+    guard case .bin(let op, let lhs, let rhs, let glyph) = e else { return nil }
+    if glyph == .outer { return try outer(anyTensor(lhs), anyTensor(rhs)) }
+    if glyph == .wedge { return try wedge(anyTensor(lhs), anyTensor(rhs)) }
+    let a = try lowerTensor(lhs)
+    let b = try lowerTensor(rhs)
+    return try tensorOfSides(op, lhs, rhs, a, b)
+  }
+
+  private func tensorOfIndex(_ e: Expr) throws -> Tensor? {
+    guard case .index(let target, let at) = e else { return nil }
+    // T[k]: the k-th slice along the first index, as M[2] is a row.
+    guard let t = try lowerTensor(target) else { return nil }
+    let k = try constIndex(at, "A tensor index")
+    if k < 1 || k > t.shape[0] {
+      throw LanguageError("That tensor has \(t.shape[0]) rows along its first index; \(k) is not one.")
+    }
+    return rows(t)[k - 1]
+  }
+
+  private func tensorOfCall(_ e: Expr) throws -> Tensor? {
+    guard case .call(let name, let args) = e else { return nil }
+    if !tensorOp(e) { return nil }
+    if name == TENSOR_CALL { return tensorOfNode(e) }
+    if name == "contract" {
+      if args.count != 3 {
+        throw LanguageError(
+          "contract takes a tensor and two of its indices: contract(T, 1, 2) sums T_ii… over i.")
+      }
+      return try contract(
+        anyTensor(args[0]), constIndex(args[1], "An index") - 1, constIndex(args[2], "An index") - 1)
+    }
+    if args.count < 2 {
+      throw LanguageError("\(name) takes two or more vectors or tensors: \(name)(a, b).")
+    }
+    var acc = try anyTensor(args[0])
+    for n in args.dropFirst() { acc = try name == "outer" ? outer(acc, anyTensor(n)) : wedge(acc, anyTensor(n)) }
+    return acc
+  }
+
+  /// A sum, product or quotient whose sides `a` and `b` are tensors, or are not (`tensorOf`, case .bin).
+  private func tensorOfSides(_ op: BinOp, _ lhs: Expr, _ rhs: Expr, _ a: Tensor?, _ b: Tensor?) throws -> Tensor? {
+    if a == nil && b == nil {
+      // T Q with T a tuple of points: the consumer reads it as a matrix,
+      // n×k — the rectangular matvec and product. (Scaled, 2 T, it stays a
+      // tuple of points; on the right, M T, each of its points is moved.)
+      if op != .mul { return nil }
+      guard let l = try pointRows(lhs) else {
+        // v T, a vector on the left of a tuple of points that is not
+        // square: the contraction v_i T_ij, a vector of T's width.
+        guard let r = try pointRows(rhs), r.shape[0] != r.shape[1] else { return nil }
+        guard let v = items(try lo(lhs)) else { return nil }
+        return try product(vectorTensor(v), r)
+      }
+      if let r = try pointRows(rhs) { return try product(l, r) }
+      if let r = try lowerMat(rhs) { return try product(l, fromMat(r.m)) }
+      guard let v = items(try lo(rhs)) else { return nil }
+      return try product(l, vectorTensor(v))
+    }
+    switch op {
+    case .add, .sub:
+      return try tensorAdd(anyTensor(lhs), anyTensor(rhs), minus: op == .sub)
+    case .mul:
+      let l = try anyTensor(lhs)
+      let r = try anyTensor(rhs)
+      if l.shape.isEmpty { return tensorScale(r, l.data[0]) }
+      if r.shape.isEmpty { return tensorScale(l, r.data[0]) }
+      return try product(l, r)
+    case .div:
+      let r = try anyTensor(rhs)
+      guard let a, r.shape.isEmpty else { throw LanguageError("Cannot divide by a tensor.") }
+      return tensorScale(a, .bin(.div, .num(1), r.data[0]))
+    case .pow:
+      // (A power is matrix algebra: e^(th e_x ∧ e_y) is lowerMat's.)
       return nil
     }
   }
