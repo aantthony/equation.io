@@ -58,6 +58,13 @@ const DOCUMENTS: Array<[text: string, time?: number]> = [
     'rho = sqrt(x^2 + y^2 + z^2); theta = atan2(y, x); phi = acos(z/rho); (rho, theta, phi) = (2, pi/4, pi/3); ' +
       '(rho, theta, phi) = (2, 12 pi u, pi u)',
   ],
+  // Multivectors, quaternions and projective geometry: glyphs, planes, lines of space, motors.
+  // (A named value's coefficients that move with t are constants, which the scene tool reads at t = 0:
+  // what moves here is written on its own row.)
+  ['camera(-pi/3, 0.6, 5); a = 0.8; R = e^(-(a/2) e_xy); p = (1, 0, 0.8); vector(p); vector(rotate(p, R)); R; e^(-(t/2) e_zx)', 0.5],
+  ['a = 0.6; p = plane((0, 0, 0), (0, sin(a), cos(a))); q = plane((1, 0, 0), (1, 0, 0.5)); p; q; meet(p, q)'],
+  ['1 + e_xyz + e_x; e_xy + e_yz; quat(cos(0.4), sin(0.4) (1, 1, 1)/sqrt(3)); action(((1, 1, 0), (0, 1, 0), (0, 0, 2)))'],
+  ['A = (2.5, -2, -2); B = (2.5, 2, 2); L = line(A, B); L; th = 1; S = motor(L, th, th/4); S; rotate((1, 1, 1), S); [e_x, 2 e_y]; motor(L, t)', 1],
 ];
 
 const recorded = DOCUMENTS.map(([text, time = 0]) => {
