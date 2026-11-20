@@ -34,7 +34,7 @@ struct EquationApp: App {
       }
     #else
       DocumentGroup(newDocument: GraphDocument()) { file in
-        DocumentView(document: file.$document)
+        DocumentView(document: file.$document, registersUndo: true)
       }
       .commands {
         ZoomCommands()

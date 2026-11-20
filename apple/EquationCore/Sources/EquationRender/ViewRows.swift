@@ -75,6 +75,42 @@ public func formatViewRow(
     ratio: sharedX || sharedY ? nil : view.ratio, locked: locked)
 }
 
+/// The same row for a panel whose view(…) row maps an axis or names a
+/// lattice's (lib/view.ts `formatViewSpec`). A mapped axis's window is held
+/// in screen units and written in its own, each end to six significant
+/// digits (on a log axis 0.00001 is a real bound, not float dust beside
+/// 100000), with the map after the ranges. A lattice's axes are written by
+/// name, the one down negated, in the order the row had them (`written`).
+public func formatViewRow(
+  _ view: View2D, width: Double, height: Double, sharedX: Bool = false, sharedY: Bool = false, locked: Bool = false,
+  maps: AxisMaps?, lattice axes: [String]? = nil, written: [String]? = nil
+) -> String? {
+  guard width > 0, height > 0, !(sharedX && sharedY) else { return nil }
+  let hw = width / 2 * view.upp
+  let hh = height / 2 * view.uppY
+  let lattice = axes.flatMap { $0.count == 2 ? $0 : nil }
+  let (across, down) = (lattice?[0] ?? "x", lattice?[1] ?? "y")
+  func range(_ map: AxisMap?, _ lo: Double, _ hi: Double) -> String {
+    guard let map else { return formatRange(lo, hi) }
+    return "\(formatRowNumber(toWorld(map, lo)))..\(formatRowNumber(toWorld(map, hi)))"
+  }
+  var parts: [String] = []
+  if !sharedX { parts.append("\(across) = \(range(maps?.x, view.cx - hw, view.cx + hw))") }
+  if !sharedY {
+    let (lo, hi) = (view.cy - hh, view.cy + hh)
+    parts.append("\(down) = \(lattice == nil ? range(maps?.y, lo, hi) : formatRange(-hi, -lo))")
+  }
+  for map in [maps?.x, maps?.y] {
+    if let map { parts.append("\(map.axis.rawValue) = \(map.text)") }
+  }
+  if lattice != nil, parts.count == 2, let written, written.count == 2, written[0] == down, written[1] == across {
+    parts.reverse()
+  }
+  if !sharedX, !sharedY, let ratio = view.ratio, ratio != 1 { parts.append("ratio = \(formatRowNumber(ratio))") }
+  if locked { parts.append("locked") }
+  return "view(\(parts.joined(separator: ", ")))"
+}
+
 /// The `camera(…)` row for a camera. A spun or eased camera accumulates
 /// turns and float dust: the angle is written as it shows, in (-pi, pi], and
 /// 0 for 0.

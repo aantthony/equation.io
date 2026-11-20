@@ -23,6 +23,10 @@ struct ZoomCommands: Commands {
       Button("Zoom Out") { graph?.zoom(by: 2) }
         .keyboardShortcut("-")
         .disabled(graph == nil)
+      // The site's ↻: t, and every state (`a' = …`), from the start.
+      Button("Restart Animation") { graph?.restart() }
+        .keyboardShortcut("r")
+        .disabled(graph == nil)
       Divider()
     }
   }

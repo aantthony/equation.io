@@ -7,16 +7,24 @@ import SwiftUI
 /// hand (GraphGestures.swift), for Ask's move_view and the Zoom commands,
 /// and as a camera(…) row's spin turns it. What a hand does here is what
 /// web/main.ts's pointer and wheel handlers do; the arithmetic is
-/// EquationRender's (ViewMoves.swift, PanelBoxes.swift, PointDrag.swift).
+/// EquationRender's (ViewMoves.swift, PanelWindows.swift, PointDrag.swift).
+///
+/// It owns what a frame needs beyond the rows: each panel's window or
+/// camera, the clock, and the run of the document's states (`a' = …`), an
+/// EquationCore `StateStepper` advanced to each frame's time.
 final class MetalCanvas: MTKView, MTKViewDelegate {
   let viewport: GraphViewport
   private let renderer: FrameRenderer?
   /// The document's side: its rows, and the way to rewrite them.
   weak var model: GraphModel?
 
-  var content: GraphPanels? {
+  var content: GraphContent? {
     didSet {
       guard content != oldValue else { return }
+      // A system written as it was keeps its run through the edit; any other starts again.
+      if let content {
+        if run == nil { run = StateStepper(content.analysis) } else { run?.adopt(content.analysis) }
+      }
       reconcile()
       updatePacing()
       redraw()
@@ -25,6 +33,9 @@ final class MetalCanvas: MTKView, MTKViewDelegate {
   var theme = GraphTheme.light {
     didSet { if theme != oldValue { redraw() } }
   }
+
+  /// The states where the last frame left them, and the trails behind them.
+  private(set) var run: StateStepper?
 
   /// The panel the last gesture was in: what the Zoom commands move.
   var active = 0
@@ -41,6 +52,8 @@ final class MetalCanvas: MTKView, MTKViewDelegate {
   var scrolling = false
 
   private var glide: Task<Bool, Never>?
+  /// A hand is on the graph or a move is in flight: what is written meanwhile is one gesture's.
+  var busy: Bool { held || glide != nil }
   private var coasting: Task<Void, Never>?
   private var spinEase: Task<Void, Never>?
   private var refine: Task<Void, Never>?
@@ -72,7 +85,8 @@ final class MetalCanvas: MTKView, MTKViewDelegate {
   @available(*, unavailable)
   required init(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 
-  /// Show a new graph: each panel's opening window or camera, and t from 0.
+  /// Show a new graph: each panel's opening window or camera, t from 0, and
+  /// every state at its start.
   func open() {
     stopMoves()
     writeback?.cancel()
@@ -81,8 +95,18 @@ final class MetalCanvas: MTKView, MTKViewDelegate {
     viewport.states = []
     viewport.opened = .now
     viewport.hot = nil
+    viewport.hover = nil
+    run = nil
     active = 0
     reconcile()
+    redraw()
+  }
+
+  /// Start the clock and the states again (the site's ↻), leaving the view where it is.
+  func restart() {
+    viewport.opened = .now
+    run = content.map { StateStepper($0.analysis) }
+    lastFrame = nil
     redraw()
   }
 
@@ -105,11 +129,12 @@ final class MetalCanvas: MTKView, MTKViewDelegate {
   private func reconcile() {
     guard let content else { return }
     var states = viewport.states
-    if states.count > content.panels.count { states.removeLast(states.count - content.panels.count) }
-    while states.count < content.panels.count { states.append(PanelState()) }
-    for (k, panel) in content.panels.enumerated() where states[k].framed {
-      let text = panel.frameRow.map { content.analysis.rows[$0].text }
-      if states[k].spatial != (panel.space != nil) {
+    let count = content.panels.panels.count
+    if states.count > count { states.removeLast(states.count - count) }
+    while states.count < count { states.append(PanelState()) }
+    for (k, framing) in content.framing.enumerated() where states[k].framed {
+      let text = framing.frameRow.map { content.analysis.rows[$0].text }
+      if states[k].spatial != (framing.space != nil) {
         states[k].framed = false
       } else if text != states[k].applied {
         // A row that is gone leaves the panel where it is, but no longer turning.
@@ -125,11 +150,15 @@ final class MetalCanvas: MTKView, MTKViewDelegate {
     frame(in: drawableSize)
   }
 
-  /// Give each panel not yet framed its opening window or camera: what its
-  /// row asks for, or else the origin at the center with 12 units across the
-  /// shorter side, or the camera a 3D graph opens with.
+  /// Give each panel not yet framed its opening window or camera
+  /// (`GraphPanels.opening`: what its row asks for, or else the origin at
+  /// the center with 12 units across the shorter side, a lattice on its
+  /// cells), or the camera a 3D graph opens with; then carry shared axes
+  /// from the panels that own them.
   private func frame(in size: CGSize) {
     guard let content, size.width > 0, size.height > 0 else { return }
+    // Of the size being framed: on a resize the view's own drawable is still the old one.
+    let scale = bounds.width > 0 ? size.width / bounds.width : 1
     var states = viewport.states
     if viewport.pixels != size {
       viewport.pixels = size
@@ -137,23 +166,24 @@ final class MetalCanvas: MTKView, MTKViewDelegate {
       for k in states.indices where !states[k].touched && !states[k].spatial { states[k].framed = false }
     }
     if viewport.scale != scale { viewport.scale = scale }
-    guard states.count == content.panels.count, states.contains(where: { !$0.framed }) else { return }
-    let boxes = viewport.boxes(content)
-    for (k, panel) in content.panels.enumerated() where !states[k].framed {
+    guard states.count == content.framing.count, states.contains(where: { !$0.framed }) else { return }
+    let layout = viewport.layout(content)
+    let opening = content.panels.opening(width: size.width, height: size.height, dpr: scale)
+    for (k, framing) in content.framing.enumerated() where !states[k].framed {
       states[k].framed = true
       states[k].touched = false
-      states[k].spatial = panel.space != nil
-      states[k].applied = panel.frameRow.map { content.analysis.rows[$0].text }
-      if let space = panel.space {
-        states[k].camera = panel.camera ?? space.opening
-        states[k].spin = panel.spin
+      states[k].spatial = framing.space != nil
+      states[k].applied = framing.frameRow.map { content.analysis.rows[$0].text }
+      if let space = framing.space {
+        states[k].camera = framing.camera ?? space.opening
+        states[k].spin = framing.spin
         states[k].spinScale = 1
-      } else {
-        states[k].view = panel.plane.opening(width: boxes[k].w, height: boxes[k].h, dpr: scale)
+      } else if k < opening.count {
+        states[k].view = opening[k]
       }
     }
     var views = states.map(\.view)
-    syncLinkedWindows(&views, boxes)
+    syncLinks(&views, layout)
     for k in states.indices { states[k].view = views[k] }
     viewport.states = states
     updatePacing()
@@ -178,6 +208,13 @@ final class MetalCanvas: MTKView, MTKViewDelegate {
     redraw()
   }
 
+  /// The frame at `time`: every panel in its box, as the view has it now.
+  private func frames(_ content: GraphContent, at time: Double) -> (frames: [PanelFrame], layout: [PanelLayout]) {
+    content.frames(
+      at: time, width: viewport.pixels.width, height: viewport.pixels.height, dpr: viewport.scale, theme: theme,
+      views: viewport.states.map(\.view), cameras: viewport.states.map(\.camera), run: run, hot: viewport.hot)
+  }
+
   func draw(in view: MTKView) {
     let size = drawableSize
     frame(in: size)
@@ -186,13 +223,17 @@ final class MetalCanvas: MTKView, MTKViewDelegate {
     else { return }
     turn()
     let time = viewport.time
-    renderer.helpers = content.panels.lazy.compactMap { $0.space?.helpers }.first
+    run?.advance(to: time)
+    let frame = frames(content, at: time)
+    renderer.helpers = content.framing.lazy.compactMap { $0.space?.helpers }.first
     renderer.draw(
-      viewport.frames(content, time: time, overlay: false), on: buffer, into: pass, width: Int(size.width),
-      height: Int(size.height), time: time, theme: theme)
+      frame.frames, on: buffer, into: pass, width: Int(size.width), height: Int(size.height), time: time, theme: theme)
     buffer.present(drawable)
     drawn += 1
     buffer.commit()
+    // The overlay (MetalGraphView.swift) draws the rest of this same frame.
+    if viewport.frames != frame.frames { viewport.frames = frame.frames }
+    if viewport.layout != frame.layout { viewport.layout = frame.layout }
 
     // A 3D panel's surfaces are drawn coarsely while they move and refined
     // once they hold still, a pass a frame: draw again when the next is
@@ -221,20 +262,37 @@ final class MetalCanvas: MTKView, MTKViewDelegate {
     }
   }
 
+  #if DEBUG
+    /// The frame the view shows now, drawn again offscreen with its overlay:
+    /// EQUATION_SCRIPT's `shot` (GraphGestures.swift).
+    func snapshot() -> CGImage? {
+      guard let content, let metal = MetalContext() else { return nil }
+      let renderer = FrameRenderer(metal)
+      renderer.helpers = content.framing.lazy.compactMap { $0.space?.helpers }.first
+      let time = viewport.time
+      // Stepped as the frames up to now would have stepped it, where none were drawn (a hidden window).
+      run?.play(to: time)
+      return renderer.image(
+        of: frames(content, at: time).frames, width: Int(viewport.pixels.width), height: Int(viewport.pixels.height),
+        dpr: viewport.scale, time: time, theme: theme)
+    }
+  #endif
+
   // MARK: Where things are
 
   /// The panel under a point of the view (in points, from its top-left corner).
   func panel(at p: CGPoint) -> Int {
     guard let content else { return 0 }
-    return panelAt(viewport.boxes(content), p.x * scale, p.y * scale)
+    return panelAt(viewport.layout(content), p.x * scale, p.y * scale)
   }
 
   /// A point of the view as device pixels from the center of panel `k`, y up.
   private func offset(_ p: CGPoint, in k: Int) -> (px: Double, py: Double) {
     guard let content else { return (0, 0) }
-    let boxes = viewport.boxes(content)
-    guard k < boxes.count else { return (0, 0) }
-    return (p.x * scale - (boxes[k].x + boxes[k].w / 2), (boxes[k].y + boxes[k].h / 2) - p.y * scale)
+    let layout = viewport.layout(content)
+    guard k < layout.count else { return (0, 0) }
+    let r = layout[k].rect
+    return (p.x * scale - (r.x + r.w / 2), (r.y + r.h / 2) - p.y * scale)
   }
 
   /// Whether panel `k` is a 3D one.
@@ -244,8 +302,8 @@ final class MetalCanvas: MTKView, MTKViewDelegate {
 
   /// Whether a hand may move panel `k`: a `locked` row holds it still.
   private func free(_ k: Int) -> Bool {
-    guard let content, k < content.panels.count, k < viewport.states.count else { return false }
-    return !content.panels[k].locked
+    guard let content, k < content.framing.count, k < viewport.states.count else { return false }
+    return !content.framing[k].locked
   }
 
   // MARK: Moving a panel
@@ -255,8 +313,7 @@ final class MetalCanvas: MTKView, MTKViewDelegate {
   private func didMove(_ k: Int) {
     if let content, !spatial(k) {
       var views = viewport.states.map(\.view)
-      syncLinkedWindows(&views, viewport.boxes(content), moved: k)
-      for i in views.indices where views[i] != viewport.states[i].view {
+      for i in syncLinks(&views, viewport.layout(content), moved: k) where i < viewport.states.count {
         viewport.states[i].view = views[i]
         moved.insert(i)
       }
@@ -274,8 +331,9 @@ final class MetalCanvas: MTKView, MTKViewDelegate {
   }
 
   /// Rewrite the moved panels' view(…) and camera(…) rows to the picture on
-  /// screen (web/main.ts `writebackViewport`). A panel without such a row
-  /// has nothing to write: its framing is not part of the document.
+  /// screen (web/main.ts `writebackViewport`, `panelViewText`). A panel
+  /// without such a row has nothing to write: its framing is not part of
+  /// the document. The rewrites of one gesture are one undo step.
   func flushWriteback() {
     writeback?.cancel()
     writeback = nil
@@ -283,26 +341,41 @@ final class MetalCanvas: MTKView, MTKViewDelegate {
     moved = []
     guard let content, let model, !panels.isEmpty else { return }
     var lines = model.rows()
-    let boxes = viewport.boxes(content)
-    var changed = false
-    for k in panels.sorted() where k < content.panels.count && k < viewport.states.count && k < boxes.count {
-      let panel = content.panels[k]
-      guard let row = panel.frameRow, row < lines.count, !panel.locked else { continue }
+    let layout = viewport.layout(content)
+    var changed: [(panel: Int, row: Int, was: String)] = []
+    var mapped = false
+    for k in panels.sorted() where k < content.framing.count && k < viewport.states.count && k < layout.count {
+      let framing = content.framing[k]
+      guard let row = framing.frameRow, row < lines.count, !framing.locked else { continue }
       let state = viewport.states[k]
+      let graph = content.panels.panels[k].graph
+      let (r, shared) = (layout[k].rect, layout[k])
       let text: String? =
         state.spatial
         ? formatCameraRow(state.camera, spin: state.spin)
         : formatViewRow(
-          state.view, width: boxes[k].w, height: boxes[k].h, sharedX: boxes[k].sharedX, sharedY: boxes[k].sharedY)
+          state.view, width: r.w, height: r.h, sharedX: shared.sharedX, sharedY: shared.sharedY, maps: graph.maps,
+          lattice: graph.lattice, written: framing.written)
       guard let text else { continue }
       let line = keepNote(lines[row], text)
       guard line != lines[row] else { continue }
+      changed.append((k, row, lines[row]))
       lines[row] = line
-      // The panel is already where its row now says.
-      viewport.states[k].applied = stripNote(line).trimmingCharacters(in: .whitespaces)
-      changed = true
+      if !state.spatial, graph.maps != nil { mapped = true }
     }
-    if changed { model.edit(lines) }
+    // A mapped axis panned past what its map can name (ln(X) left of X = 0)
+    // has no row to write: the row keeps the last window it could.
+    if mapped {
+      let read = analyze(lines)
+      for change in changed where read.rows[change.row].error != nil { lines[change.row] = change.was }
+      changed.removeAll { lines[$0.row] == $0.was }
+    }
+    guard !changed.isEmpty else { return }
+    // The panel is already where its row now says.
+    for change in changed {
+      viewport.states[change.panel].applied = stripNote(lines[change.row]).trimmingCharacters(in: .whitespaces)
+    }
+    model.gestureEdit(lines)
   }
 
   /// Stop whatever is moving the view by itself: a hand beats a move in flight.
@@ -316,6 +389,7 @@ final class MetalCanvas: MTKView, MTKViewDelegate {
 
   /// Zoom panel `k` by `factor` (under 1 moves in): in 2D keeping the math
   /// point under `p` where it is, in 3D moving the camera toward its target.
+  /// A panel with mapped axes zooms its screen's window like any other.
   func zoom(panel k: Int, at p: CGPoint?, by factor: Double) {
     guard free(k), factor > 0, factor.isFinite else { return }
     if spatial(k) {
@@ -356,13 +430,15 @@ final class MetalCanvas: MTKView, MTKViewDelegate {
         self.drag(panel: k, dx: step.x, dy: step.y)
       }
       self?.flushWriteback()
+      if let self, !self.held { self.model?.endGesture() }
     }
   }
 
   // MARK: Moves that take a while
 
   /// Run `step` with an eased 0…1 until `seconds` have passed, drawing each
-  /// time. False if a hand or another move took over first.
+  /// time. False if a hand or another move took over first. The rows the
+  /// move rewrites on its way are one undo step.
   private func ease(seconds: Double, _ step: @escaping @MainActor (Double) -> Void) async -> Bool {
     stopMoves()
     let start = CACurrentMediaTime()
@@ -380,13 +456,14 @@ final class MetalCanvas: MTKView, MTKViewDelegate {
     let finished = await task.value
     if glide == task { glide = nil }
     flushWriteback()
+    if !held { model?.endGesture() }
     return finished
   }
 
   /// Ease the first panel's window to show the given ranges (one alone
   /// keeps the other axis's center), arriving after `seconds`.
   func glide(x: (Double, Double)?, y: (Double, Double)?, seconds: Double) async -> Bool {
-    guard let content, !spatial(0), let box = viewport.boxes(content).first, !viewport.states.isEmpty,
+    guard let content, !spatial(0), let box = viewport.layout(content).first?.rect, !viewport.states.isEmpty,
       box.w > 0, box.h > 0
     else { return false }
     let from = viewport.states[0].view
@@ -411,13 +488,15 @@ final class MetalCanvas: MTKView, MTKViewDelegate {
   }
 
   /// Glide a panel's zoom (the active one's, unless told): below 1 zooms
-  /// in, above 1 out; about `p`, or the panel's center.
-  func glideZoom(by factor: Double, at p: CGPoint? = nil, panel: Int? = nil) {
+  /// in, above 1 out; about `p`, or the panel's center. The task finishes
+  /// with the glide.
+  @discardableResult
+  func glideZoom(by factor: Double, at p: CGPoint? = nil, panel: Int? = nil) -> Task<Void, Never>? {
     let k = panel ?? active
-    guard free(k), factor > 0 else { return }
+    guard free(k), factor > 0 else { return nil }
     let from = viewport.states[k]
     let at = p.map { offset($0, in: k) } ?? (px: 0, py: 0)
-    Task { @MainActor in
+    return Task { @MainActor in
       _ = await ease(seconds: 0.25) { [weak self] e in
         guard let self, k < self.viewport.states.count else { return }
         let part = pow(factor, e)
@@ -438,10 +517,12 @@ final class MetalCanvas: MTKView, MTKViewDelegate {
   /// rest, and save it in the panel's camera(…) row — written at the end of
   /// the panel's rows if it has none (web/main.ts `setCameraSpin`).
   func setSpin(_ spin: Double) {
-    guard let content, let model, spatial(0), let panel = content.panels.first else { return }
+    guard let content, let model, spatial(0), let framing = content.framing.first,
+      let panel = content.panels.panels.first
+    else { return }
     viewport.states[0].spin = spin
     viewport.states[0].spinScale = 0
-    if panel.frameRow != nil {
+    if framing.frameRow != nil {
       moved.insert(0)
       flushWriteback()
     } else {
@@ -449,8 +530,9 @@ final class MetalCanvas: MTKView, MTKViewDelegate {
       let text = formatCameraRow(viewport.states[0].camera, spin: spin)
       viewport.states[0].applied = text
       lines.insert(text, at: min(panel.rows.upperBound, lines.count))
-      model.edit(lines)
+      model.gestureEdit(lines)
     }
+    model.endGesture()
     spinEase?.cancel()
     let start = CACurrentMediaTime()
     spinEase = Task { @MainActor [weak self] in
@@ -466,14 +548,16 @@ final class MetalCanvas: MTKView, MTKViewDelegate {
   }
 
   /// How the first panel is framed, for Ask: the visible window in math
-  /// units, or the camera and its spin.
+  /// units (the screen's, on a panel with mapped axes, as the site reports
+  /// it), or the camera and its spin.
   enum Framing {
     case window(x: [Double], y: [Double])
     case camera(Camera3D, spin: Double)
   }
 
   var framing: Framing? {
-    guard let content, let state = viewport.states.first, let box = viewport.boxes(content).first else { return nil }
+    guard let content, let state = viewport.states.first, let box = viewport.layout(content).first?.rect
+    else { return nil }
     if state.spatial { return .camera(state.camera, spin: state.spin) }
     let shown = state.view.visible(width: box.w, height: box.h)
     return .window(x: shown.x, y: shown.y)
@@ -481,31 +565,35 @@ final class MetalCanvas: MTKView, MTKViewDelegate {
 
   // MARK: Under the hand
 
+  /// The draggable point of panel `k` under `p`, within `radius` points.
+  private func grabbable(at p: CGPoint, in k: Int, radius: Double) -> (point: GrabPoint, x: Double, y: Double)? {
+    guard let content, !spatial(k), k < content.framing.count, k < viewport.states.count else { return nil }
+    let view = viewport.states[k].view
+    let points = content.grabPoints(panel: k, time: viewport.time, run: run)
+    let at = offset(p, in: k)
+    let math = view.point(px: at.px, py: at.py)
+    return grabPoint(points, at: math.x, math.y, upp: view.upp * scale, uppY: view.uppY * scale, radius: radius)
+      .map { ($0, math.x, math.y) }
+  }
+
   /// A pointer or a finger came down at `p` (in points from the top-left
   /// corner). The gesture belongs to the panel it starts in, wherever it
   /// wanders; grabbing a point there wins over moving the view. `pan`: the
   /// drag slides a 3D camera's target instead of orbiting it.
   func began(at p: CGPoint, pan: Bool, radius: Double = grabRadius) {
     stopMoves()
+    // Whatever was being written is its own undo step; this gesture is the next.
+    flushWriteback()
+    model?.endGesture()
     held = true
     panning = pan
     active = panel(at: p)
     grab = nil
+    viewport.hover = nil
     coast.track(x: p.x, y: p.y, at: CACurrentMediaTime())
-    guard !pan, !spatial(active), let content, active < content.panels.count else { return }
-    let view = viewport.states[active].view
-    let time = viewport.time
-    var env = content.analysis.environment(at: time)
-    env["t"] = time
-    let points = content.analysis.grabPoints(rows: content.panels[active].rows, env: env)
-    let at = offset(p, in: active)
-    let math = view.point(px: at.px, py: at.py)
-    guard
-      let hit = grabPoint(
-        points, at: math.x, math.y, upp: view.upp * scale, uppY: view.uppY * scale, radius: radius)
-    else { return }
-    grab = (hit.row, hit.x - math.x, hit.y - math.y)
-    viewport.hot = hit.row
+    guard !pan, let hit = grabbable(at: p, in: active, radius: radius) else { return }
+    grab = (hit.point.row, hit.point.x - hit.x, hit.point.y - hit.y)
+    viewport.hot = hit.point.row
     redraw()
   }
 
@@ -513,16 +601,30 @@ final class MetalCanvas: MTKView, MTKViewDelegate {
   func dragged(to p: CGPoint, dx: Double, dy: Double) {
     guard held else { return }
     if let grab {
-      guard let model, active < viewport.states.count else { return }
+      guard let model, let content, active < viewport.states.count, active < content.panels.panels.count
+      else { return }
       let view = viewport.states[active].view
       let at = offset(p, in: active)
       let math = view.point(px: at.px, py: at.py)
+      var to = (x: math.x + grab.dx, y: math.y + grab.dy)
+      var upp = (x: view.upp, y: view.uppY)
+      // On a mapped axis the point is held on the screen and written in the
+      // axis's own units, rounded to about a pixel there (web/main.ts `dragTo`).
+      if let maps = content.panels.panels[active].graph.maps {
+        func carried(_ map: AxisMap?, _ s: Double, _ step: Double) -> Double? {
+          guard let map else { return nil }
+          let unit = pow(10, (log10(step * 3)).rounded(.down))
+          let world = toWorld(map, ((s / unit) + 0.5).rounded(.down) * unit)
+          return Double(String(format: "%.4e", world)) ?? world
+        }
+        if let x = carried(maps.x, to.x, view.upp) { (to.x, upp.x) = (x, 0) }
+        if let y = carried(maps.y, to.y, view.uppY) { (to.y, upp.y) = (y, 0) }
+        guard to.x.isFinite, to.y.isFinite else { return }
+      }
       // The rows as they are now: the last move's rewrite may not have come back round yet.
       let lines = model.rows()
-      if let next = analyze(lines).movingPoint(
-        row: grab.row, to: math.x + grab.dx, math.y + grab.dy, upp: (view.upp, view.uppY), in: lines)
-      {
-        model.edit(next)
+      if let next = analyze(lines).movingPoint(row: grab.row, to: to.x, to.y, upp: upp, in: lines) {
+        model.gestureEdit(next)
       }
       return
     }
@@ -538,6 +640,7 @@ final class MetalCanvas: MTKView, MTKViewDelegate {
       grab = nil
       viewport.hot = nil
       coast.stop()
+      model?.endGesture()
       redraw()
       return
     }
@@ -545,6 +648,7 @@ final class MetalCanvas: MTKView, MTKViewDelegate {
       startCoasting(panel: active)
     } else {
       flushWriteback()
+      model?.endGesture()
     }
   }
 
@@ -555,6 +659,7 @@ final class MetalCanvas: MTKView, MTKViewDelegate {
   func scrolled(at p: CGPoint, dx: Double, dy: Double, modified: Bool) {
     stopMoves()
     if !held { active = panel(at: p) }
+    viewport.hover = nil
     let factor = exp(min(max(-dy, -60), 60) * 0.002)
     if spatial(active) {
       if modified {
@@ -581,5 +686,40 @@ final class MetalCanvas: MTKView, MTKViewDelegate {
   func doubleTapped(at p: CGPoint, out: Bool) {
     active = panel(at: p)
     glideZoom(by: out ? 2 : 0.5, at: p, panel: active)
+  }
+
+  /// What the pointer rests on at `p` (nil: it left the graph), with no
+  /// button down: a point a drag can move, which the cursor says, and any
+  /// point the overlay draws, whose coordinates are shown beside it.
+  /// Returns whether a drag would pick a point up.
+  @discardableResult
+  func hovered(at p: CGPoint?) -> Bool {
+    guard let p, !held, let content else {
+      if viewport.hover != nil { viewport.hover = nil }
+      return false
+    }
+    let k = panel(at: p)
+    let draggable = grabbable(at: p, in: k, radius: grabRadius) != nil
+    var hover: GraphViewport.Hover?
+    if !spatial(k), k < viewport.states.count, k < content.panels.panels.count,
+      let frame = viewport.frames.first(where: { $0.layout == viewport.layout(content)[k] }),
+      case .plane(let scene) = frame.content, let points = scene.overlay?.points
+    {
+      let view = viewport.states[k].view
+      let at = offset(p, in: k)
+      let math = view.point(px: at.px, py: at.py)
+      let (upp, uppY) = (view.upp * scale, view.uppY * scale)
+      let away = { (p: Overlay2D.Point) in hypot((p.x - math.x) / upp, (p.y - math.y) / uppY) }
+      if let near = points.min(by: { away($0) < away($1) }), away(near) <= grabRadius {
+        // The overlay holds a mapped panel's points on its screen: read them in the axes' own units.
+        let maps = content.panels.panels[k].graph.maps
+        let x = maps?.x.map { toWorld($0, near.x) } ?? snapToPixel(near.x, upp: view.upp / 100)
+        let y = maps?.y.map { toWorld($0, near.y) } ?? snapToPixel(near.y, upp: view.uppY / 100)
+        let read = { (v: Double) in String(format: "%.6g", v == 0 ? 0 : v) }
+        hover = .init(at: p, text: "\(near.label.map { "\($0) = " } ?? "")(\(read(x)), \(read(y)))")
+      }
+    }
+    if viewport.hover != hover { viewport.hover = hover }
+    return draggable
   }
 }

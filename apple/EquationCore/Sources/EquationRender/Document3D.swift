@@ -117,10 +117,11 @@ public struct Document3D: Equatable, Sendable {
       time: time)
   }
 
-  /// Everything the rows draw at a time, seen from `camera`.
-  public func scene(at time: Double, camera: Camera3D) -> Scene3D {
+  /// Everything the rows draw at a time, seen from `camera`. `run` has the
+  /// document's states where the frame finds them (their starts without).
+  public func scene(at time: Double, camera: Camera3D, run: StateStepper? = nil) -> Scene3D {
     var scene = Scene3D()
-    var env = environment(at: time)
+    var env = run?.environment(at: time) ?? environment(at: time)
     env["t"] = time
     if let surface { drawSurface(surface, into: &scene) }
     for (index, row) in analysis.rows.enumerated() {

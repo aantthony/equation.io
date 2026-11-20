@@ -42,18 +42,29 @@ SIMCTL_CHILD_EQUATION_SCRATCH='y = sin(a x); a = 2' xcrun simctl launch booted i
 
 ## The graph view
 
-`GraphPanels.swift` makes a document the panels the view shows (one, and one
-more for each `---` row); `MetalCanvas.swift` draws them in one frame
-(`EquationRender`'s `FrameRenderer`: 3D panels in a multisampled pass of
-their own, copied in among the 2D ones) and moves their windows and cameras;
+`GraphContent.swift` is a document as the view shows it: `EquationRender`'s
+`GraphPanels` (the panels, their layout, windows, shared axes and 2D scenes —
+what metal-shot draws from the same rows) with each 3D panel's `Document3D`
+and the display toggles rows are shown with (a level set's "all levels", a
+sequence's partial sums, a field's streamlines and arrows in space; they are
+the view's, kept by row in `GraphModel`, not saved). `MetalCanvas.swift`
+draws a frame of them (`FrameRenderer`: 3D panels in a multisampled pass of
+their own, copied in among the 2D ones), owns the windows, the cameras, the
+clock and the run of the document's states (`StateStepper`), and moves them;
 `GraphGestures.swift` hands it the platform's events. A window, a camera or
-a point moved by hand rewrites its row, as on the site.
+a point moved by hand rewrites its row, as on the site, and in a Mac
+document window everything one gesture rewrites is one undo step.
 
-The language's port doesn't build 3D scenes yet, so a 3D panel's scene is a
-fixture in debug builds: with `EQUATION_SCENE3D` set (a `Graph3D`'s JSON, the
-path of one, or `demo`), the panel with a `camera(…)` row is 3D, or the first.
-`EQUATION_SCRIPT` plays gestures and takes pictures without a hand or a
-screen (the steps are listed in `GraphGestures.swift`):
+Ask's `get_graph`, `set_graph` and `check` describe each row as the site
+does (`EquationRender` `RowReport.swift`, lib/assistant-tools.ts
+`describeRow` ported and held to it by fixture: `pnpm swift:reports`).
+
+In debug builds `EQUATION_SCENE3D` (a `Graph3D`'s JSON, the path of one, or
+`demo`) draws a scene written down in the panel with a `camera(…)` row, or
+the first, in place of the builder's. `EQUATION_SCRIPT` plays gestures,
+commands and Ask's tools and takes pictures without a hand or a screen (the
+steps are listed in `GraphGestures.swift`); `-ApplePersistenceIgnoreState
+YES` keeps a killed run's saved windows from holding the next one's back:
 
 ```sh
 open -n Equation.app --env EQUATION_SCENE3D=demo \
