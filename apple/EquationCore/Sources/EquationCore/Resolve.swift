@@ -3,7 +3,7 @@
 /// (lib/defs.ts `resolveExpr`/`rx`, lib/geom.ts `lowerGeom`).
 ///
 /// The port covers the scalar core. Everything it has not reached — sums and
-/// integrals, lists, matrices, geometry statements, … —
+/// integrals, lists, multivectors, … —
 /// throws `Unsupported`, and the row says it is not supported yet rather
 /// than drawing something the site would not.
 

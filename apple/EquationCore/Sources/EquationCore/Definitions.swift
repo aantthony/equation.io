@@ -10,8 +10,9 @@
 /// - `within = r < 2` names a condition, read in braces: `{within: 1}`.
 ///
 /// - `a = e^(i pi/3)` names a complex number, written in where it is read.
+/// - `M = ((1, 2), (3, 4))` names a matrix, expanded where it is used.
 ///
-/// States (`a' = …`), data files, lists, intervals and matrices are not
+/// States (`a' = …`), data files, lists, intervals and multivectors are not
 /// ported: their rows are reported as not supported yet, and so is every row
 /// that names one.
 public enum Definition: Equatable, Sendable {
