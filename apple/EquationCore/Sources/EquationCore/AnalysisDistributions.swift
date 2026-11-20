@@ -129,12 +129,9 @@ struct DistributionRows {
       row.classified = try classify(try densityExpr(exact), defined: constNames, fields: [:])
       return
     }
-    // Port: the site draws any other variable too — a derived discrete one
-    // by enumerating its atoms, a continuous one by quadrature or from its
-    // sample. Here only a law draws.
-    if discrete {
-      if rvs.discreteDist(name) == nil { throw Unsupported("arithmetic on discrete random variables") }
-    } else {
+    // Port: the site draws any other continuous variable too, by
+    // quadrature or from its sample. Here only a law draws.
+    if !discrete {
       guard case .usum? = rvs.exactLaw(name) else {
         throw Unsupported("the density of a transformed random variable")
       }
@@ -243,9 +240,9 @@ struct DistributionRows {
       object: .distribution(form: .expect, rv: name), animated: ps.contains("t"), needs3D: false,
       params: ps.list.filter { $0 != "t" })
     do {
-      // A closed form earns full display precision.
-      let m = try rvs.exactMoments(name, constEnv)
-      let value = try m?.mean ?? rvs.mean(name, constEnv)
+      // A closed form and a certified enumeration both earn full display precision.
+      let m = try rvs.exactMoments(name, constEnv)?.mean ?? rvs.quadMoments(name, constEnv)?.mean
+      let value = try m ?? rvs.mean(name, constEnv)
       if value.isFinite {
         row.info = "≈ \(readoutNumber(value, m != nil ? 4 : 3))"
       } else if try rvs.meanUnstable(name, constEnv) {

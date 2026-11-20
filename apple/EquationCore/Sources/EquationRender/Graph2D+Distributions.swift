@@ -32,12 +32,34 @@ extension Graph2D {
     }
   }
 
-  /// Draw a density, pmf, prob or expect plan. A plan whose law has no value
-  /// this frame (a parameter out of range mid-drag) draws nothing. `window`
-  /// is the part of the plane in view, whose stretch of the x-axis says
-  /// which stems are drawn; `pointsPerUnit` how far apart consecutive whole
-  /// numbers stand on it (web/main.ts `stemPx`), which says how.
+  /// Draw the density, pmf, prob or expect plan of a row. What it draws
+  /// changes only with the constants its law reads and the window, so a
+  /// frame that moves neither draws what the last one did: an enumeration or
+  /// a convolution is not run again (the site keeps them per variable, in
+  /// its `RVSystem`). `window` is the part of the plane in view, whose
+  /// stretch of the x-axis says which stems are drawn; `pointsPerUnit` how
+  /// far apart consecutive whole numbers stand on it (web/main.ts `stemPx`),
+  /// which says how.
   func drawDistribution(
+    _ plan: CpuPlan, row: Int, color: RGB, env: [String: Double], window: Bounds?, pointsPerUnit: Double?,
+    into overlay: inout Overlay2D
+  ) {
+    let reads = analysis.rows[row].classified.map { $0.params + ($0.animated ? ["t"] : []) } ?? []
+    let key = DrawnLaws.Key(
+      rows: analysis.rows.map(\.text), color: color, values: reads.map { (env[$0] ?? .nan).bitPattern },
+      xmin: window?.xmin, xmax: window?.xmax, pointsPerUnit: pointsPerUnit)
+    let drawn = lawsDrawn.drawn(row: row, key: key) {
+      var fresh = Overlay2D()
+      drawDistribution(plan, color: color, env: env, window: window, pointsPerUnit: pointsPerUnit, into: &fresh)
+      return fresh
+    }
+    overlay.polylines += drawn.polylines
+    overlay.points += drawn.points
+  }
+
+  /// Draw a density, pmf, prob or expect plan. A plan whose law has no value
+  /// this frame (a parameter out of range mid-drag) draws nothing.
+  private func drawDistribution(
     _ plan: CpuPlan, color: RGB, env: [String: Double], window: Bounds?, pointsPerUnit: Double?,
     into overlay: inout Overlay2D
   ) {
@@ -85,5 +107,38 @@ extension Graph2D {
     } catch {
       // A parameter is missing this frame, or the law is not evaluable at it.
     }
+  }
+}
+
+/// What each row's law last drew, and what it was drawn from. Shared by the
+/// copies of a graph, which are the same rows.
+final class DrawnLaws: Equatable, @unchecked Sendable {
+  struct Key: Equatable {
+    var rows: [String]
+    var color: RGB
+    /// The constants the row's law reads, as their bits (NaN is itself).
+    var values: [UInt64]
+    /// The stretch of the x-axis in view, and how far apart whole numbers stand on it.
+    var xmin: Double?
+    var xmax: Double?
+    var pointsPerUnit: Double?
+  }
+
+  private let lock = NSLock()
+  private var rows: [Int: (key: Key, drawn: Overlay2D)] = [:]
+
+  /// A cache is no part of what a graph is.
+  static func == (_: DrawnLaws, _: DrawnLaws) -> Bool { true }
+
+  func drawn(row: Int, key: Key, _ draw: () -> Overlay2D) -> Overlay2D {
+    lock.lock()
+    let hit = rows[row]
+    lock.unlock()
+    if let hit, hit.key == key { return hit.drawn }
+    let fresh = draw()
+    lock.lock()
+    rows[row] = (key, fresh)
+    lock.unlock()
+    return fresh
   }
 }

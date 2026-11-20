@@ -13,9 +13,10 @@
 /// (a declaration, or a derived variable a closure rule reduces to one), and
 /// a sum of uniforms (an exact piecewise polynomial).
 ///
-/// What the site answers by quadrature against a base law, by enumerating
-/// the joint of discrete bases, or from its joint sample is not ported: those
-/// paths throw `Unsupported`, and the row says so.
+/// A variable built on discrete bases alone that has no law of its own is
+/// enumerated (DiscreteEnumeration.swift). What the site answers by
+/// quadrature against a base law, or from its joint sample, is not ported:
+/// those paths throw `Unsupported`, and the row says so.
 
 /// A random variable: a declaration `X ~ Normal(0, 1)`, or an expression in
 /// others, `Y = X^2` (lib/dist.ts `RV`).
@@ -174,7 +175,7 @@ public struct RVSystem: Equatable, Sendable {
     return out
   }
 
-  private func baseDist(_ name: String) -> BaseDist? {
+  func baseDist(_ name: String) -> BaseDist? {
     if case .base(_, let dist)? = rvs[name] { return dist }
     return nil
   }
@@ -474,7 +475,7 @@ public struct RVSystem: Equatable, Sendable {
   }
 
   /// `e` with every derived variable inlined (see grounded).
-  private func ground(_ expr: Expr) -> Expr? {
+  func ground(_ expr: Expr) -> Expr? {
     var e = expr
     // Dependencies are acyclic (cycles were dropped); the guard bounds
     // pathological chains and substitution blowup all the same.
@@ -552,14 +553,6 @@ public struct RVSystem: Equatable, Sendable {
     return (buildEnvelope(law, kLo, kHi, stride, (lo / stride).rounded(.down), (hi / stride).rounded(.up)), law)
   }
 
-  /// The pmf of a derived discrete variable, which the site enumerates over
-  /// the joint of its bases (or samples): not ported. Nil for a variable
-  /// that is not one, as on the site (`pmfOf`).
-  private func pmfOf(_ name: String) throws {
-    guard case .derived = rvs[name], isDiscreteVar(name), discreteDist(name) == nil else { return }
-    throw Unsupported("arithmetic on discrete random variables")
-  }
-
   /// What a discrete variable draws over the visible x-range, as runs of
   /// stems (`pmfRuns`). With `select` — a P(…) row's bounds — only the part
   /// it selects, strictness and all. Nil for a variable that is not
@@ -572,8 +565,8 @@ public struct RVSystem: Equatable, Sendable {
       guard let select else { return [drawn.stems] }
       return selectStems(drawn.stems, drawn.law, try integerBounds(select, env))
     }
-    try pmfOf(name)
-    return nil
+    // A derived one, at its atoms' true locations.
+    return try pmfOf(name, env).map { try atomRuns($0, env, view: view, select: select) }
   }
 
   /// The stem an E(…) marker stands on: the atom at x, within rounding, and
@@ -583,8 +576,7 @@ public struct RVSystem: Equatable, Sendable {
       let k = wholeNumber(x)
       return k.isNaN ? (x, 0) : (k, law.pmf(k))
     }
-    try pmfOf(name)
-    return (x, 0)
+    return try pmfOf(name, env).map { atomNear($0, x) } ?? (x, 0)
   }
 
   // MARK: Curves
@@ -681,39 +673,59 @@ public struct RVSystem: Equatable, Sendable {
     }
   }
 
-  /// The mean of a variable: exact under its law (`mean`). NaN while its
-  /// parameters declare no distribution, or when the mean does not exist.
+  /// Moments certified without a closed law (`quadMoments`): of a derived
+  /// discrete variable, the sum against the base pmfs, where enumeration
+  /// reached and truncation is certified invisible in the mean.
   ///
-  /// Port: the site goes on to quadrature against the base pdf for a
-  /// one-variable transform (`quadMoments`), then to the curve's or the
-  /// sample's mean; none of those is ported.
-  func mean(_ name: String, _ env: [String: Double]) throws -> Double {
-    if let m = try exactMoments(name, env) { return m.mean }
-    // A declaration with no moments has no distribution at these values:
-    // nothing integrates, enumerates or samples to a number either.
-    if case .base = rvs[name] { return .nan }
-    try pmfOf(name)
-    if discreteDist(name) != nil { return .nan }
+  /// Port: for a transform of one continuous base the site integrates
+  /// against the base pdf (lib/integrate.ts); that is not ported.
+  func quadMoments(_ name: String, _ env: [String: Double]) throws -> (mean: Double, sd: Double, mass: Double)? {
+    guard case .derived = rvs[name] else { return nil }  // base laws: exactMoments has them
+    if isDiscreteVar(name) {
+      guard let pmf = try pmfOf(name, env), pmf.meanExact else { return nil }
+      return (pmf.mean, pmf.sd, pmf.mass)
+    }
     throw Unsupported("the mean of a transformed random variable")
   }
 
+  /// The mean of a variable: exact under its law when one is derivable, else
+  /// the enumerated mean of a discrete one (`mean`). NaN while its parameters
+  /// declare no distribution, or when the mean does not exist.
+  ///
+  /// Port: the site's last resorts — the mean of a drawn curve, and the
+  /// sample's — are not ported.
+  func mean(_ name: String, _ env: [String: Double]) throws -> Double {
+    if let m = try exactMoments(name, env) { return m.mean }
+    if let m = try quadMoments(name, env) { return m.mean }
+    if isDiscreteVar(name) {
+      // Uncertified enumeration; NaN while parameters are invalid or the
+      // mean's sum diverges (meanUnstable says which).
+      guard let pmf = try pmfOf(name, env), pmf.meanOk else { return .nan }
+      return pmf.mean
+    }
+    // A declaration with no moments has no distribution at these values:
+    // its sample is NaN throughout, and so is its mean.
+    return .nan
+  }
+
   /// Why mean() is NaN, when the reason is the law and not the parameters:
-  /// the mean does not exist (Cauchy, StudentT with df ≤ 1) (`meanUnstable`).
+  /// the mean does not exist (Cauchy, StudentT with df ≤ 1), or its sum over
+  /// the atoms diverges (`meanUnstable`).
   func meanUnstable(_ name: String, _ env: [String: Double]) throws -> Bool {
     if let m = try exactMoments(name, env) { return m.mean.isNaN }
+    if try quadMoments(name, env) != nil { return false }
+    if isDiscreteVar(name) { return try pmfOf(name, env)?.meanOk == false }
     return false
   }
 
-  /// What a derived row's readout says: exact μ, σ under a closed law
-  /// (`moments`). Nil when nothing computes.
+  /// What a derived row's readout says, decided in one place: exact μ, σ
+  /// under a closed law; for a discrete variable, what its enumeration
+  /// certifies (`moments`). Nil when nothing computes.
   func moments(_ name: String, _ env: [String: Double]) throws -> Moments? {
     if let m = try exactMoments(name, env), m.mean.isFinite, m.sd.isFinite {
       return .exact(mean: m.mean, sd: m.sd, mass: 1, note: nil)
     }
-    if isDiscreteVar(name) {
-      try pmfOf(name)
-      return nil
-    }
+    if isDiscreteVar(name) { return try pmfOf(name, env).map(atomMoments) }
     throw Unsupported("the moments of a transformed random variable")
   }
 
@@ -739,19 +751,24 @@ public struct RVSystem: Equatable, Sendable {
 
   /// The value of a P(…) row, and whether it is exact (shown to 4 places) or
   /// an estimate (3) (`eventProbability`). Constant bounds on one variable go
-  /// through its law. `single` is the row's bounded variable, when it has
-  /// that shape.
+  /// through its law or its atoms; any other event over discrete variables
+  /// alone is enumerated over the joint of their bases. Either way a discrete
+  /// event keeps its strictness — ties have mass. `single` is the row's
+  /// bounded variable, when it has that shape.
   ///
-  /// Port: the site enumerates any other event over discrete variables, and
-  /// estimates the rest over its joint sample; neither is ported.
+  /// Port: everything else the site estimates over its joint sample, which
+  /// is not ported.
   func eventProbability(_ body: Expr, _ single: ProbShade?, _ env: [String: Double]) throws
     -> (value: Double, exact: Bool)
   {
     if let single {
       if let value = try exactProbability(single.rv, single.bounds, env) { return (value, true) }
-      try pmfOf(single.rv)
+      if isDiscreteVar(single.rv) {
+        guard let pmf = try pmfOf(single.rv, env) else { return (.nan, true) }
+        return (try atomProbability(pmf, single.bounds, env), true)
+      }
     }
-    if continuousIn(body).isEmpty { throw Unsupported("events over several discrete random variables") }
+    if continuousIn(body).isEmpty, let value = try enumeratedProbability(body, env) { return (value, true) }
     throw Unsupported("probabilities estimated from samples")
   }
 

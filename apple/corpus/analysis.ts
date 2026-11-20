@@ -491,6 +491,19 @@ const CASES: string[] = [
   'X ~ Normal(0, 1); Y = sin(X); Y; P(Y > 0); E(Y); P(X > Y); Z = {X > 0: X^2, 1}; E(X^2); X Y; E(X^3)',
   'D ~ DiscreteUniform(1, 6); F ~ DiscreteUniform(1, 6); S = D + F; P(S >= 10); P(D > F); E(S); D / 2; D^2; E(D^2); P(D^2 <= 9)',
   'N ~ Poisson(3); Z ~ Normal(0, 0.25); Y = N + Z; P(Y < 2.5); E(Y); U ~ Uniform(0, 1); V = U^2; E(V); E(U + V)',
+  // Arithmetic on discrete variables: atoms enumerated over the joint of the bases.
+  'D ~ DiscreteUniform(1, 6); F ~ DiscreteUniform(1, 6); S = D + F; S - D; D - D; D F; D/F; D^F; -D; abs(D - F); max(D, F)',
+  'D ~ DiscreteUniform(1, 6); F ~ DiscreteUniform(1, 6); min(D, F) + 1; {D > F: D, F}; mod(D, 2); D + F + D; {D > 3: 1}; D + 0.5',
+  'D ~ DiscreteUniform(1, 6); F ~ DiscreteUniform(1, 6); P(D > F); P(D >= F); P(D = F); P(D != F); P(D + F = 7); P(D + F > 9)',
+  'D ~ DiscreteUniform(1, 6); F ~ DiscreteUniform(1, 6); P(2 < D + F <= 5); P(D < F < 5); P(D F > 10); E(D F); E(D/F); P(D - D = 0)',
+  'D ~ DiscreteUniform(1, 6); E(1/(D - 3)); 1/(D - 3); P(1/(D - 3) > 0); sqrt(D - 3); E(sqrt(D - 3)); P(D^2 <= 9); P(D^2 != 9); P(3 < D^2)',
+  'X ~ Poisson(4); Y ~ Geometric(0.25); X Y; X^2; 2^Y; E(2^Y); E(X^2); P(X^2 < 10); P(X > Y); E(1.5^Y); 1/X; E(1/X); P(1/X > 0.3)',
+  'N ~ Binomial(5, 0.5); 0.1 N; 0.1 N + 0.2 N; P(0.1 N + 0.2 N = 0.3); P(0.1 N + 0.2 N <= 0.3); P(0.1 N < 0.3); N/3; (N/3) 3; sin(N)',
+  'a = 2; D ~ DiscreteUniform(1, 6); T = a D + 1; P(T > 5); E(T); S = D + t; E(S); B ~ Binomial(3, a/4); B^2; E(B^2); P(B^2 = 4)',
+  'D0 ~ DiscreteUniform(1, 6); D1 ~ DiscreteUniform(1, 6); D2 ~ DiscreteUniform(1, 6); D3 ~ DiscreteUniform(1, 6); ' +
+    'D4 ~ DiscreteUniform(1, 6); T = D0 + D1 + D2 + D3 + D4; T + D0; P(T > 20); E(T D0); P(T > 3 D0); T^2; W = T - D1; P(W = T)',
+  'X ~ Poisson(1000000); X^2; E(X^2); Y ~ Geometric(0.000001); P(X > Y); Y + Y; A ~ Poisson(300); B ~ Poisson(300); A B; P(A < B)',
+  'G ~ Geometric(0.5); 3^G; E(3^G); 1.9^G; E(1.9^G); 1.3^G; E(1.3^G); G^2; H ~ NegativeBinomial(2.5, 0.3); H/2; P(H/2 <= 1.5)',
   // u and v alone: the density of the row's values.
   'u; 2 u + 1; u + v; u - v; a = 2; a u; u^2; u v; (u, v); u + x; u < 0.5; sin(u); 1 - u; u + u; u/2 + v/2 + 1',
   // Fits, which need lists.

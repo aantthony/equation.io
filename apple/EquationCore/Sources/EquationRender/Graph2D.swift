@@ -29,6 +29,8 @@ public struct Graph2D: Equatable, Sendable {
   public var lattice: [String]?
   /// The cells kept from frame to frame.
   let discrete = DiscreteCache()
+  /// What each random variable's row last drew (Graph2D+Distributions.swift).
+  let lawsDrawn = DrawnLaws()
 
   public struct Window: Equatable, Sendable {
     public var x: [Double]?
@@ -167,7 +169,7 @@ public struct Graph2D: Equatable, Sendable {
           axis: theme.axis, into: &overlay)
       case .density, .pmf, .prob, .expect:
         drawDistribution(
-          cpu, color: color, env: env, window: window, pointsPerUnit: pointsPerUnit, into: &overlay)
+          cpu, row: index, color: color, env: env, window: window, pointsPerUnit: pointsPerUnit, into: &overlay)
       default:
         break
       }

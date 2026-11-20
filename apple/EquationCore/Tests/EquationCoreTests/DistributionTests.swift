@@ -35,11 +35,23 @@ import Testing
   }
 
   @Test func whatIsNotPortedSaysSo() {
-    // Quadrature, enumeration and the joint sample; and a fit, which needs lists.
-    let rows = ["X ~ Normal(0, 1)", "Y = sin(X)", "E(X^3)", "P(X > Y)", "D ~ Poisson(2)", "D^2", "L ~ m X + b"]
+    // Quadrature and the joint sample, which stands in for an enumeration past its cap too.
+    let rows = ["X ~ Normal(0, 1)", "Y = sin(X)", "E(X^3)", "P(X > Y)", "D ~ Geometric(0.000001)", "D^2", "L ~ m X + b"]
     let analysis = analyze(rows)
     #expect(analysis.rows.map { $0.unsupported != nil } == [false, true, true, true, false, true, false])
+    // A fit runs over lists.
     #expect(analyze(["L = 2", "L ~ m x + b", "y = m x"]).rows.map { $0.unsupported != nil } == [true, true, true])
+  }
+
+  @Test func discreteArithmeticIsEnumerated() throws {
+    let rows = ["D ~ DiscreteUniform(1, 6)", "F ~ DiscreteUniform(1, 6)", "S = D + F", "P(D > F)", "D / 2", "E(D^2)"]
+    let analysis = analyze(rows)
+    #expect(analysis.rows.map(\.info) == [nil, nil, "μ = 7, σ = 2.41523", "≈ 0.4167", "μ = 1.75, σ = 0.853913", "≈ 15.1667"])
+    let sum = try #require(try analysis.random.pmfOf("S", [:]))
+    #expect(sum.xs == (2...12).map(Double.init) && abs(sum.ps[5] - 1.0 / 6) < 1e-15)
+    // Atoms stand where the arithmetic puts them: every half from ½ to 3.
+    let halves = try #require(try analysis.random.pmfRuns("@4", [:]))
+    #expect(halves.count == 1 && halves[0].ks == [0.5, 1, 1.5, 2, 2.5, 3] && halves[0].step == 0.5)
   }
 
   @Test func stemsFollowTheView() throws {
