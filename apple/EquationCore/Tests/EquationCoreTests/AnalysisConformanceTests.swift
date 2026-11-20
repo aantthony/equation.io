@@ -207,6 +207,8 @@ import Testing
         out.append("cpu: \(error)")
       }
     }
+    // What is drawn of a random variable's law.
+    out += drawnDifferences(got.cpu, want["drawn"], analysis)
     let gpu = want["gpu"] as? [String: Any]
     check("gpu type", got.gpu?.type, gpu?["type"] as? String)
     if let gpu, let mine = got.gpu, gpu["omitted"] == nil {

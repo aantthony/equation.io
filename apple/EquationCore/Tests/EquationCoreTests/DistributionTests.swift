@@ -1,3 +1,4 @@
+import Foundation
 import Testing
 
 @testable import EquationCore
@@ -71,4 +72,92 @@ import Testing
     let mark = try #require(try analysis.random.markerHeight("S", [:]))
     #expect(mark.x == 1 && mark.h == 1)
   }
+}
+
+// MARK: - What is drawn of a law, against the site's
+
+/// Equal, or within what two libms' exp and log leave of a mass.
+private func near(_ a: Double, _ b: Double) -> Bool {
+  if a.isNaN || b.isNaN { return a.isNaN && b.isNaN }
+  return a == b || abs(a - b) <= 1e-11 * max(abs(a), abs(b))
+}
+
+private func near(_ a: [Double], _ b: [Double]) -> Bool {
+  a.count == b.count && zip(a, b).allSatisfy { near($0, $1) }
+}
+
+/// How what the port draws of a density, pmf, prob or expect plan differs
+/// from what lib/dist.ts hands web/main.ts for it (apple/corpus/analysis.ts
+/// `drawnOf`): a pmf's stems, the whole law and through a window; the stems or
+/// the polygon a P(…) row selects; a uniform sum's curve; an E(…) row's marker.
+func drawnDifferences(_ plan: CpuPlan?, _ want: Any?, _ analysis: DocumentAnalysis) -> [String] {
+  guard let plan, let want = want as? [String: Any] else { return [] }
+  var env = analysis.env
+  env["t"] = 0
+  let rvs = analysis.random
+  let window = (lo: -2.5, hi: 9.25)
+  var out: [String] = []
+
+  /// A value the site computed, the port's attempt at it, and how to compare the two.
+  func check<T>(_ what: String, _ theirs: Any?, _ mine: () throws -> T?, same: (T, Any) -> Bool) {
+    if theirs as? String == "unrecorded" { return }
+    let got: T?
+    do {
+      got = try mine()
+    } catch {
+      if theirs as? String != "error" { out.append("drawn \(what): the port throws \(error), the site does not") }
+      return
+    }
+    if theirs as? String == "error" {
+      out.append("drawn \(what): the site throws, the port does not")
+    } else if theirs == nil || theirs is NSNull {
+      if let got { out.append("drawn \(what): the site draws nothing, the port \(got)") }
+    } else if let got {
+      if !same(got, theirs!) { out.append("drawn \(what): got \(got), want \(theirs!)") }
+    } else {
+      out.append("drawn \(what): the port draws nothing, the site \(theirs!)")
+    }
+  }
+  func sameRuns(_ mine: [PmfStems], _ theirs: Any) -> Bool {
+    guard let theirs = theirs as? [[String: Any]], theirs.count == mine.count else { return false }
+    return zip(mine, theirs).allSatisfy { run, want in
+      near(run.ks, (want["ks"] as! [Any]).map(number)) && near(run.ps, (want["ps"] as! [Any]).map(number))
+        && run.envelope == want["envelope"] as! Bool
+        && (run.step.map { near($0, number(want["step"]!)) } ?? (want["step"] is NSNull))
+    }
+  }
+  func samePoints(_ mine: [Double], _ theirs: Any) -> Bool {
+    (theirs as? [Any]).map { near(mine, $0.map(number)) } ?? false
+  }
+
+  switch plan {
+  case .pmf(let rv, _):
+    check("stems", want["all"], { try rvs.pmfRuns(rv, env) }, same: sameRuns)
+    check("stems in a window", want["window"], { try rvs.pmfRuns(rv, env, view: window) }, same: sameRuns)
+  case .density(let rv, _):
+    check("curve", want["curve"], { try rvs.curve(rv, env) }) { curve, theirs in
+      guard let theirs = theirs as? [String: Any] else { return false }
+      return samePoints(curve.pts, theirs["pts"]!) && near(curve.mean, number(theirs["mean"]!))
+        && near(curve.sd, number(theirs["sd"]!)) && near(curve.mass, number(theirs["mass"]!))
+    }
+  case .prob(_, let shade?):
+    check("selection", want["all"], { try rvs.pmfRuns(shade.rv, env, select: shade.bounds) }, same: sameRuns)
+    check(
+      "selection in a window", want["window"],
+      { try rvs.pmfRuns(shade.rv, env, view: window, select: shade.bounds) }, same: sameRuns)
+    check(
+      "shaded polygon", want["polygon"],
+      {
+        try rvs.curve(shade.rv, env)?.shadePolygon(
+          lo: try shade.bounds.lo.map { try evaluate($0, env) }, hi: try shade.bounds.hi.map { try evaluate($0, env) })
+      }, same: samePoints)
+  case .expect(let rv):
+    check("marker", want["mark"], { try rvs.markerHeight(rv, env) }) { mark, theirs in
+      guard let theirs = theirs as? [String: Any] else { return false }
+      return near(mark.x, number(theirs["x"]!)) && near(mark.h, number(theirs["h"]!))
+    }
+  default:
+    break
+  }
+  return out
 }

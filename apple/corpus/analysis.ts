@@ -15,6 +15,7 @@
 import { writeFileSync } from 'node:fs';
 import { analyzeRows } from '../../lib/analysis.ts';
 import { diff } from '../../lib/diff.ts';
+import { type PmfStems, type RVSystem, markerHeight, shadePolygon } from '../../lib/dist.ts';
 import {
   childrenOf,
   type Expr,
@@ -79,6 +80,58 @@ function slim(plan: { type: string } | undefined): unknown {
   if (!PORTED.has(plan.type)) return { type: plan.type, omitted: true };
   const text = JSON.stringify(plan, replacer);
   return text.length > 20_000 ? { type: plan.type, omitted: true } : plan;
+}
+
+/** What web/main.ts draws of a random variable's plan, from lib/dist.ts: a pmf's stems (the whole law, and
+ *  through a window), the stems or the polygon a P(…) row selects, a uniform sum's exact curve, and an E(…)
+ *  row's marker. (A curve the site integrates or samples is left out: only its plan is recorded.) */
+function drawnOf(plan: { type: string } | undefined, rvs: RVSystem, constEnv: Record<string, number>): unknown {
+  const env = { ...constEnv, t: 0 };
+  const window = { lo: -2.5, hi: 9.25 };
+  const attempt = (run: () => unknown): unknown => {
+    try {
+      return run() ?? null;
+    } catch {
+      return 'error';
+    }
+  };
+  const runs = (found: PmfStems[] | null): unknown =>
+    found && found.map(s => ({ ks: [...s.ks], ps: [...s.ps], envelope: s.envelope, step: s.step ?? null }));
+  const exactCurve = (rv: string) => (rvs.exactLaw(rv)?.kind === 'usum' ? rvs.curve(rv, env) : undefined);
+  const cpu = plan as import('../../lib/compiler.ts').CpuPlan | undefined;
+  switch (cpu?.type) {
+    case 'pmf':
+      return {
+        all: attempt(() => runs(rvs.pmfRuns(cpu.rv, env))),
+        window: attempt(() => runs(rvs.pmfRuns(cpu.rv, env, window))),
+      };
+    case 'density':
+      return {
+        curve: attempt(() => {
+          const c = exactCurve(cpu.rv);
+          return c === undefined ? 'unrecorded' : c && { pts: [...c.pts], mean: c.mean, sd: c.sd, mass: c.mass };
+        }),
+      };
+    case 'prob': {
+      const shade = cpu.shade;
+      if (!shade) return null;
+      return {
+        all: attempt(() => runs(rvs.pmfRuns(shade.rv, env, undefined, shade))),
+        window: attempt(() => runs(rvs.pmfRuns(shade.rv, env, window, shade))),
+        polygon: attempt(() => {
+          const c = exactCurve(shade.rv);
+          if (c === undefined) return 'unrecorded';
+          const lo = shade.lo ? evaluate(shade.lo, env) : undefined;
+          const hi = shade.hi ? evaluate(shade.hi, env) : undefined;
+          return c && shadePolygon(c, lo, hi);
+        }),
+      };
+    }
+    case 'expect':
+      return { mark: attempt(() => markerHeight(rvs, cpu.rv, env)) };
+    default:
+      return null;
+  }
 }
 
 /** Targeted documents: one concern each, rows separated as the examples' are. */
@@ -636,6 +689,7 @@ const recorded = docs.map(({ name, rows }) => {
         cls: row.cls ? { animated: row.cls.animated, needs3D: row.cls.needs3D, params: row.cls.params } : null,
         cpu: slim(row.cpu),
         gpu: slim(row.gpu),
+        drawn: drawnOf(row.cpu, analysis.rvs, analysis.constEnv),
       };
     }),
   };
