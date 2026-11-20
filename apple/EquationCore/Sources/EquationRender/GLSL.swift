@@ -97,7 +97,8 @@ func translateFragment(_ glsl: String) -> TranslatedShader {
     body.append(
       text.replacing(precisionQualifier, with: "")
         .replacing(vectorEquality) { match in
-          let (a, op, b) = (match.output[1].substring ?? "", match.output[2].substring ?? "", match.output[3].substring ?? "")
+          let part = { (k: Int) in match.output[k].substring ?? "" }
+          let (a, op, b) = (part(1), part(2), part(3))
           return "\(op == "==" ? "all" : "any")(\(a) \(op) \(b))"
         }
         .replacing(outParameter) { match in "thread \(match.output[1].substring ?? "") &\(match.output[2].substring ?? "")" })
