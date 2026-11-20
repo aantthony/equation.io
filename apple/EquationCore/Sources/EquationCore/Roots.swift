@@ -46,21 +46,12 @@ public enum FoundRoots: Equatable, Sendable {
   case roots([FoundRoot])
 }
 
-/// lib/poly.ts `polynomialRoots`: the multiset of real roots of e viewed as a
-/// polynomial in v, sorted by x; nil when e is not a polynomial in v. Not
-/// ported yet, so findRoots takes it as an argument and, given none, sends
-/// polynomials down the numeric path with everything else.
-public typealias PolynomialRoots = (Expr, String) -> FoundRoots?
-
 private let SAMPLES = 1536
 
 /// All roots of f(v) in [lo, hi]. `.zero` means f is identically zero.
-public func findRoots(
-  _ f: Expr, _ v: String, _ lo: Double, _ hi: Double, evaluate: Evaluator = evaluate,
-  polynomialRoots: PolynomialRoots? = nil
-) -> FoundRoots {
+public func findRoots(_ f: Expr, _ v: String, _ lo: Double, _ hi: Double, evaluate: Evaluator = evaluate) -> FoundRoots {
   if !(hi > lo) || !lo.isFinite || !hi.isFinite { return .roots([]) }
-  switch polynomialRoots?(f, v) {
+  switch polynomialRoots(f, v) {
   case .zero:
     return .zero
   case .roots(let exact):

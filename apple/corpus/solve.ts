@@ -324,7 +324,7 @@ const rootCases: [src: string, lo: number, hi: number, v?: string][] = [
 ];
 const roots = rootCases.flatMap(([src, lo, hi, v = 'x']) => {
   const f = parseExpr(src);
-  // A polynomial takes lib/poly.ts's exact path, which the Swift does not have yet.
+  // A polynomial takes lib/poly.ts's exact path: exact.ts records those.
   if (hi > lo && isFinite(lo) && isFinite(hi) && polynomialRoots(f, v) !== null) {
     throw new Error(`${src} is a polynomial: not the numeric path`);
   }
