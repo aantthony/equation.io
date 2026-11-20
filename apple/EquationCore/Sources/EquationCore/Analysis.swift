@@ -267,10 +267,6 @@ func prepareDocument(_ sources: [String], files: DataFiles? = nil) -> PreparedDo
       // A fit is a definition of its coefficients (RegressionRows.swift).
       scanned[i] = .regression(
         name: "~\(i)", lhs: String(decoding: fit.lhs, as: UTF16.self), rhs: String(decoding: fit.rhs, as: UTF16.self))
-    } else if text.contains("~") {
-      // Any other `~` is not a row the port reads.
-      blocked[i] = "this use of ~"
-      tildeNames.formUnion(writtenNames(text))
     } else if seqScans[i] != nil {
       // Sequence and recurrence rows (a_n = …, a_{n+1} = …) are plots, not definitions.
     } else {
@@ -643,10 +639,7 @@ private func analyzeRows(_ sources: [String], _ document: PreparedDocument) -> D
     // `p(50..400)`: where p goes over that time.
     if case .bin(.mul, let value, .range(let from, let to), _) = rawParsed {
       func lower(_ e: Expr) throws -> Expr {
-        let low = try lowerObjects(try Resolver(getFn: getFn, opts: ropts).resolve(e), built, ropts)
-        // (One path per run of a family's list is not ported.)
-        if low.isSeq { throw Unsupported("orbits of a list") }
-        return low.e
+        try lowerObjects(try Resolver(getFn: getFn, opts: ropts).resolveRow(e).expr, built, ropts).e
       }
       rows[i].classified = try classifyOrbit(
         try lower(value), from: try lower(from), to: try lower(to), built, constNames: constNames)
@@ -664,8 +657,6 @@ private func analyzeRows(_ sources: [String], _ document: PreparedDocument) -> D
     let exact = graphArgs != nil || !plane(rawParsed)
     var rowOpts = ropts
     rowOpts.exactConditions = exact
-    // (A row's own expression may read an interval: Interval.swift.)
-    rowOpts.intervals = true
     // On a panel drawn on a surface, gaussian(x, y) reads that surface.
     rowOpts.surface = panelSurfaces[panel]?.embed
     // gaussian(S) alone: S coloured by its curvature (SurfaceGeometry.swift).

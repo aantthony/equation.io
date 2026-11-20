@@ -140,9 +140,7 @@ extension Resolver {
   private func curveOperand(_ name: String, _ arg: Expr) throws -> (items: [Expr], over: Expr?) {
     let usage =
       "\(name) takes a parametric curve in u, like \(curveOpExample[name]!) with C = (cos(2pi u), sin(2pi u))."
-    // Port: where an interval is not read (Interval.swift), neither is u's.
     let uInterval = opts.interval("u")
-    if uInterval != nil, !opts.intervals { throw Unsupported("interval(…)") }
     var r = arg
     if case .var(let fname) = arg, let fn = try getFn(fname) {
       if fn.params.count != 1 || fn.recursive { throw LanguageError(usage) }
@@ -155,7 +153,6 @@ extension Resolver {
     // (`u = interval(0, 2pi)`), or else the one interval of a curve without u.
     // Any other interval stays, a family of curves.
     let hidden = intervalsIn(r)
-    if !hidden.isEmpty, !opts.intervals { throw Unsupported("interval(…)") }
     let uKey = uInterval.map(exprKey)
     let along =
       hidden.first { $0.key == uKey } ?? (hidden.count == 1 && !freeVars(r).contains("u") ? hidden[0] : nil)

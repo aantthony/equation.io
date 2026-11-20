@@ -171,24 +171,15 @@ extension Resolver {
   /// A function's parameter of the same name shadows it.
   func namedInterval(_ name: String) throws -> Expr? {
     if opts.params?.contains(name) == true { return nil }
-    guard let value = opts.interval(name) else { return nil }
-    // Port: only a Fourier signal reads an interval (Interval.swift).
-    if !opts.intervals { throw Unsupported("interval(…)") }
-    return value
+    return opts.interval(name)
   }
 
   /// `interval(a, b)`, `fourier(…)` and `reconstruct(…)` (lib/defs.ts `rx`,
   /// case 'call'), or nil for any other call.
   func resolveSignalCall(_ name: String, _ rawArgs: [Expr]) throws -> Expr? {
-    if name == "interval" {
-      if !opts.intervals { throw Unsupported("interval(…)") }
-      return try hiddenInterval(try legacyCallArgs(name, rawArgs).map(resolve))
-    }
+    if name == "interval" { return try hiddenInterval(try legacyCallArgs(name, rawArgs).map(resolve)) }
     guard name == "fourier" || name == "reconstruct" else { return nil }
-    // The signal is read over an interval, and the samples may span one.
-    var inner = self
-    inner.opts.intervals = true
-    let args = try legacyCallArgs(name, rawArgs).map(inner.resolve)
+    let args = try legacyCallArgs(name, rawArgs).map(resolve)
     var scope = opts
     if let params = opts.params, !params.isEmpty {
       // A parameter is not the document's constant, list or field of the same name.

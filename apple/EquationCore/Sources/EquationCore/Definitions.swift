@@ -715,8 +715,6 @@ func buildDefs(
     var scope = options()
     scope.documentNames = scope.documentNames!.union(params)
     scope.params = Set(params)
-    // (A body may hold an interval; a parameter shadows a named one, in `namedInterval`.)
-    scope.intervals = true
     // A parameter shadows a complex constant of the same name.
     scope.complex = { params.contains($0) ? nil : defs.complexes[$0] }
     // (And a named multivector, and a built-in unit vector: f(e_x) = e_x^2 squares its argument.)
@@ -815,17 +813,13 @@ func buildDefs(
       }
     case .state(let name, _):
       let opts = options()
-      states.derivs[name] = try withoutStateFamily(
-        try Resolver(getFn: getFn, opts: opts).resolve(try parse(d)), opts)
+      states.derivs[name] = try Resolver(getFn: getFn, opts: opts).resolve(try parse(d))
     case .initial(let name, _):
       let opts = options()
       // (A list of starting values is a family of runs: StateFamilies.swift.)
       states.inits[name] = try Resolver(getFn: getFn, opts: opts).resolve(try parse(d))
     case .constant(let name, _, let draw):
-      // (A value may hold an interval: Interval.swift.)
-      var valueOpts = options()
-      valueOpts.intervals = true
-      let resolved = try Resolver(getFn: getFn, opts: valueOpts).resolve(try parse(d))
+      let resolved = try Resolver(getFn: getFn, opts: options()).resolve(try parse(d))
       defs.conditions[name] = nil
       // u and v take only an interval: the range they run over.
       if paramVars.contains(name) {

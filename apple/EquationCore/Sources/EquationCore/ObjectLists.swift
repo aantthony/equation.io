@@ -65,9 +65,11 @@ func exceedsListNodes(_ e: Expr, _ limit: Int, settledAreLeaves: Bool = false) -
 /// over P's own instances — so `(P.x, P.y - (m P.x + b))` pairs up point by
 /// point (lib/defs.ts `pointColumn`).
 private func pointColumn(_ defs: BuiltDefs, _ name: String, _ axis: String) throws -> Low? {
-  // (A tuple of two 2D points is a matrix; its rows are the same points.)
-  if defs.mats.has(name) { throw Unsupported("a matrix read as a list of its rows") }
-  guard let points = defs.lists[name], case .list(let items) = points.e else { return nil }
+  // A tuple of two 2D points — three 3D ones — is a matrix; its rows are
+  // the same points.
+  guard let points = defs.mats[name].map({ rowsAsPoints($0, name) }) ?? defs.lists[name],
+    case .list(let items) = points.e
+  else { return nil }
   let k = ["x", "y", "z"].firstIndex(of: axis) ?? -1
   let dims = items.map { p -> Int in if case .vec(let comps) = p { comps.count } else { 0 } }
   if items.isEmpty || dims.contains(0) {
@@ -84,13 +86,12 @@ private func pointColumn(_ defs: BuiltDefs, _ name: String, _ axis: String) thro
 
 /// Resolve a name to list elements: a named list, a data column written
 /// `table.column` (Tables.swift), or a coordinate of a named list of points
-/// (lib/defs.ts `listGetter`). A matrix read as the list of its rows
-/// (lib/object-lists.ts `rowsAsPoints`) is not ported, which says so.
+/// (lib/defs.ts `listGetter`). (A matrix is no list here: where a row reads
+/// one as the list of its rows, `lowerObjects` says so.)
 func listGetter(_ defs: BuiltDefs) -> GetList {
   { name in
     if let hit = defs.lists[name] { return hit }
     if let column = try tableColumn(defs, name) { return column }
-    if defs.mats.has(name) { throw Unsupported("a matrix read as a list of its rows") }
     let u = Array(name.utf16)
     guard let dot = u.firstIndex(of: unit(".")), dot > 0 else { return nil }
     return try pointColumn(
@@ -190,6 +191,16 @@ private struct ListValue {
   var axes: [Axis]
 }
 
+private func isVecNode(_ e: Expr) -> Bool { if case .vec = e { true } else { false } }
+
+/// A matrix consumed as its rows: a tuple of points, in order, so
+/// polyline(M) walks them and M[2] is the second. Named rows share axes
+/// across all calls (lib/geom.ts `rowsAsPoints`).
+func rowsAsPoints(_ matrix: Mat, _ name: String? = nil) -> Low {
+  let axis = name.map { Axis(id: "\($0)#0", n: matrix.count, ordered: true) } ?? tupleAxis(matrix.count)
+  return Low(.list(matrix.map { .vec($0) }), [axis])
+}
+
 /// Errors the port's own gaps throw pass through every recovery below: what
 /// the site would have made of the row there is not known.
 private func recover<T>(_ run: () throws -> T) throws -> T? {
@@ -222,7 +233,9 @@ func lowerObjects(_ e: Expr, _ defs: BuiltDefs, _ opts: ResolveOpts, named: Bool
     return childrenOf(e).contains(where: traced)
   }
   func continuous(_ e: Expr) -> Bool { freeVars(e).contains(where: plotVariable) || traced(e) }
-  let get = listGetter(defs)
+  // (Here a matrix is the list of its rows too, where a list is asked for.)
+  let baseGet = listGetter(defs)
+  let get: GetList = { name in try baseGet(name) ?? defs.mats[name].map { rowsAsPoints($0, name) } }
   // (A named point's components, and a vector state's.)
   let comps = opts.comps
   let mats: GetMat = { defs.mats[$0] }
@@ -247,22 +260,83 @@ func lowerObjects(_ e: Expr, _ defs: BuiltDefs, _ opts: ResolveOpts, named: Bool
   }
   if !exceedsListNodes(e, 32768) { e = try mapIndices(e, indexed) }
   let isList: (String) -> Bool = { name in ((try? get(name)) ?? nil) != nil }
-  // A list of points beside a matrix (R P) is a multiset of points, not a
-  // matrix scaled by a list: it is taken point by point (`matrixRows`).
-  let besidePoints: (Expr) -> Bool = { arg in
-    freeVars(arg).contains { v in
-      guard !defs.mats.has(v), let list = (try? get(v)) ?? nil else { return false }
-      if case .list(let items) = list.e { return items.contains { if case .vec = $0 { true } else { false } } }
-      return !list.isData
-    }
+  /// A matrix a figure reads as its rows — one tuple of them; a multiset of
+  /// matrices keeps its argument (`pushTransforms`' rows).
+  func figureRows(_ arg: Expr) throws -> [Expr]? {
+    guard let rows = try matrixRows(arg), rows.axes.count == 1 else { return nil }
+    return rows.items
   }
   func ordinary(_ e: Expr, packed: Bool = false) throws -> Low {
     try lowerLists(
-      try lowerGeomObjects(
-        e, comps: comps, mats: mats, tensors: tensors, isList: isList, notMatrix: besidePoints), get, opts,
-      named: named, packed: packed)
+      try lowerGeomObjects(e, comps: comps, mats: mats, tensors: tensors, isList: isList, rowsOf: figureRows),
+      get, opts, named: named, packed: packed)
+  }
+  /// A matrix consumed as its rows (lib/object-lists.ts `matrixRows`): a
+  /// named one, or algebra that makes one — M N, 2 T, T + (1, 0) — computed
+  /// as the matrix first, so polyline(M N) draws what P = M N; polyline(P)
+  /// draws.
+  func matrixRows(_ e: Expr) throws -> ListValue? {
+    // A list of points beside a matrix (R P) is a multiset of points, not
+    // a matrix scaled by a list: the paths below take it point by point.
+    for v in freeVars(e) {
+      if defs.mats.has(v) { continue }
+      guard try get(v) != nil else { continue }
+      guard let items = try listValue(.var(v)), !items.items.contains(where: isVecNode) else { return nil }
+    }
+    var m: Mat?
+    if case .var(let name) = e {
+      m = defs.mats[name]
+    } else {
+      m =
+        try recover {
+          try lowerMatrix(e, comps: comps, getMat: mats, getTensor: tensors, isList: isList)
+        } ?? nil
+    }
+    guard let m else { return nil }
+    var name: String?
+    if case .var(let named) = e { name = named }
+    let rows = rowsAsPoints(m, name)
+    // With a list among its entries, M is a multiset of matrices, so its
+    // rows are a multiset of tuples of points: M = ((a, 0), (0, 1)). The
+    // entries lower as one tuple (4 or 9 of them, so never a point), whose
+    // positions, innermost, regroup into rows.
+    let entries = m.flatMap { $0 }
+    if try entries.contains(where: { try freeVars($0).contains { try get($0) != nil } }) {
+      let value = try lowerLists(.vec(entries), get, opts, named: true)
+      let axes = value.isList ? value.own : []
+      if value.isList, let positions = axes.last, positions.ordered, positions.n == entries.count {
+        let width = m[0].count
+        return ListValue(
+          items: stride(from: 0, to: value.items.count, by: width).map {
+            .vec(Array(value.items[$0..<($0 + width)]))
+          },
+          axes: axes.dropLast() + rows.own)
+      }
+    }
+    return ListValue(items: rows.items, axes: rows.own)
+  }
+  /// A named matrix with a list among its entries as the multiset of
+  /// matrices it is, each written out as its tuple of rows; nil for one
+  /// matrix (`matrices`).
+  func matrices(_ name: String) throws -> ListValue? {
+    guard let m = defs.mats[name] else { return nil }
+    let entries = m.flatMap { $0 }
+    guard try entries.contains(where: { try freeVars($0).contains { try get($0) != nil } }) else { return nil }
+    // (More than 3 entries, so a tuple: the positions innermost.)
+    let value = try lowerLists(.vec(entries), get, opts, named: true)
+    guard value.isList else { return nil }
+    let axes = value.own
+    guard axes.count >= 2, let positions = axes.last, positions.ordered else { return nil }
+    let n = entries.count
+    let size = m.count
+    let items = stride(from: 0, to: value.items.count, by: n).map { start -> Expr in
+      let flat = Array(value.items[start..<(start + n)])
+      return .vec((0..<size).map { r in .vec(Array(flat[(r * size)..<((r + 1) * size)])) })
+    }
+    return ListValue(items: items, axes: Array(axes.dropLast()))
   }
   func listValue(_ e: Expr) throws -> ListValue? {
+    if case .var(let name) = e, defs.mats.has(name) { return try matrixRows(e) }
     guard let value = try recover({ try ordinary(e) }) else { return nil }
     switch value.e {
     case .list(let items):
@@ -290,7 +364,7 @@ func lowerObjects(_ e: Expr, _ defs: BuiltDefs, _ opts: ResolveOpts, named: Bool
   if !isFigure, !exceedsListNodes(e, 32768), holdsFigure(e), let family = try expand(e, outside: true) {
     return family
   }
-  e = try lowerFigureObjects(e, comps, mats, tensors, notMatrix: besidePoints)
+  e = try lowerFigureObjects(e, comps, mats, tensors, rowsOf: figureRows)
   // Connectedness consumes a whole list; it does not broadcast its vertices
   // into separate one-vertex figures.
   if case .call(let form, let args) = e, ["polyline", "polygon", "hull"].contains(form), args.count == 1,
@@ -428,16 +502,19 @@ func lowerObjects(_ e: Expr, _ defs: BuiltDefs, _ opts: ResolveOpts, named: Bool
     {
       return nil
     }
-    if case .var(let name) = arg, defs.mats.has(name) { return nil }
     func inOrder(_ axes: [Axis]) throws {
       if form == "hull" || axes.contains(where: \.ordered) { return }
       let p: String = if case .var(let name) = arg { name } else { "P" }
       throw LanguageError(
         "\(form) needs an order — a list [ … ] has none. Sort it: \(form)(sort(\(p), \(p).x)).")
     }
+    // A matrix is its rows, computed as the matrix first (2 M, M N).
+    let asMatrix = try matrixRows(arg)
     // Points computed over packed numbers with a slider or t in the way —
     // polyline(F(k)) through thousands of k — stay one vertex template.
-    if let value = try recover({ try ordinary(arg, packed: true) }), case .lazy(let cols, let body) = value.e {
+    if asMatrix == nil, let value = try recover({ try ordinary(arg, packed: true) }),
+      case .lazy(let cols, let body) = value.e
+    {
       let axes = value.own
       try inOrder(axes)
       return try walkEach(axes) { cut in
@@ -452,7 +529,8 @@ func lowerObjects(_ e: Expr, _ defs: BuiltDefs, _ opts: ResolveOpts, named: Bool
       }
       return ListValue(items: value.items, axes: value.own)
     }
-    var found = try listValue(arg)
+    var found = asMatrix
+    if found == nil { found = try listValue(arg) }
     if found == nil { found = try computed() }
     guard var pts = found else { return nil }
     pts.items = tupleItems(pts.items)
@@ -528,14 +606,12 @@ func lowerObjects(_ e: Expr, _ defs: BuiltDefs, _ opts: ResolveOpts, named: Bool
       func visit(_ n: Expr) throws -> Expr { try visitNode(n, true) }
       func within(_ n: Expr) throws -> Expr { try visitNode(n, asMatrix) }
       if case .var(let name) = node, bound.contains(name) { return node }
-      if case .var(let name) = node, let m = defs.mats[name] {
-        // M = ((a, 0), (0, 1)) with a list among its entries is a multiset
-        // of matrices, one per member; and where a call asks for points a
-        // matrix is the list of its rows. Neither is ported.
-        if !asMatrix { throw Unsupported("a matrix read as a list of its rows") }
-        let overList = m.contains { row in row.contains { freeVars($0).contains(where: isList) } }
-        if overList { throw Unsupported("a matrix over a list") }
-        return node
+      if asMatrix, case .var(let name) = node, defs.mats.has(name) {
+        // M = ((a, 0), (0, 1)) is a multiset of matrices: one per member,
+        // chosen with every other use of a, so M Q pairs up with Q = M P.
+        guard let each = try matrices(name) else { return node }
+        lists.append(each)
+        return .call(MEMBER, [.num(Double(lists.count - 1))])
       }
       // Around a figure, only the transform's lists count: the figure keeps its own.
       if outside, case .call(let name, _) = node, POINT_FIGURES.contains(name) { return node }
@@ -1278,34 +1354,6 @@ func drawnByPosition(_ value: Expr) -> Bool {
   case .list(let items): return items.contains { if case .vec = $0 { true } else { false } }
   case .lazy(_, let body): if case .vec = body { return true } else { return false }
   default: return false
-  }
-}
-
-/// A state's rate or start, which may not read a list yet: a list of starts
-/// is a family of runs, one state per member (lib/defs.ts, the state
-/// families), which is not ported.
-func withoutStateFamily(_ resolved: Expr, _ opts: ResolveOpts) throws -> Expr {
-  if readsLists(resolved, opts) { throw Unsupported("a family of states") }
-  return resolved
-}
-
-/// Whether a resolved expression reads a list anywhere: a literal, a named
-/// list, a position or a filter, text, or a function that reduces or sorts
-/// one. What a pass that does not lower lists asks before it goes on. (A
-/// matrix or a tensor indexes as a list does, but is none.)
-func readsLists(_ e: Expr, _ opts: ResolveOpts) -> Bool {
-  readsLists(e) { name in ((try? opts.getList?(name)) ?? nil) != nil }
-}
-
-private func readsLists(_ e: Expr, _ isList: (String) -> Bool) -> Bool {
-  switch e {
-  case .list, .data, .text, .lazy, .index, .eqtest, .str, .hist: return true
-  case .var(let name): return isList(name) || isList(dottedHead(name))
-  case .call(let name, let args):
-    if listFunctions.contains(name) || name == MAP || name == LIST_SEQ { return true }
-    if (name == "min" || name == "max") && args.count == 1 { return true }
-    return args.contains { readsLists($0, isList) }
-  default: return childrenOf(e).contains { readsLists($0, isList) }
   }
 }
 

@@ -173,9 +173,8 @@ func compDims(_ fn: String, _ n: Int, _ value: Expr, _ got: Int) -> String {
 /// f(P): component k of the one argument, once it is known to be a point
 /// (lib/geom.ts `lower`, case 'comp'). A matrix has no meaning of its own to
 /// a function of scalars, so there it is the list of its rows; that and a
-/// list of points wait for lists (`lo` refuses those).
+/// list of points wait for lists (`lowerPoints` hands those on).
 func lowerComp(_ value: Expr, _ k: Int, _ n: Int, _ fn: String, _ context: GeomContext) throws -> Lowered {
-  if try context.compMatrix(value) { throw Unsupported("a matrix read as a list of its rows") }
   guard case .vec(let items) = try context.lo(value) else { throw LanguageError(compArity(fn, n)) }
   if !compFits(n, k, items.count) { throw LanguageError(compDims(fn, n, value, items.count)) }
   return .scalar(items[k])

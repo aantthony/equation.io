@@ -26,7 +26,7 @@ func holdsFigure(_ e: Expr) -> Bool {
 /// segments and hulls to hulls — so the transform moves inside, onto each
 /// point, and the figure stays the whole statement (lib/object-lists.ts
 /// `pushTransforms`).
-private func pushTransforms(_ e: Expr, _ rowsOf: (Expr) -> [Expr]?) throws -> Expr {
+private func pushTransforms(_ e: Expr, _ rowsOf: (Expr) throws -> [Expr]?) throws -> Expr {
   func onto(_ fig: (name: String, args: [Expr]), shifts: Bool = false, _ move: (Expr) -> Expr) throws -> Expr {
     // vector(V) starts at the origin, which a shift would have to move too.
     if shifts && fig.name == "vector" && fig.args.count == 1 {
@@ -34,7 +34,7 @@ private func pushTransforms(_ e: Expr, _ rowsOf: (Expr) -> [Expr]?) throws -> Ex
     }
     // A figure of a matrix's rows moves each row, as a point: R polygon(T)
     // is polygon(R A, R B, …), not polygon(R T), the matrix product.
-    let args = (fig.args.count == 1 ? rowsOf(fig.args[0]) : nil) ?? fig.args
+    let args = (fig.args.count == 1 ? try rowsOf(fig.args[0]) : nil) ?? fig.args
     return .call(fig.name, args.map(move))
   }
   switch e {
@@ -66,23 +66,12 @@ private func pushTransforms(_ e: Expr, _ rowsOf: (Expr) -> [Expr]?) throws -> Ex
 /// (2, 0))), polygon((A, B, C)) — read as its points in order; and a matrix
 /// as its rows, computed as the matrix first (2 M, M N), so polyline(M N)
 /// draws what P = M N; polyline(P) draws.
+/// `rowsOf`: a matrix consumed as one tuple of its rows, or nil
+/// (lib/object-lists.ts `matrixRows`, which reads the document's lists).
 func lowerFigureObjects(
   _ source: Expr, _ comps: @escaping (String) -> [String]?, _ mats: @escaping GetMat, _ tensors: @escaping GetTensor,
-  notMatrix: (Expr) -> Bool = { _ in false }
+  rowsOf matrixRows: (Expr) throws -> [Expr]?
 ) throws -> Expr {
-  /// A matrix consumed as its rows (lib/object-lists.ts `matrixRows`).
-  /// `notMatrix`: a list of points beside a matrix (R P) is a multiset of
-  /// points, not a matrix scaled by a list.
-  func matrixRows(_ arg: Expr) -> [Expr]? {
-    if notMatrix(arg) { return nil }
-    let m: Mat? =
-      if case .var(let name) = arg {
-        mats(name)
-      } else {
-        (try? lowerMatrix(arg, comps: comps, getMat: mats, getTensor: tensors)) ?? nil
-      }
-    return m?.map { .vec($0) }
-  }
   var e = source
   if figureCall(e) == nil, !exceedsNodes(e, 32768), holdsFigure(e) { e = try pushTransforms(e, matrixRows) }
   // Connectedness consumes a whole tuple; it does not broadcast its vertices
@@ -96,9 +85,9 @@ func lowerFigureObjects(
         default: false
         }
       }
-      if points { return try lowerFigureObjects(.call(name, items), comps, mats, tensors, notMatrix: notMatrix) }
+      if points { return try lowerFigureObjects(.call(name, items), comps, mats, tensors, rowsOf: matrixRows) }
     }
-    if let rows = matrixRows(args[0]) { return .call(name, rows) }
+    if let rows = try matrixRows(args[0]) { return .call(name, rows) }
   }
   return e
 }

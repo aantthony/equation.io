@@ -73,10 +73,8 @@ struct ResolveOpts {
   var isList: (String) -> Bool = { _ in false }
   var getList: GetList?
   var indexIssue: ((_ index: Expr, _ target: Expr) -> String?)?
-  /// A name defined as an interval (Interval.swift), and whether one may be
-  /// read here: in a row's own expression, a definition or a Fourier signal.
+  /// A name defined as an interval (Interval.swift).
   var interval: (String) -> Expr? = { _ in nil }
-  var intervals = false
 }
 
 /// The elementary functions the port evaluates and compiles: a call to any
@@ -448,8 +446,6 @@ struct Resolver {
   }
 
   private func resolveUserCall(_ name: String, _ fn: FnDef, _ rawArgs: [Expr]) throws -> Expr {
-    // Port: a body holding an interval, called where one is not read (Interval.swift).
-    if !opts.intervals, hasInterval(fn.body) { throw Unsupported("interval(…)") }
     let n = fn.params.count
     // A function's arguments are as written when they fill its parameters:
     // only a mismatch spreads tuples, f((a, b)) ≡ f(a, b).
@@ -643,9 +639,9 @@ func lowerGeom(
 func lowerGeomObjects(
   _ e: Expr, comps: @escaping (String) -> [String]?, mats: @escaping GetMat = { _ in nil },
   tensors: @escaping GetTensor = { _, _ in nil }, isList: @escaping (String) -> Bool = { _ in false },
-  notMatrix: @escaping (Expr) -> Bool = { _ in false }
+  rowsOf: (Expr) throws -> [Expr]?
 ) throws -> Expr {
-  let figures = try lowerFigureObjects(e, comps, mats, tensors, notMatrix: notMatrix)
+  let figures = try lowerFigureObjects(e, comps, mats, tensors, rowsOf: rowsOf)
   do {
     return try lowerGeom(figures, comps: comps, mats: mats, tensors: tensors, isList: isList)
   } catch let failed as FailedWithMatrices {
@@ -709,7 +705,9 @@ private func lowerPointsComp(_ e: Expr, _ comps: (String) -> [String]?, _ contex
   func lo(_ n: Expr) throws -> Lowered { try lowerPoints(n, comps, context) }
   // (A list of points waits for list lowering, which reads the coordinate
   // of every point in it.)
-  if try context.compMatrix(value) { throw Unsupported("a matrix read as a list of its rows") }
+  if let rows = try context.compRows(value, index, arity, functionName) {
+    return .scalar(.comp(value: rows, index: index, arity: arity, functionName: functionName))
+  }
   if let waiting = try waitingComp(e, isList: context.isList, lo) { return .scalar(waiting) }
   return try lowerComp(value, index, arity, functionName, context)
 }

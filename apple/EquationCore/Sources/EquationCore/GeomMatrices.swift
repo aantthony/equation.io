@@ -82,6 +82,7 @@ final class GeomContext {
   var isList: (String) -> Bool = { _ in false }
   private var matSeen: [Expr: MatValue?] = [:]
   private var tenSeen: [Expr: Tensor?] = [:]
+  private var compSeen: [Expr: Expr] = [:]
   /// Multivectors and flats (GeomAlgebra.swift).
   var algebra = AlgebraSeen()
 
@@ -534,11 +535,24 @@ final class GeomContext {
     return .vec(solveVec(m, v))
   }
 
-  /// A matrix the value of a `comp` reads as its rows — f(M), hull(S) — is a
-  /// list of points, which waits for lists.
-  func compMatrix(_ value: Expr) throws -> Bool {
-    if case .var(let name) = value, getMat(name) != nil { return true }
-    return try lowerMat(value) != nil
+  /// A matrix (a name, or algebra over one: 2 S) has no meaning of its own
+  /// to a function of scalars, so it is what it is wherever a call asks for
+  /// points — hull(S), distance(S, A): the list of its rows, which the
+  /// `comp` waits on for list lowering. Nil for a value that is no matrix.
+  /// (One answer per value: every component of f(M) reads the same rows.
+  /// lib/geom.ts `lower`, case 'comp', its `wait`.)
+  func compRows(_ value: Expr, _ k: Int, _ n: Int, _ fn: String) throws -> Expr? {
+    if let hit = compSeen[value] { return hit }
+    var m: Mat?
+    if case .var(let name) = value { m = getMat(name) }
+    if m == nil { m = try lowerMat(value)?.m }
+    guard let m else { return nil }
+    if !compFits(n, k, m.count) { throw LanguageError(compDims(fn, n, value, m.count)) }
+    var name: String?
+    if case .var(let named) = value { name = named }
+    let rows = settledNode(rowsAsPoints(m, name))
+    compSeen[value] = rows
+    return rows
   }
 }
 
@@ -547,7 +561,8 @@ final class GeomContext {
 /// A definition whose value is a matrix (`R = e^(a J)`, `N = 2 M`), or nil
 /// (lib/geom.ts `lowerMatrix`).
 func lowerMatrix(
-  _ e: Expr, comps: @escaping (String) -> [String]?, getMat: @escaping GetMat, getTensor: @escaping GetTensor
+  _ e: Expr, comps: @escaping (String) -> [String]?, getMat: @escaping GetMat, getTensor: @escaping GetTensor,
+  isList: @escaping (String) -> Bool = { _ in false }
 ) throws -> Mat? {
   // Only the matrix-algebra spine can make a matrix: look along it for one.
   func spine(_ n: Expr) -> Bool {
@@ -578,7 +593,9 @@ func lowerMatrix(
     }
   }
   if !spine(e) { return nil }
-  return try GeomContext(comps: comps, getMat: getMat, getTensor: getTensor, mats: true).lowerMat(e)?.m
+  let context = GeomContext(comps: comps, getMat: getMat, getTensor: getTensor, mats: true)
+  context.isList = isList
+  return try context.lowerMat(e)?.m
 }
 
 /// A definition whose value is a tensor of any shape but a square matrix's

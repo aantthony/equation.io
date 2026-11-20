@@ -10,12 +10,6 @@ import Synchronization
 /// (ClassifyIntervals.swift) or the density path (AnalysisDistributions.swift)
 /// replaces it: by a sampling parameter swept over [0, 1] (`lo + (hi - lo) u`),
 /// or by a uniform random variable.
-///
-/// Port: an interval is read where a row's own expression is (and in the
-/// definitions and functions it names), in a reduction and in a Fourier
-/// signal. Anywhere else the resolver reaches one (`P(…)`, `E(…)`, a
-/// sequence, a state, an orbit) it is reported as not supported
-/// (`ResolveOpts.intervals`).
 
 struct HiddenInterval {
   /// The node itself, as it appears in the row.

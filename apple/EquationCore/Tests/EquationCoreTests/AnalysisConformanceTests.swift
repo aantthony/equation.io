@@ -117,14 +117,15 @@ import Testing
   }
 
   @Test func whatIsNotPortedSaysSo() {
-    let rows = ["c' = [1, 2] c"]
+    // (A state of four components: the site's own analysis throws on one.)
+    let rows = ["p' = (1, 2, 3, 4)"]
     for text in rows {
       let row = analyze([text]).rows[0]
       #expect(row.unsupported != nil, "\(text)")
       #expect(row.cpu == nil && row.gpu == nil && row.error == nil, "\(text)")
     }
     // A name the port cannot read takes the rows that use it with it.
-    let analysis = analyze(["c' = [1, 2] c", "b = c + 1", "a = 2 b", "y = x"])
+    let analysis = analyze(["p' = (1, 2, 3, 4)", "b = p + 1", "a = 2 b", "y = x"])
     #expect(analysis.rows.map { $0.unsupported != nil } == [true, true, true, false])
   }
 
@@ -253,8 +254,8 @@ import Testing
     if let cpu, let mine = got.cpu, cpu["omitted"] == nil {
       do {
         // (A list's numbers come through each side's libm: equal to the last few places.)
-        let wanted = "\(try cpuPlan(cpu, like: mine))"
-        if !sameButForRounding("\(mine)", wanted) { check("cpu", "\(mine)", wanted) }
+        let (described, wanted) = (intervalsInOrder("\(mine)"), intervalsInOrder("\(try cpuPlan(cpu, like: mine))"))
+        if !sameButForRounding(described, wanted) { check("cpu", described, wanted) }
       } catch let unrecorded as PackedColumn {
         // A column too long to carry in the fixture: held to its length.
         check("cpu packed length", packedLengths(mine), unrecorded.lengths(cpu))
@@ -608,6 +609,42 @@ func close(_ a: Double, _ b: Double) -> Bool {
   if a.isNaN || b.isNaN { return a.isNaN && b.isNaN }
   if a == b { return true }
   return abs(a - b) <= 1e-13 * max(abs(a), abs(b))
+}
+
+/// A plan's description with the identities of its intervals (the third
+/// argument of each `[interval]` call, a count of all the intervals read so
+/// far by whoever is reading) numbered in the order they appear: a sequence's
+/// term keeps the interval it reads, and the two sides have read different
+/// numbers of them by then.
+func intervalsInOrder(_ description: String) -> String {
+  let marker = "Expr.call(\"[interval]\", ["
+  guard description.contains(marker) else { return description }
+  var out = ""
+  var seen: [String: Int] = [:]
+  var rest = Substring(description)
+  while let found = rest.range(of: marker) {
+    out += rest[..<found.upperBound]
+    rest = rest[found.upperBound...]
+    // The call's arguments run to the bracket that closes them.
+    var (depth, end) = (1, rest.startIndex)
+    while end < rest.endIndex, depth > 0 {
+      if rest[end] == "[" { depth += 1 }
+      if rest[end] == "]" { depth -= 1 }
+      end = rest.index(after: end)
+    }
+    let arguments = rest[..<end]
+    let last = "Expr.num("
+    if let identity = arguments.range(of: last, options: .backwards) {
+      let number = String(arguments[identity.upperBound...].prefix { $0 != ")" })
+      let order = seen[number] ?? seen.count + 1
+      seen[number] = order
+      out += arguments[..<identity.upperBound] + "#\(order)" + arguments[identity.upperBound...].dropFirst(number.count)
+    } else {
+      out += arguments
+    }
+    rest = rest[end...]
+  }
+  return out + rest
 }
 
 /// Whether two descriptions agree but for the last few places of the numbers
