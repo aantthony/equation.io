@@ -199,6 +199,9 @@ public struct Graph2D: Equatable, Sendable {
           cpu, row: index, color: color, env: env, window: window, pointsPerUnit: pointsPerUnit, into: &overlay)
       case .system(2, _, _, _), .complexSystem:
         drawSystem(cpu, row: index, color: css, env: env, window: window, into: &overlay)
+      case .value(_, let shade?):
+        // A definite integral's row: the area it measures (Graph2D+Integrals.swift).
+        drawIntegral(shade, row: index, color: color, env: env, bounds: bounds, into: &overlay)
       case .orbit:
         if let pts = orbits[index] { overlay.polylines.append(.init(pts: pts, color: css)) }
       case .trail(2, let coords):

@@ -19,6 +19,13 @@ public struct ShadeRun: Equatable, Sendable {
   /// gap or a crossing: there is no edge of the region there to stroke.
   public var clipLo: Bool
   public var clipHi: Bool
+
+  public init(sign: Int, pts: [Double], clipLo: Bool, clipHi: Bool) {
+    self.sign = sign
+    self.pts = pts
+    self.clipLo = clipLo
+    self.clipHi = clipHi
+  }
 }
 
 /// The tint for areas that subtract from the value: the row color's
