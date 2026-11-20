@@ -98,7 +98,7 @@ import SwiftUI
   func animateSlider(_ name: String, to: Double, from: Double?, seconds: Double) async -> String {
     guard let model else { return Self.notReady }
     let lines = rows()
-    let analysis = analyze(lines)
+    let analysis = analyzeDeep(lines)
     let sliders = analysis.rows.indices.filter { analysis.rows[$0].slider != nil && analysis.rows[$0].error == nil }
     // (A redefined built-in, `e := 0.6`, by the name its row wrote.)
     let named = { (index: Int) in (analysis.rows[index].definition?.name).map(writtenName) }
@@ -144,12 +144,13 @@ import SwiftUI
   /// check (lib/assistant-tools.ts `checkRows`): what the rows would draw, without drawing them.
   func check(_ rows: [String]) async -> String {
     let texts = rows.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty }
-    let analysis = analyze(texts)
+    let analysis = analyzeDeep(texts)
     let entries = texts.indices.map { k -> String in
       let report = analysis.describe(row: k, texts: texts, kindMeanings: Self.kindMeanings)
       return Self.object([
         ("row", Self.quoted(texts[k])), ("kind", report.kind.map(Self.quoted)),
         ("meaning", report.meaning.map(Self.quoted)), ("value", report.value.map(Self.quoted)),
+        ("note", Self.fileNote(analysis.rows[k]).map(Self.quoted)),
         ("error", report.error.map(Self.quoted)), ("hint", report.hint.map(Self.quoted)),
         ("warning", report.warning.map(Self.quoted)),
       ])
@@ -162,6 +163,13 @@ import SwiftUI
   func shape(_ name: String) async -> String { Self.lookups?.shape(name) ?? Self.noLookups }
   func searchFunctions(_ query: String) async -> String { Self.lookups?.searchFunctions(query) ?? Self.noLookups }
   func functionDoc(_ name: String) async -> String { Self.lookups?.functionDoc(name) ?? Self.noLookups }
+
+  /// What a row that reads a data file says of it: the tools read the rows
+  /// without their files, so the row is right and its data is not here
+  /// (worker/mcp.ts, a row's `note: row.dataLocal`). Not an error to fix.
+  private static func fileNote(_ row: RowAnalysis) -> String? {
+    row.error == nil ? row.dataLocal : nil
+  }
 
   /// `Math.round(v * 1e6) / 1e6`, as the site's reports round.
   private static func round6(_ v: Double) -> Double { (v * 1e6).rounded() / 1e6 }
@@ -216,7 +224,8 @@ import SwiftUI
         ("index", "\(k)"), ("text", quoted(rows[k])), ("status", quoted(report.status)),
         ("error", report.error.map(quoted)), ("hint", report.hint.map(quoted)), ("kind", report.kind.map(quoted)),
         ("meaning", report.meaning.map(quoted)), ("value", report.value.map(quoted)),
-        ("animated", report.animated ? "true" : nil), ("warning", report.warning.map(quoted)),
+        ("note", fileNote(row).map(quoted)), ("animated", report.animated ? "true" : nil),
+        ("warning", report.warning.map(quoted)),
         ("color", hex.map(quoted)),
       ])
     }

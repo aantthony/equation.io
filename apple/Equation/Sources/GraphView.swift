@@ -184,9 +184,18 @@ struct GraphAnalysis: Equatable {
 
   /// `files`: the document's data files, which its `open(…)` rows read. Nil
   /// for a reading that is to see none of them (Ask's: Chat.swift).
+  ///
+  /// Read with the stack a deep row needs (DeepStack.swift), wherever it is asked for.
   init(
     rows: [GraphRow], theme: GraphTheme, previous: [Int: Int] = [:], toggles on: [Int: Set<String>] = [:],
     files: DataFiles? = nil
+  ) {
+    self = DeepStack.run { GraphAnalysis(reading: rows, theme: theme, previous: previous, toggles: on, files: files) }
+  }
+
+  private init(
+    reading rows: [GraphRow], theme: GraphTheme, previous: [Int: Int], toggles on: [Int: Set<String>],
+    files: DataFiles?
   ) {
     let texts = rows.map(\.text)
     let analysis = analyze(texts, files: files)
@@ -317,7 +326,7 @@ struct GraphView: View {
     model.slide = { [weak model] index, value in
       var lines = document.wrappedValue.rows.map(\.text)
       guard lines.indices.contains(index),
-        let moved = analyze(lines, files: document.wrappedValue.files)
+        let moved = analyzeDeep(lines, files: document.wrappedValue.files)
           .settingSlider(row: index, to: value, in: lines[index]), moved != lines[index]
       else { return }
       lines[index] = moved
