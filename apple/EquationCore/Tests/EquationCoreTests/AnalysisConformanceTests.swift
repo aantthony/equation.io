@@ -201,6 +201,7 @@ import Testing
             sharedX: (view["shared"] as? [String: Any])?["x"] as? Bool ?? false,
             sharedY: (view["shared"] as? [String: Any])?["y"] as? Bool ?? false)
         case "grid": (view["coords"] as? [String]).map { .gridCoords($0) } ?? .grid(mode: view["mode"] as! String)
+        case "surface": surfaceSpec(view["surface"] as! [String: Any])
         default: nil
         }
       // (JSON has no -0: a lattice view's down range from 0 is [-80, -0] on the site too.)
@@ -570,4 +571,13 @@ func normalizeGLSL(_ glsl: String) -> String {
     }
   }
   return out
+}
+
+/// An on(…) row's surface as the site records it (lib/surface-map.ts `SurfaceMap`).
+private func surfaceSpec(_ surface: [String: Any]) -> ViewSpec? {
+  guard let embed = try? (surface["embed"] as! [Any]).map({ try decode($0) }) else { return nil }
+  return .surface(
+    SurfaceMap(
+      text: surface["text"] as! String, embed: embed, x: (surface["x"] as! [Any]).map(number),
+      y: (surface["y"] as! [Any]).map(number)))
 }

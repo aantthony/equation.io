@@ -35,6 +35,7 @@ func spaceGraph(_ rows: [String], theme: GraphTheme, time: Double, explain: Bool
   }
   let colors = Graph2D.colors(analysis, ids: Array(rows.indices), previous: [:], theme: theme, sources: rows).colors
   var document = Document3D(analysis, colors: colors)
+  document.theme = theme
   for (k, text) in rows.enumerated() {
     guard let at = noteStart(text) else { continue }
     let note = String(decoding: Array(text.utf16.dropFirst(at)), as: UTF16.self)

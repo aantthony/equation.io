@@ -32,6 +32,9 @@ public enum ViewSpec: Equatable, Sendable {
   /// `grid(r, theta)`: exactly those coordinates' level sets (Grid.swift);
   /// `grid(x, y)` the Cartesian grid even where coordinate fields are defined.
   case gridCoords([String])
+  /// `on((X, Y, Z) = (…), x = lo..hi, y = lo..hi)`: the surface the panel's
+  /// 2D rows are drawn on (SurfaceMap.swift).
+  case surface(SurfaceMap)
 
   public var kind: String {
     switch self {
@@ -39,6 +42,7 @@ public enum ViewSpec: Equatable, Sendable {
     case .camera: "camera"
     case .split: "split"
     case .grid, .gridCoords: "grid"
+    case .surface: "surface"
     }
   }
 }
@@ -321,8 +325,8 @@ func parseViewRow(
     (head, inner) = ("view", body)
   } else if let body = wholeCallBody(text, "camera") {
     (head, inner) = ("camera", body)
-  } else if wholeCallBody(text, "on") != nil {
-    throw Unsupported("panels drawn on a surface (on(…))")
+  } else if let body = wholeCallBody(text, "on") {
+    return try parseSurfaceRow(body, env, documentNames: documentNames)
   } else {
     return nil
   }
@@ -460,4 +464,53 @@ func parseViewRow(
     if value != 0 { spin = value }
   }
   return .camera(theta: theta, phi: phi, radius: radius, target: target, spin: spin, locked: locked)
+}
+
+/// `on((X, Y, Z) = (…), x = lo..hi, y = lo..hi)`: the surface the panel's 2D
+/// rows are drawn on (lib/view.ts `parseSurfaceRow`).
+private func parseSurfaceRow(_ inner: String, _ env: [String: Double], documentNames: Set<String>) throws
+  -> ViewSpec
+{
+  let args = splitArgs(inner)
+  // The camera frames the panel: lock it there.
+  if args.contains(where: { $0.lowercased() == "locked" }) {
+    throw LanguageError("on(…) takes no locked: put it on the panel’s camera(…) row.")
+  }
+  let usage =
+    "Expected on((X, Y, Z) = (cos(y) cos(x), cos(y) sin(x), sin(y)), x = -pi..pi, y = -pi/2..pi/2): the surface "
+    + "the panel’s rows are drawn on, and the x and y it spans."
+  /// `^\(\s*X\s*,\s*Y\s*,\s*Z\s*\)\s*=\s*([\s\S]+)$`
+  func embedded(_ arg: String) -> String? {
+    var s = RowScanner(arg)
+    guard s.eat("(") else { return nil }
+    for (k, name) in ["X", "Y", "Z"].enumerated() {
+      s.space()
+      guard s.eat(name.unicodeScalars.first!) else { return nil }
+      s.space()
+      guard s.eat(k < 2 ? "," : ")") else { return nil }
+    }
+    s.space()
+    guard s.eat("=") else { return nil }
+    s.space()
+    return s.atEnd ? nil : String(s.u[s.i...])
+  }
+  var src: String?
+  var ranges: [String: [Double]] = [:]
+  for arg in args {
+    if let embed = embedded(arg) {
+      if src != nil { throw LanguageError("on(…) gives the surface twice.") }
+      src = embed
+      continue
+    }
+    guard let named = namedArg(arg), named.name == "x" || named.name == "y", let range = splitRange(named.value)
+    else { throw LanguageError(usage) }
+    let axis = named.name
+    if ranges[axis] != nil { throw LanguageError("on(…) sets \(axis) twice.") }
+    let lo = try num(range.0, env, "\(axis) lower bound")
+    let hi = try num(range.1, env, "\(axis) upper bound")
+    if lo >= hi { throw LanguageError("The \(axis) range needs lo < hi (got \(JS.string(lo))..\(JS.string(hi))).") }
+    ranges[axis] = [lo, hi]
+  }
+  guard let src, let x = ranges["x"], let y = ranges["y"] else { throw LanguageError(usage) }
+  return .surface(try parseSurfaceMap(src, x: x, y: y, env: env, documentNames: documentNames))
 }

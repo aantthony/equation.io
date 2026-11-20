@@ -455,6 +455,8 @@ public func analyze(_ sources: [String]) -> DocumentAnalysis {
   var panelBlocked: Set<Int> = []
   // Each panel's axis maps, from its view(…) row wherever in the panel it sits (AxisMap.swift).
   var panelMaps: [Int: AxisMaps] = [:]
+  // And the surface a panel's rows are drawn on (SurfaceMap.swift).
+  var panelSurfaces: [Int: SurfaceMap] = [:]
   do {
     var at = 0
     for (i, text) in texts.enumerated() where !text.isEmpty && rows[i].definition == nil && !rows[i].comment {
@@ -464,11 +466,9 @@ public func analyze(_ sources: [String]) -> DocumentAnalysis {
         panelBlocked.insert(at)
       } else if let head = viewHead(text), head == "view" || head == "on", !fnNames.contains(head) {
         do {
-          if case .mappedView(_, _, _, _, let maps)? = try parseViewRow(text, boundVals, documentNames: documentNames),
-            panelMaps[at] == nil
-          {
-            panelMaps[at] = maps
-          }
+          let spec = try parseViewRow(text, boundVals, documentNames: documentNames)
+          if case .mappedView(_, _, _, _, let maps)? = spec, panelMaps[at] == nil { panelMaps[at] = maps }
+          if case .surface(let surface)? = spec, panelSurfaces[at] == nil { panelSurfaces[at] = surface }
         } catch is Unsupported {
           panelBlocked.insert(at)
         } catch {
@@ -550,6 +550,13 @@ public func analyze(_ sources: [String]) -> DocumentAnalysis {
               }
             }
           }
+          // A panel on a surface is 3D: framed by a camera, not a 2D window.
+          if (view.kind == "surface" && seenViewKinds.contains("view"))
+            || (view.kind == "view" && panelSurfaces[panel] != nil)
+          {
+            throw LanguageError(
+              "This panel draws on a surface (on(…)), so it is 3D: frame it with camera(…), not view(…).")
+          }
           seenViewKinds.insert(view.kind)
           rows[i].view = view
           rows[i].viewAxes = latticeAxes
@@ -613,6 +620,10 @@ public func analyze(_ sources: [String]) -> DocumentAnalysis {
       let exact = !plane(rawParsed)
       var rowOpts = ropts
       rowOpts.exactConditions = exact
+      // Port: on a panel drawn on a surface, gaussian(x, y) reads that surface.
+      if panelSurfaces[panel] != nil, readsPanelCurvature(rawParsed, fnNames) {
+        throw Unsupported("the curvature of a panel's surface")
+      }
       // gaussian(S) alone: S coloured by its curvature (SurfaceGeometry.swift).
       let painted = curvaturePaint(rawParsed, fnNames) { arg in
         if case .var(let name) = arg { return built.pointDims[name] == 2 }
@@ -659,6 +670,9 @@ public func analyze(_ sources: [String]) -> DocumentAnalysis {
       if let maps = panelMaps[panel] {
         cls = try classifyMapped(cls, lowered, maps, defined: constNames, fields: fieldEnv)
       }
+      // A panel on a surface paints or carries its 2D rows onto it; a row
+      // in space draws as it would in any 3D panel.
+      if panelSurfaces[panel] != nil, !cls.needs3D { cls = try classifyOnSurface(cls) }
       rows[i].info = curveHint(cls.object, text)
       // `e = 0.6` parsed with e already a number; only the text still says e.
       // `i = [0..9]` is a family of such claims, one per member.

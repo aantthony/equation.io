@@ -32,7 +32,13 @@ import { CURVE_SAMPLES } from '../../lib/path.ts';
 import { solveSystem, traceSystem } from '../../lib/solve.ts';
 import { noteColor } from '../../lib/statements.ts';
 import { defaultGeodesicLength, divergingGain, numericIn } from '../../lib/surface-geometry.ts';
-import { surfaceInUV, surfaceMapping } from '../../lib/surface-map.ts';
+import {
+  type SurfaceMap,
+  surfaceArrows,
+  surfaceInUV,
+  surfaceMapping,
+  surfacePoint,
+} from '../../lib/surface-map.ts';
 import { clampPhi } from '../../lib/view.ts';
 import { fieldScale } from '../../lib/volume.ts';
 
@@ -70,6 +76,70 @@ export function graphJSON(
     texts: [] as object[],
     volumes: [] as object[],
     streamlines: [] as object[],
+  };
+
+  /** A point on a surface moved a hair toward the eye, so the surface does
+   *  not hide what lies exactly on it: web/main.ts towardEye. */
+  const lifted = (p: readonly number[]): [number, number, number] => {
+    const cp = Math.cos(camera.phi);
+    const eye = [
+      camera.target[0] + camera.radius * cp * Math.cos(camera.theta),
+      camera.target[1] + camera.radius * cp * Math.sin(camera.theta),
+      camera.target[2] + camera.radius * Math.sin(camera.phi),
+    ];
+    const lift = 0.004 * camera.radius;
+    const d = Math.hypot(eye[0] - p[0], eye[1] - p[1], eye[2] - p[2]) || 1;
+    return [0, 1, 2].map(k => p[k] + (lift * (eye[k] - p[k])) / d) as [number, number, number];
+  };
+  const markScene = () => ({
+    curves: scene.curves.length,
+    points: scene.points.length,
+    texts: scene.texts.length,
+    segments: scene.segments.length,
+  });
+  /** What a 2D row added to the scene since `mark`, placed in the plane
+   *  z = 0, carried onto the surface: web/main.ts carryOntoSurface. */
+  const carryOntoSurface = (mark: ReturnType<typeof markScene>, surface: SurfaceMap) => {
+    const SURFACE_PIECES = 24;
+    const onto = (x: number, y: number) => lifted(surfacePoint(surface, x, y));
+    const line = (pts: ArrayLike<number>, pieces: number): Float32Array => {
+      const out: number[] = [];
+      for (let i = 0; i + 2 < pts.length; i += 3) {
+        const [x0, y0] = [pts[i], pts[i + 1]];
+        const next = i + 5 < pts.length;
+        const steps = next && Number.isFinite(pts[i + 3]) ? pieces : 1;
+        for (let k = 0; k < steps; k++) {
+          const t = k / steps;
+          const [x, y] = next && steps > 1 ? [x0 + (pts[i + 3] - x0) * t, y0 + (pts[i + 4] - y0) * t] : [x0, y0];
+          const q = Number.isFinite(x) && Number.isFinite(y) ? onto(x, y) : null;
+          out.push(...(q?.every(Number.isFinite) ? q : [NaN, NaN, NaN]));
+        }
+      }
+      return Float32Array.from(out);
+    };
+    type Line = { pts: Float32Array; retained?: boolean };
+    for (const c of scene.curves.slice(mark.curves) as Line[])
+      c.pts = line(c.pts, c.pts.length > 300 ? 1 : SURFACE_PIECES);
+    for (const s of scene.segments.slice(mark.segments) as Line[]) {
+      const out: number[] = [];
+      for (let i = 0; i + 5 < s.pts.length; i += 6) {
+        const piece = line([s.pts[i], s.pts[i + 1], 0, s.pts[i + 3], s.pts[i + 4], 0], SURFACE_PIECES);
+        for (let k = 0; k + 5 < piece.length; k += 3) {
+          const seg = piece.subarray(k, k + 6);
+          if (seg.every(Number.isFinite)) out.push(...seg);
+        }
+      }
+      s.pts = Float32Array.from(out);
+      s.retained = false;
+    }
+    const placed = (items: object[], from: number) => {
+      const kept = (items.slice(from) as Array<{ pos: [number, number, number] }>).filter(it =>
+        (it.pos = onto(it.pos[0], it.pos[1])).every(Number.isFinite),
+      );
+      items.splice(from, items.length - from, ...kept);
+    };
+    placed(scene.points, mark.points);
+    placed(scene.texts, mark.texts);
   };
 
   const palette = dark ? DARK_PALETTE : LIGHT_PALETTE;
@@ -263,6 +333,8 @@ export function graphJSON(
     scene.psurfaces.push({ ...surfaceGLSL, xy: undefined, color: bg.map((b, k) => 0.65 * b + 0.35 * axis[k]) });
   }
 
+  // Named points in x and y, which sit on a panel's surface, labelled.
+  const surfacePoints: Array<{ name: string; color: RGB }> = [];
   let slot = 0;
   rows.forEach((row, index) => {
     // A row's own text: the analysis keeps it without its note.
@@ -273,6 +345,8 @@ export function graphJSON(
     const takes = takesColor({ ...row, text, point: named });
     const color = noteColor(text) ?? palette[takes ? slot++ % palette.length : 0];
     if (row.error) warn(`${row.text}: ${row.error}`);
+    if (surface && named && !row.error && defs.pointDims.get(row.def!.name) === 2)
+      surfacePoints.push({ name: row.def!.name, color });
     if (!row.cpu || row.error) return;
     const point = row.cpu.type === 'point';
     if (surfaceGLSL && row.cls && !row.cls.needs3D) {
@@ -285,13 +359,41 @@ export function graphJSON(
             : gpu?.type === 'scalar2d'
               ? { kind: 'scalar', field: gpu.field }
               : null;
-      if (paint && surfaceMapping(row.cls.object) === 'paint')
+      const on = surfaceMapping(row.cls.object);
+      if (paint && on === 'paint')
         scene.paints.push({ ...surfaceGLSL, paint, color, params: gpu!.params, uniforms: gpu!.uniforms });
-      else warn(`not carried onto the surface: ${text}`);
+      else if (on === 'carry' && row.cpu.type === 'vfield2d') {
+        // A vector field as arrows along the surface's tangents.
+        const comps = row.cpu.comps;
+        const arrows = surfaceArrows(surface!, (x, y) =>
+          comps.map(c => {
+            try {
+              return evaluate(c, { ...env, x, y });
+            } catch {
+              return NaN;
+            }
+          }),
+        );
+        const pts = new Float32Array(arrows.length);
+        for (let k = 0; k + 2 < arrows.length; k += 3) pts.set(lifted(arrows.slice(k, k + 3)), k);
+        if (pts.length) scene.curves.push({ pts, color, arrow: true });
+      } else if (on === 'carry' && row.cpu.type !== 'pregion' && row.cpu.type !== 'geodesic') {
+        const mark = markScene();
+        draw(row.cpu, row.gpu, color, index, text, point ? row.def?.name : undefined);
+        carryOntoSurface(mark, surface!);
+      } else if (on !== 'none') warn(`not carried onto the surface: ${text}`);
       return;
     }
     draw(row.cpu, row.gpu, color, index, text, point ? row.def?.name : undefined);
   });
+
+  for (const { name, color } of surfacePoints) {
+    const [px, py] = [constEnv[`${name}_x`], constEnv[`${name}_y`]];
+    if (!isFinite(px) || !isFinite(py)) continue;
+    const mark = markScene();
+    scene.points.push({ pos: [px, py, 0], color, label: name });
+    carryOntoSurface(mark, surface!);
+  }
 
   // The loop helpers the shaders name (recursive functions, Fourier sums), as
   // the page splices them into a shader, their tables written as constants.

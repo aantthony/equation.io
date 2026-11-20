@@ -47,4 +47,16 @@ export const SURFACE_CASES: string[] = [
   'a = 1; (x^2 + y^2 - 4, x y - 1) = (0, 0); (x^2 + y^2, y) = (4, a x); (sin(x), cos(y)) = (0, 0); (atan2(y, x), x^2 + y^2) = (a, 4)',
   '(x + y, x - y) = (cos(u), sin(u)); (x, y) = (cos(t), 1); (x^2, y) = 1; (x, y) = (1, 2, 3); (x y, x + z) = (1, 2); (x, y, x) = (1, 2, 3)',
   'view(x = 10^X); (x, y) = (100, 2); (x^2 + y^2, x y) = (4, 1)',
+  // Rows drawn on a surface: the on(…) row, what is painted and what is carried.
+  'on((X, Y, Z) = (2cos(y) cos(x), 2cos(y) sin(x), 2sin(y)), x = -pi..pi, y = -pi/2..pi/2); y = sin(x); y < 0; cos(x) y; x^2 + y^2 = 1',
+  "a = 1; on((X, Y, Z) = (x, y, a x y), x = -2..2, y = -2..2); (1, 1); A = (0.5, a); A; (cos(2pi u), sin(2pi u)); (-y, x); (x', y') = (1, sin(t))",
+  'on((X, Y, Z) = (x, y, x^2 - y^2), x = -1..1, y = -1..1); segment((0, 0), (1, 1)); polygon((0, 0), (1, 0), (0, 1)); label((0, 0), "o"); [(0, 0), (1, 1)]; 2 + 2; (1, 2, 3)',
+  'on((X, Y, Z) = (x, y, 0), x = 0..1, y = 0..1); z = x y; (u, v, u v); x^2 + y^2 + z^2 = 1; (cos(u), sin(u), u); x y z; (y, z, x)',
+  'on((X, Y, Z) = (x, y, 0), x = 0..1, y = 0..1); a_n = 1/n; domain(w^2); iter(z^2 + w); ((1, 2), (3, 4)) (x, y); (x^2, y) = (1, 1); trail((cos(t), sin(t))); e^(i t)',
+  'on((X, Y, Z) = (x, y, 0), x = 0..1, y = 0..1); view(x = 0..1); camera(1, 0.5); ---; view(x = 0..1); on((X, Y, Z) = (x, y, 1), x = 0..1, y = 0..1); on((X, Y, Z) = (x, y, 2), x = 0..1, y = 0..1)',
+  'on(); on(x = 0..1, y = 0..1); on((X, Y, Z) = (x, y, 0)); on((X, Y, Z) = (x, y, 0), x = 0..1); ---; on((X, Y, Z) = (x, y, 0), x = 1..0, y = 0..1); ---; on((X, Y, Z) = (x, y, 0), x = 0..1, x = 0..1, y = 0..1)',
+  'on((X, Y, Z) = (x, y, 0), x = 0..1, y = 0..1, locked); ---; on((X, Y, Z) = (x, y), x = 0..1, y = 0..1); ---; on((X, Y, Z) = (1, 2, 3), x = 0..1, y = 0..1); ---; on((X, Y, Z) = (x, x, x), x = 0..1, y = 0..1)',
+  'on((X, Y, Z) = (x, y, k), x = 0..1, y = 0..1); ---; on((X, Y, Z) = (x, y, t), x = 0..1, y = 0..1); ---; on((X, Y, Z) = (x, y, cos x), x = 0..1, y = 0..1); ---; on((X, Y, Z) = (x, y, x!), x = 0..1, y = 0..1); ---; on((X, Y, Z) = (x, y, 0), z = 0..1, y = 0..1)',
+  'on(x) = 2 x; on(3); y = on(x); ---; on((X, Y, Z) = (x, y, 0), x = 0..1, y = 0..1); gaussian(x, y); geodesic((0, 0), (1, 1)); y = x; ds^2 = dx^2 + dy^2',
+  'b = 2; on((X, Y, Z) = (b x, y, sum[n=1..2] sin(n x)), x = 0..1, y = 0..1); y = x; ---; on((X, Y, Z) = ((3 + cos(y)) cos(x), (3 + cos(y)) sin(x), sin(y)), x = -pi..pi, y = -pi..pi); p = 2; q = 3; sin((p y - q x)/2) = 0',
 ];
