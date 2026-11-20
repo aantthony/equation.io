@@ -192,6 +192,7 @@ func mightBePoint(_ e: Expr, _ comps: (String) -> [String]?) -> Bool {
     return u.count > 2 && u[0] == unit("e") && u[1] == unit("_")
       && u[2...].allSatisfy { $0 >= unit("x") && $0 <= unit("z") }
   case .bin(_, _, _, .geometric?): return true
+  case .call(let name, _) where ["quat", "gp", "rev", "dual", "slerp", "grade", "vec"].contains(name): return true
   default: return childrenOf(e).contains { mightBePoint($0, comps) }
   }
 }

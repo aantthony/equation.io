@@ -302,6 +302,7 @@ func boundNames(_ document: PreparedDocument) -> BoundNames {
   names.values.formUnion(built.points)
   names.values.formUnion(built.mats.keys)
   names.values.formUnion(built.tensors.keys)
+  names.values.formUnion(built.multivectors.keys)
   // (So does a vector state: r_1, r_2 are among the states.)
   names.values.formUnion(built.states.keys)
   names.values.formUnion(built.vecStates.keys)

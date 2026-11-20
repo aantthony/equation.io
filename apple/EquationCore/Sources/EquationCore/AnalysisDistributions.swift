@@ -64,6 +64,7 @@ func buildRandomVariables(_ scan: RandomScan, _ built: BuiltDefs, _ raw: [Defini
   ropts.documentNames = documentNames
   ropts.complex = { built.complexes[$0] }
   ropts.interval = { built.intervals[$0] }
+  ropts.multivector = { built.multivectors[$0] }
   let getFn: GetFn = { name in
     if let fn = built.fns[name] { return fn }
     if fnNames.contains(name) { throw LanguageError("\(name) has an error in its definition.") }
@@ -75,7 +76,7 @@ func buildRandomVariables(_ scan: RandomScan, _ built: BuiltDefs, _ raw: [Defini
     taken: { name in
       built.consts.has(name) || built.fields.has(name) || built.conditions.has(name) || built.fns.has(name)
         || built.points.contains(name) || built.complexes.has(name) || built.mats.has(name)
-        || built.tensors.has(name) || built.lists.has(name)
+        || built.tensors.has(name) || built.lists.has(name) || built.multivectors.has(name)
     })
 }
 

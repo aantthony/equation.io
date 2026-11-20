@@ -348,9 +348,21 @@ func lowerObjects(_ e: Expr, _ defs: BuiltDefs, _ opts: ResolveOpts, named: Bool
     case .call(let name, let args) where REDUCES_POINTS.contains(name) && args.count == 1:
       // count(2 P), mean(R P): a reduction takes the computed multiset of
       // points whole, rather than one member per point.
-      guard let pts = try recover({ try lowerObjects(args[0], defs, opts, named: true) }), pts.isList,
+      guard var pts = try recover({ try lowerObjects(args[0], defs, opts, named: true) }), pts.isList,
         !pts.items.isEmpty
       else { return try mapChildren(n, settleComps) }
+      // Points that meet and join made are the tuples they are; lines and
+      // planes count, but have no total or mean.
+      let flats = pts.items.compactMap(flatOfNode)
+      if flats.count == pts.items.count {
+        if flats.allSatisfy(isPoint) {
+          pts.e = .list(tupleItems(pts.items))
+        } else if name == "count" {
+          return .num(Double(flats.count))
+        } else {
+          throw LanguageError("\(name) is not defined for lines and planes — count takes them.")
+        }
+      }
       if pts.items.allSatisfy({ if case .vec = $0 { true } else { false } }) {
         return .call(name, [settledNode(pts)])
       }
@@ -414,7 +426,8 @@ func lowerObjects(_ e: Expr, _ defs: BuiltDefs, _ opts: ResolveOpts, named: Bool
     }
     var found = try listValue(arg)
     if found == nil { found = try computed() }
-    guard let pts = found else { return nil }
+    guard var pts = found else { return nil }
+    pts.items = tupleItems(pts.items)
     guard pts.items.allSatisfy({ if case .vec = $0 { true } else { false } }) else {
       throw LanguageError("\(form) needs a list of points.")
     }
@@ -448,8 +461,8 @@ func lowerObjects(_ e: Expr, _ defs: BuiltDefs, _ opts: ResolveOpts, named: Bool
 
   /// A connected figure through a template of points: the template is its
   /// one vertex, evaluated once per element of the columns (`packedFigure`).
-  func packedFigure(_ form: String, _ cols: [Column], _ vertex: Expr) throws -> Expr {
-    guard case .vec(let items) = vertex, items.count == 2 || items.count == 3 else {
+  func packedFigure(_ form: String, _ cols: [Column], _ body: Expr) throws -> Expr {
+    guard case .vec(let items) = tupleItems([body])[0], items.count == 2 || items.count == 3 else {
       throw LanguageError("\(form) needs a list of points.")
     }
     let n = cols.first?.values.count ?? 0

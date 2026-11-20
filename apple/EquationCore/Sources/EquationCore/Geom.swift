@@ -22,6 +22,9 @@ let geometryFunctions: Set<String> = GEOM_STATEMENTS.union([
   "dot", "cross", "midpoint", "perp", "unit", "rotate", "distance", "angle", "label",
   // Matrices and tensors.
   "det", "trace", "transpose", "solve", "outer", "wedge", "contract", "streamlines",
+  // Multivectors, projective geometry and their glyphs (GeomAlgebra.swift).
+  "gp", "rev", "grade", "dual", "quat", "slerp", "vec", "meet", "join", "plane", "project", "reflect", "motor",
+  "action", "qjulia",
 ])
 
 /// Lower a whole statement (lib/geom.ts `lowerStatement`): desugar a
@@ -78,7 +81,7 @@ func lenOfN(_ items: [Expr]) -> Expr {
 /// pass through, adjacent scalars (a flattened tuple literal) join into a 2D
 /// point. A scalar left without a partner throws `stray`, a message made
 /// from that argument's index.
-private func legacyPointArgs(_ args: [Lowered], _ stray: (Int) -> String) throws -> [[Expr]] {
+func legacyPointArgs(_ args: [Lowered], _ stray: (Int) -> String) throws -> [[Expr]] {
   var vs: [[Expr]] = []
   var i = 0
   while i < args.count {
@@ -95,7 +98,7 @@ private func legacyPointArgs(_ args: [Lowered], _ stray: (Int) -> String) throws
   return vs
 }
 
-private func legacyPointArgs(_ args: [Lowered], _ stray: String) throws -> [[Expr]] {
+func legacyPointArgs(_ args: [Lowered], _ stray: String) throws -> [[Expr]] {
   try legacyPointArgs(args) { _ in stray }
 }
 
@@ -151,44 +154,6 @@ private func lowerAngle(_ args: [Lowered], _ usage: String, _ stray: (Int) -> St
     return .piecewise([Expr.Case(cond: valid, value: .call("atan2", [lenOfN(cross), dot]))], otherwise: nil)
   }
   return .call(ANGLE_FN, u + v)
-}
-
-// MARK: - What the port leaves alone
-
-/// The calls that make or take multivectors (lib/clifford.ts).
-private let MV_FNS: Set<String> = ["gp", "rev", "grade", "dual", "quat", "slerp", "vec", "[mv]"]
-
-/// The calls that make or take points, lines and planes of projective
-/// geometry (lib/pga.ts), other than `rotate` (a motor's is told by its
-/// second argument, which is one of these) and `slerp` (above).
-private let FLAT_FNS: Set<String> = ["meet", "join", "plane", "project", "reflect", "line", "motor", "[pga]"]
-
-/// Whether a subtree holds a multivector at all (`mvIn`): a ⟑ or a
-/// multivector function.
-private func mvIn(_ e: Expr) -> Bool {
-  switch e {
-  case .call(let name, let args): return MV_FNS.contains(name) || args.contains(where: mvIn)
-  case .bin(_, let a, let b, let glyph): return glyph == .geometric || mvIn(a) || mvIn(b)
-  default: return childrenOf(e).contains(where: mvIn)
-  }
-}
-
-private func flatIn(_ e: Expr) -> Bool {
-  if case .call(let name, _) = e, FLAT_FNS.contains(name) { return true }
-  return childrenOf(e).contains(where: flatIn)
-}
-
-/// Multivectors (lib/clifford.ts) and the points, lines and planes of
-/// projective geometry (lib/pga.ts) are not ported: a row or definition that
-/// holds one anywhere is not supported, whatever else it says. `line(A, B)`
-/// on a row of its own is the implicit line, and is.
-func refuseUnportedGeometry(_ e: Expr) throws {
-  if mvIn(e) { throw Unsupported("multivectors and quaternions") }
-  if case .call("line", let args) = e {
-    if args.contains(where: flatIn) { throw Unsupported("lines and planes of projective geometry") }
-  } else if flatIn(e) {
-    throw Unsupported("lines and planes of projective geometry")
-  }
 }
 
 // MARK: - f(P)
@@ -371,6 +336,7 @@ func lowerGeomStatement(_ e: Expr, _ context: GeomContext) throws -> Expr? {
     if args.count != 1 { throw LanguageError(STREAMLINES_USAGE) }
     return .call(STREAMLINES_CALL, [try lowerStatement(args[0], context)])
   }
+  if let algebra = try lowerAlgebraStatement(e, context) { return algebra }
   if let tensor = try lowerTensorStatement(e, context) { return tensor }
   guard case .call(let name, let rawArgs) = e, GEOM_STATEMENTS.contains(name) else { return nil }
   let args = try rawArgs.map(context.lo)
@@ -394,7 +360,7 @@ func lowerGeomStatement(_ e: Expr, _ context: GeomContext) throws -> Expr? {
   }
   if pts[0].count == 3 && name == "line" && pts.count == 2 {
     // A line of space is a value of projective geometry (lib/pga.ts).
-    throw Unsupported("lines and planes of projective geometry")
+    return flatNode(try regressivePga(pointPga(pts[0]), pointPga(pts[1])).graded(2))
   }
   if pts[0].count == 3 && (name == "line" || name == "square") {
     throw LanguageError("\(name) is only defined for 2D points.")

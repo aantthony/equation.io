@@ -224,6 +224,17 @@ import Testing
         out.append("cpu: \(error)")
       }
     }
+    // The value a row of glyphs reads out.
+    let readout = cpu?["readout"] as? [String: Any]
+    if cpu?["omitted"] == nil { check("readout type", got.readout?.type, readout?["type"] as? String) }
+    if let readout, let mine = got.readout {
+      do {
+        let wanted = "\(try cpuPlan(readout, like: mine))"
+        if !sameButForRounding("\(mine)", wanted) { check("readout", "\(mine)", wanted) }
+      } catch {
+        out.append("readout: \(error)")
+      }
+    }
     // What is drawn of a random variable's law.
     out += drawnDifferences(got.cpu, want["drawn"], analysis)
     let gpu = want["gpu"] as? [String: Any]
@@ -285,7 +296,7 @@ import Testing
       case .bifurcation(let field):
         same("field", field, gpu["field"])
       case .implicit3d(let field, let grad):
-        if gpu["plane"] != nil { out.append("gpu: the site draws a plane here") }
+        sameList("plane", mine.plane, gpu["plane"])
         same("field", field, gpu["field"])
         sameList("grad", grad, gpu["grad"])
       case .scalar3d(let field):
@@ -361,7 +372,17 @@ import Testing
       if o["jacobian"] != nil { throw FixtureError(description: "a matrix field on mapped axes") }
       return .tfield2d(entries: try exprs("entries"), streamlines: o["streamlines"] as? Bool ?? false)
     case "tuple":
-      if o["blades"] != nil || o["flat"] != nil { throw FixtureError(description: "a multivector or a flat") }
+      // A multivector's coefficients, or a flat's.
+      if let blades = o["blades"] as? [String: Any] {
+        return .blades(
+          values: try exprs("values"), dim: (blades["dim"] as! NSNumber).intValue,
+          quat: blades["quat"] as? Bool ?? false, count: whole("count"))
+      }
+      if let flat = o["flat"] as? [String: Any] {
+        return .flat(
+          values: try exprs("values"), dim: (flat["dim"] as! NSNumber).intValue,
+          grade: (flat["grade"] as! NSNumber).intValue, count: whole("count"))
+      }
       // A multiset of tuples, their values back to back.
       if let count = whole("count") {
         guard let shape = (o["shape"] as? [NSNumber])?.map(\.intValue) else {
@@ -439,7 +460,7 @@ import Testing
       return .histogram(
         centers: try packed(o["centers"]), counts: try packed(o["counts"]), width: number(o["width"]!))
     case "family":
-      if o["readout"] != nil { throw FixtureError(description: "a family with a readout") }
+      // (A row of glyphs' readout is compared beside its plan.)
       var own: [FamilyMember] = []
       if case .family(let members)? = mine { own = members }
       let wanted = o["members"] as! [[String: Any]]

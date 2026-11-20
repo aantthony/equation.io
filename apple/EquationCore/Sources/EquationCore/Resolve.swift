@@ -50,6 +50,9 @@ struct ResolveOpts {
   /// The value of a name defined as a complex number (`a = e^(iπ/3)`),
   /// written in wherever the name is read.
   var complex: (String) -> Expr? = { _ in nil }
+  /// The value of a name defined as a multivector, a line or a plane: its
+  /// internal node, written in wherever the name appears (GeomAlgebra.swift).
+  var multivector: (String) -> Expr? = { _ in nil }
   /// A constant's value, for a Σ/Π bound at expansion time.
   var consts: (String) -> Double? = { _ in nil }
   /// Out: the constants Σ/Π bounds read (their sliders step in whole numbers).
@@ -271,9 +274,8 @@ struct Resolver {
       if name == "grad" || name == "div" || name == "curl" || name == "laplacian" {
         throw Unsupported("vector calculus")
       }
-      if isUnitVector(name), let names = opts.documentNames, !names.contains(name), !opts.openVars.contains(name) {
-        throw Unsupported("unit vectors")
-      }
+      if let value = opts.multivector(name) { return value }
+      if let value = unitVector(name, opts) { return value }
       return pointCoord(name) ?? e
     case .neg(let a):
       return .neg(try resolve(a))
@@ -336,14 +338,6 @@ struct Resolver {
         },
         otherwise: try otherwise.map(resolve))
     }
-  }
-
-  /// e_x, e_y, e_z, and the blades e_xy, e_zx, e_xyz.
-  private func isUnitVector(_ name: String) -> Bool {
-    let u = Array(name.utf16)
-    guard u.count >= 3, u.count <= 5, u[0] == unit("e"), u[1] == unit("_") else { return false }
-    let axes = u[2...]
-    return axes.allSatisfy { $0 >= unit("x") && $0 <= unit("z") } && Set(axes).count == axes.count
   }
 
   private func resolveCall(_ name: String, _ rawArgs: [Expr]) throws -> Expr {
@@ -537,7 +531,6 @@ func lowerGeom(
   if case .call(PAINT_CALL, let args) = e {
     return .call(PAINT_CALL, try args.map { try lowerGeom($0, comps: comps, mats: mats, tensors: tensors) })
   }
-  try refuseUnportedGeometry(e)
   // (A root-level geometry form — segment, polygon, circle, … — desugars first.)
   return try lowerWithMatrices(e, comps: comps, getMat: mats, getTensor: tensors, isList: isList)
 }
@@ -562,6 +555,10 @@ func lowerGeomObjects(
 
 func lowerPoints(_ e: Expr, _ comps: (String) -> [String]?, _ context: GeomContext) throws -> Lowered {
   func lo(_ n: Expr) throws -> Lowered { try lowerPoints(n, comps, context) }
+  // A multivector, or a point, line or plane of projective geometry (GeomAlgebra.swift).
+  let outer = context.enterAlgebra(e)
+  defer { context.algebra.clean = outer }
+  if let value = try context.algebraValue(e) { return value }
   // A tensor operation's result is whatever rank it comes to.
   if let value = try context.tensorValue(e) { return value }
   switch e {
@@ -571,6 +568,7 @@ func lowerPoints(_ e: Expr, _ comps: (String) -> [String]?, _ context: GeomConte
   case .list(let items):
     // Items lower independently; a named point becomes its (A_x, A_y) tuple,
     // so [A, B] scatters named points like [(1, 2), (3, 4)] does literals.
+    if let multiset = try context.algebraList(items) { return .scalar(multiset) }
     return .scalar(.list(try items.map { try lo($0).expr }))
   case .index, .range, .eqtest, .figure, .lazy, .trail, .label, .hist, .family:
     // A point among a structural node's children is written out as a tuple.
@@ -588,7 +586,7 @@ func lowerPoints(_ e: Expr, _ comps: (String) -> [String]?, _ context: GeomConte
     if let waiting = try waitingComp(e, isList: context.isList, lo) { return .scalar(waiting) }
     return try lowerComp(value, index, arity, functionName, context)
   case .loop(let params, let seeds, let loopBody, let limit):
-    return .scalar(try lowerLoop(params, seeds, loopBody, limit, lo))
+    return .scalar(try lowerLoop(params, seeds, loopBody, limit, lo, context))
   case .var(let name):
     try context.refuseMatrixName(name)
     guard let names = comps(name) else { return .scalar(e) }
@@ -740,9 +738,10 @@ func lowerPoints(_ e: Expr, _ comps: (String) -> [String]?, _ context: GeomConte
 /// self-call's points spread into consecutive parameters, as a call's single
 /// point does: f(T(a, b) + P, k + 1) passes f(a, b, k) three values. The
 /// function's result and conditions stay numbers. (A quaternion spreads the
-/// same way on the site; multivectors are not ported.)
+/// same way, into its w, x, y, z.)
 private func lowerLoop(
-  _ params: [String], _ seeds: [Expr], _ loopBody: Expr, _ limit: Int, _ lo: (Expr) throws -> Lowered
+  _ params: [String], _ seeds: [Expr], _ loopBody: Expr, _ limit: Int, _ lo: (Expr) throws -> Lowered,
+  _ context: GeomContext
 ) throws -> Expr {
   func scalar(_ n: Expr) throws -> Expr {
     guard case .scalar(let a) = try lo(n) else {
@@ -754,6 +753,11 @@ private func lowerLoop(
     if let recur = recurArgs(x) {
       var args: [Expr] = []
       for a in recur {
+        // A quaternion spreads into its w, x, y, z.
+        if let parts = try context.quaternionSpread(a) {
+          args += parts
+          continue
+        }
         switch try lo(a) {
         case .vec(let items): args += items
         case .scalar(let e): args.append(e)

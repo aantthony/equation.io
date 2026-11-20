@@ -346,7 +346,7 @@ func compileFamilyGpu(_ members: [Classified], _ shared: FamilyShared?, params: 
     }
     return GpuPlan(params: params, shader: .family(members: each))
   }
-  return GpuPlan(params: params, shader: .family(members: try members.map(compileGpu)))
+  return GpuPlan(params: params, shader: .family(members: try members.map { try compilePlane(compileGpu($0), $0) }))
 }
 
 // MARK: - Readouts (lib/plot.ts plotReadout)

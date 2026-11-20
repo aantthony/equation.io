@@ -455,6 +455,9 @@ struct BuiltDefs {
   /// constants `M#k` (see `hoist`).
   var mats = OrderedMap<Mat>()
   var tensors = OrderedMap<Tensor>()
+  /// Named multivectors, lines, planes and motors: each its internal `[mv]`
+  /// or `[pga]` node, written into every row that names it.
+  var multivectors = OrderedMap<Expr>()
   /// Named lists, and scatters of columns, each with the instances it runs
   /// over (Lists.swift).
   var lists = OrderedMap<Low>()
@@ -523,6 +526,7 @@ func buildDefs(_ raw: [Definition], skip: Set<String>, sequences: [SeqScan] = []
     opts.documentNames = Set(byName.keys)
     opts.complex = { defs.complexes[$0] }
     opts.interval = { defs.intervals[$0] }
+    opts.multivector = { defs.multivectors[$0] }
     // Σ/Π bounds in later definitions may use the constants resolved so far.
     opts.consts = { numEnv[$0] }
     opts.boundConsts = boundConsts
@@ -570,6 +574,9 @@ func buildDefs(_ raw: [Definition], skip: Set<String>, sequences: [SeqScan] = []
     scope.params = Set(params)
     // A parameter shadows a complex constant of the same name.
     scope.complex = { params.contains($0) ? nil : defs.complexes[$0] }
+    // (And a named multivector, and a built-in unit vector: f(e_x) = e_x^2 squares its argument.)
+    scope.multivector = { params.contains($0) ? nil : defs.multivectors[$0] }
+    if let names = scope.documentNames { scope.documentNames = names.union(params) }
     var body = try Resolver(getFn: getFn, opts: scope).resolve(try parse(byName[name]!))
     if containsRecur(body) { body = try wrapRecursion(name, params, body) }
     let fn = FnDef(params: params, body: body)
@@ -682,8 +689,6 @@ func buildDefs(_ raw: [Definition], skip: Set<String>, sequences: [SeqScan] = []
         // Point-ness flows in definition order, so `C = B + D` needs B and D
         // defined above (a stray point name below is reported after the loop).
         // (`L = line(A, B)` names the line as a value of projective geometry.)
-        if case .call("line", _) = resolved { throw Unsupported("lines and planes of projective geometry") }
-        try refuseUnportedGeometry(resolved)
         // `M = ((a, b), (c, d))`, `R = e^(a J)`, `N = 2 M`: a tuple of rows,
         // or matrix algebra, names a matrix.
         let getMat: GetMat = { defs.mats[$0] }
@@ -710,9 +715,29 @@ func buildDefs(_ raw: [Definition], skip: Set<String>, sequences: [SeqScan] = []
           defs.tensors[name] = Tensor(shape: tensor.shape, data: tensor.data.map { hoist(name, $0) })
           continue
         }
+        // `L = join(A, B)`, `R = e^(-t/2 e_xy)`, `q = quat(1, 2, 3, 4)`: a
+        // line, plane, motor or multivector, written into every row that
+        // names it; `X = meet(L, M)` names the point it is (GeomAlgebra.swift).
+        var value = resolved
+        if !ofPoints, holdsAlgebra(resolved) {
+          switch try namedAlgebra(
+            resolved, comps: comps, getMat: getMat, getTensor: getTensor, isList: { defs.lists.has($0) },
+            hoist: { hoist(name, $0) })
+          {
+          case .named(let node, let what):
+            try notDrawn(what)
+            defs.multivectors[name] = node
+            continue
+          case .value(let e):
+            value = e
+          }
+        } else if ofPoints, case .call("line", let args) = resolved {
+          // `N = line(P, A)` over a list names the lines, as join does.
+          value = .call("join", args)
+        }
         // A list, a tuple of more than 3 values or a scatter of columns names
         // a list: the name is its values, over instances of its own.
-        let listed = try namedList(name, resolved, draw: draw, ofPoints: ofPoints, defs, options(), comps: comps)
+        let listed = try namedList(name, value, draw: draw, ofPoints: ofPoints, defs, options(), comps: comps)
         // A tuple of computed points that is square, `A = (2 P, Q + R)`:
         // one tensor, named as a matrix when it is square.
         if let reduced = tensorOfNode(listed.e), reduced.shape.count >= 2 {
@@ -1034,7 +1059,9 @@ func buildDefs(_ raw: [Definition], skip: Set<String>, sequences: [SeqScan] = []
       // A surviving matrix or tensor name means it was defined below its
       // use, so lowering saw it as a plain scalar.
       let listed = defs.lists.has(name) ? "a list" : nil
-      let valued = defs.mats.has(name) ? "a matrix" : defs.tensors.has(name) ? "a tensor" : nil
+      let valued =
+        defs.mats.has(name)
+        ? "a matrix" : defs.tensors.has(name) ? "a tensor" : defs.multivectors.has(name) ? "a multivector" : nil
       if let kind = listed ?? valued ?? (defs.intervals.has(name) ? "an interval" : nil) {
         throw LanguageError("\(name) is \(kind) — move its definition above where it is used.")
       }
@@ -1106,6 +1133,7 @@ func buildDefs(_ raw: [Definition], skip: Set<String>, sequences: [SeqScan] = []
       defs.consts.has(name) || defs.fields.has(name) || defs.conditions.has(name) || defs.points.contains(name)
         || defs.complexes.has(name)
         || defs.fns[name] != nil || defs.unsupported[name] != nil || defs.mats.has(name) || defs.tensors.has(name)
+        || defs.multivectors.has(name)
         || defs.states.has(name) || defs.vecStates[name] != nil
         || defs.lists.has(name) || defs.intervals.has(name)
     }
@@ -1145,6 +1173,7 @@ func buildDefs(_ raw: [Definition], skip: Set<String>, sequences: [SeqScan] = []
       defs.complexes[name] = nil
       defs.mats[name] = nil
       defs.tensors[name] = nil
+      defs.multivectors[name] = nil
       defs.states[name] = nil
       defs.lists[name] = nil
       defs.intervals[name] = nil
@@ -1178,6 +1207,7 @@ func buildDefs(_ raw: [Definition], skip: Set<String>, sequences: [SeqScan] = []
       // (A matrix's entries are checked one by one, to the same end.)
       for (name, matrix) in defs.mats.entries { candidates += matrix.flatMap { $0 }.map { (name, $0, []) } }
       for (name, tensor) in defs.tensors.entries { candidates += tensor.data.map { (name, $0, []) } }
+      candidates += defs.multivectors.entries.map { ($0.key, $0.value, []) }
       candidates += defs.lists.entries.map { ($0.key, $0.value.e, []) }
       candidates += defs.intervals.entries.map { ($0.key, $0.value, []) }
       for (name, expr, params) in candidates where present(name) {

@@ -101,6 +101,12 @@ public indirect enum MathObject: Equatable, Sendable {
   /// A multiset of `count` tuples, matrices or tensors of one `shape`, their
   /// values back to back: read out, as one is.
   case tuples(values: [Expr], shape: [Int], count: Int)
+  /// A multivector's coefficients, by blade, read out as `1 + 2 e_xy` (or in
+  /// i, j, k: `quat`); `count` of them back to back for a multiset.
+  case blades(values: [Expr], dim: Int, quat: Bool, count: Int?)
+  /// The coefficients of a point, line, plane or motor of projective
+  /// geometry (PGA.swift), read out as what it is.
+  case flat(values: [Expr], dim: Int, grade: Int, count: Int?)
   /// One copy of the row per list element. `shared`: the one program its
   /// members are drawn with, each choosing itself by the uniform `index`.
   case family(members: [Classified], shared: FamilyShared?)
@@ -141,7 +147,7 @@ public indirect enum MathObject: Equatable, Sendable {
     case .trail: "trail"
     case .list(let list): list.publicKind
     case .histogram: "histogram"
-    case .tuples: "tuple"
+    case .tuples, .blades, .flat: "tuple"
     case .family: "family"
     }
   }
@@ -167,6 +173,12 @@ public struct Classified: Equatable, Sendable {
   public var animated: Bool
   public var needs3D: Bool
   public var params: [String]
+  /// The value a row of glyphs pictures, read out beside them: a
+  /// multivector's blades, a flat, or the matrix of `action(M)`.
+  public var readout: MathObject? = nil
+  /// A plane of projective geometry, a x + b y + c z + d = 0: an implicit
+  /// surface drawn translucent, as a plane.
+  public var plane: [Expr]? = nil
 }
 
 /// The message for a row that tries to define t, which is animation time.
@@ -404,6 +416,13 @@ func classify(_ lowered: Expr, defined: Set<String>, fields: [String: Expr]) thr
     return Classified(object: object, animated: moving, needs3D: objectNeeds3D(object), params: params)
   }
 
+  // A multivector, a flat or action(M) on a row of its own (AlgebraPlans.swift).
+  if let algebra = try classifyAlgebra(
+    expr, hasSpace: hasSpace, hasParam: hasParam, done: done,
+    family: { try classify(.family(members: $0), defined: defined, fields: fields) })
+  {
+    return algebra
+  }
   // A matrix or tensor on a row of its own, or a multiset of them.
   if let tensors = try classifyTensors(expr, hasSpace: hasSpace, hasParam: hasParam) { return done(tensors) }
   if let tensor = try classifyTensor(expr, hasSpace: hasSpace, hasParam: hasParam, hasZ: vars.contains("z")) {
