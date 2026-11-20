@@ -25,8 +25,8 @@ struct PanelState: Equatable {
   var touched = false
 }
 
-/// The panels' windows and cameras and the graph's clock, shared by the
-/// Metal view and the overlay drawn over it.
+/// The panels' windows and cameras and the graph's clock, and the frame the
+/// Metal view last drew, which the overlay drawn over it shows the rest of.
 @MainActor @Observable
 final class GraphViewport {
   var states: [PanelState] = []
@@ -35,63 +35,36 @@ final class GraphViewport {
   /// The Metal view's size in device pixels, and how many of them make a point.
   var pixels = CGSize.zero
   var scale = 1.0
-  /// The point under a drag, drawn with a halo.
+  /// The row whose point is under a drag, drawn with a halo.
   var hot: Int?
+  /// The frame as last drawn: each panel in its box, with what goes over
+  /// the shader passes (the numbers along the axes, the rows the CPU
+  /// evaluates, a 3D panel's names), and every panel's place for the edges.
+  var frames: [PanelFrame] = []
+  var layout: [PanelLayout] = []
+  /// What the pointer rests on, said beside it (in points from the top-left corner).
+  var hover: Hover?
 
-  /// Seconds since the graph opened.
-  var time: Double { Date.now.timeIntervalSince(opened) }
-
-  /// Where the panels are, in device pixels from the top-left corner.
-  func boxes(_ content: GraphPanels) -> [PanelBox] {
-    panelBoxes(content.splits, width: pixels.width, height: pixels.height, margin: (12 * scale).rounded())
+  struct Hover: Equatable {
+    var at: CGPoint
+    var text: String
   }
 
-  /// The frame as it is at `time`: each panel's box, and what it shows
-  /// there. `overlay` adds what the CPU evaluates for the 2D panels (the
-  /// points and curves drawn over the shader passes), in `theme`'s colors.
-  func frames(_ content: GraphPanels, time: Double, overlay: Bool, theme: GraphTheme = .light) -> [PanelFrame] {
-    let boxes = boxes(content)
-    return content.panels.indices.compactMap { k -> PanelFrame? in
-      guard k < states.count, k < boxes.count else { return nil }
-      let panel = content.panels[k]
-      if let space = panel.space {
-        let camera = states[k].camera
-        return PanelFrame(
-          box: boxes[k], content: .space(camera: camera, scene: space.scene(at: time, camera: camera)),
-          env: space.environment(at: time), grid: panel.grid)
-      }
-      // The window in the panel's pixels: what is drawn over it, and a
-      // lattice's cells, are worked out for what it shows.
-      let (view, width, height) = (states[k].view, boxes[k].w, boxes[k].h)
-      var layers = panel.plane.layers
-      let lattice = panel.plane.cells(at: time, view: view, width: width, height: height, dpr: scale)
-      if !lattice.cells.isEmpty { layers.cells = lattice.cells }
-      var extras: Overlay2D?
-      if overlay {
-        let bounds = Graph2D.Bounds(view: view, width: width, height: height)
-        var drawn = panel.plane.overlay(at: time, bounds: bounds, theme: theme)
-        if let hot, panel.rows.contains(hot) {
-          var env = panel.plane.environment(at: time)
-          env["t"] = time
-          // The overlay doesn't say which row a dot is: the one where the held point is.
-          for at in content.analysis.grabPoints(rows: hot..<(hot + 1), env: env) {
-            for index in drawn.points.indices where drawn.points[index].x == at.x && drawn.points[index].y == at.y {
-              drawn.points[index].hot = true
-            }
-          }
-        }
-        extras = drawn
-      }
-      return PanelFrame(
-        box: boxes[k], content: .plane(view: view, layers: layers, overlay: extras),
-        env: panel.plane.environment(at: time), grid: panel.grid, lattice: lattice.labels)
-    }
+  /// A time the clock is held at (EQUATION_SCRIPT's `at`), for a picture of that moment.
+  @ObservationIgnored var frozen: Double?
+
+  /// Seconds since the graph opened.
+  var time: Double { frozen ?? Date.now.timeIntervalSince(opened) }
+
+  /// Where the panels are, in device pixels from the top-left corner.
+  func layout(_ content: GraphContent) -> [PanelLayout] {
+    content.panels.layout(width: pixels.width, height: pixels.height, dpr: scale)
   }
 }
 
 /// The graph's Metal view, with the overlay over it.
 struct MetalGraphView: View {
-  var content: GraphPanels
+  var content: GraphContent
   var theme: GraphTheme
   var generation: Int
   var model: GraphModel
@@ -100,24 +73,31 @@ struct MetalGraphView: View {
   var body: some View {
     MetalCanvasView(content: content, theme: theme, generation: generation, viewport: viewport, model: model)
       .overlay {
-        // A graph that moves redraws its overlay with every frame; a
-        // window or a camera that moves, as the viewport says it has.
-        TimelineView(.animation(paused: !content.animated)) { timeline in
-          Overlay(
-            frames: viewport.frames(
-              content, time: timeline.date.timeIntervalSince(viewport.opened), overlay: true, theme: theme),
-            scale: viewport.scale, theme: theme)
+        // Drawn again whenever the Metal view draws a frame that differs.
+        Overlay(frames: viewport.frames, layout: viewport.layout, scale: viewport.scale, theme: theme)
+          .allowsHitTesting(false)
+      }
+      .overlay(alignment: .topLeading) {
+        if let hover = viewport.hover {
+          Text(hover.text)
+            .font(.system(.caption, design: .monospaced))
+            .padding(.horizontal, 6)
+            .padding(.vertical, 3)
+            .background(.regularMaterial, in: .rect(cornerRadius: 6))
+            .fixedSize()
+            .offset(x: hover.at.x + 12, y: hover.at.y - 28)
+            .allowsHitTesting(false)
         }
-        .allowsHitTesting(false)
       }
   }
 }
 
 /// What is drawn over the shader passes, panel by panel: the numbers along
 /// the axes and the rows the CPU evaluates in 2D, the axes' and points'
-/// names in 3D (EquationRender `drawPanelLabels`).
+/// names in 3D, and the edges between panels (EquationRender `drawPanelLabels`).
 private struct Overlay: View, Equatable {
   var frames: [PanelFrame]
+  var layout: [PanelLayout]
   /// Device pixels per point.
   var scale: Double
   var theme: GraphTheme
@@ -125,7 +105,7 @@ private struct Overlay: View, Equatable {
   var body: some View {
     Canvas { context, size in
       context.withCGContext { ctx in
-        drawPanelLabels(ctx, frames, size: size, dpr: scale, theme: theme)
+        drawPanelLabels(ctx, frames, size: size, dpr: scale, theme: theme, edges: layout)
       }
     }
   }
@@ -134,7 +114,7 @@ private struct Overlay: View, Equatable {
 // MARK: - The Metal view
 
 private struct MetalCanvasView {
-  var content: GraphPanels
+  var content: GraphContent
   var theme: GraphTheme
   var generation: Int
   var viewport: GraphViewport

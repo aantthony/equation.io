@@ -25,6 +25,10 @@ struct EquationEditor {
   @Binding var document: GraphDocument
   var status: [RowStatus]
   var slide: @MainActor (Int, Double) -> Void
+  /// A slider was let go: its drag is one undo step.
+  var slid: @MainActor () -> Void = {}
+  /// Flip a row's display toggle (`RowStatus.Toggle.id`).
+  var flip: @MainActor (Int, String) -> Void = { _, _ in }
   #if os(iOS)
     /// The card the equations sit in on iPhone, which a pull at their top moves.
     @Environment(\.panelDrag) private var panelDrag
@@ -37,6 +41,8 @@ struct EquationEditor {
     let document = $document
     controller.onEdit = { lines in document.wrappedValue.setLines(lines) }
     controller.slide = slide
+    controller.slid = slid
+    controller.flip = flip
     #if os(iOS)
       controller.panelDrag = panelDrag
       controller.bottomInset = bottomInset
@@ -175,6 +181,8 @@ final class EditorController: NSObject {
   let textView = EquationTextView(usingTextLayoutManager: true)
   var onEdit: ([String]) -> Void = { _ in }
   var slide: @MainActor (Int, Double) -> Void = { _, _ in }
+  var slid: @MainActor () -> Void = {}
+  var flip: @MainActor (Int, String) -> Void = { _, _ in }
   #if os(iOS)
     /// The card the equations sit in, on iPhone; nil beside the graph.
     var panelDrag: PanelDrag?
@@ -371,8 +379,11 @@ final class EditorController: NSObject {
     let width = widgetWidth
     var heights: [Int: CGFloat] = [:]
     for (i, row) in status.enumerated() {
-      guard row.slider != nil || row.error != nil || row.info != nil else { continue }
-      let widget = RowWidget(status: row, slide: { [weak self] value in self?.slide(i, value) })
+      guard row.slider != nil || row.error != nil || row.info != nil || row.unsupported != nil || row.toggles != nil
+      else { continue }
+      let widget = RowWidget(
+        status: row, slide: { [weak self] value in self?.slide(i, value) }, slid: { [weak self] in self?.slid() },
+        flip: { [weak self] toggle in self?.flip(i, toggle) })
       let host: PlatformHostingController<RowWidget>
       if let existing = widgets[i] {
         host = existing
@@ -523,10 +534,13 @@ final class EditorController: NSObject {
   }
 #endif
 
-/// What sits under a row: its slider, then its error or readout.
+/// What sits under a row: its slider, its display toggles, then its error
+/// or readout (the order of web/main.ts `reconcile`).
 struct RowWidget: View {
   var status: RowStatus
   var slide: @MainActor (Double) -> Void
+  var slid: @MainActor () -> Void = {}
+  var flip: @MainActor (String) -> Void = { _ in }
 
   var body: some View {
     VStack(alignment: .leading, spacing: 4) {
@@ -536,7 +550,8 @@ struct RowWidget: View {
           Slider(
             value: Binding(get: { slider.value }, set: { slide($0) }),
             in: slider.min...slider.max,
-            step: slider.step > 0 ? slider.step : (slider.max - slider.min) / 400
+            step: slider.step > 0 ? slider.step : (slider.max - slider.min) / 400,
+            onEditingChanged: { editing in if !editing { slid() } }
           )
           .controlSize(.small)
           Text(slider.max.formatted()).monospacedDigit()
@@ -544,10 +559,27 @@ struct RowWidget: View {
         .font(.caption)
         .foregroundStyle(.secondary)
       }
+      if let toggles = status.toggles, status.error == nil {
+        HStack(spacing: 6) {
+          ForEach(toggles, id: \.id) { toggle in
+            Toggle(toggle.label, isOn: Binding(get: { toggle.on }, set: { _ in flip(toggle.id) }))
+              .toggleStyle(.button)
+              .controlSize(.small)
+              .help(toggle.help)
+          }
+        }
+        .font(.caption)
+      }
       if let error = status.error {
         Text(error)
           .font(.caption)
           .foregroundStyle(Color(Style.errorColor))
+          .fixedSize(horizontal: false, vertical: true)
+      } else if let unsupported = status.unsupported {
+        // Not an error: the site draws the row, and the app will.
+        Text(unsupported)
+          .font(.caption)
+          .foregroundStyle(.secondary)
           .fixedSize(horizontal: false, vertical: true)
       } else if let info = status.info {
         Text(info)

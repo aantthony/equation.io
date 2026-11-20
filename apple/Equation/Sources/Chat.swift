@@ -26,10 +26,17 @@ import SwiftUI
   private static let noLookups = #"{"error":"the app's reference is missing from this build"}"#
   private static let notReady = #"{"error":"the graph isn't ready"}"#
 
-  /// The voice prototype's get_graph: every row's status, and the window or camera.
+  /// lib/row-kind.ts `KIND_MEANINGS`, as `pnpm app:data` bundles it (language.json).
+  private static let kindMeanings: [String: String] = {
+    struct Language: Decodable { var kindMeanings: [String: String] }
+    guard let data = try? Data(contentsOf: AppData.url("language")) else { return [:] }
+    return (try? JSONDecoder().decode(Language.self, from: data).kindMeanings) ?? [:]
+  }()
+
+  /// The voice prototype's get_graph: every row's status and meaning, and the window or camera.
   func graph() async -> String {
     guard let model else { return Self.notReady }
-    return Self.state(rows: rows(), status: await model.status(after: rows()), framing: model.metal?.framing)
+    return Self.state(rows: rows(), theme: model.theme, framing: model.metal?.framing)
   }
 
   /// Change the graph, and read it back.
@@ -38,7 +45,7 @@ import SwiftUI
     guard let model else { return Self.notReady }
     // The view takes the new rows on the next turn of the run loop: its framing is the new graph's then.
     await Task.yield()
-    return Self.state(rows: rows, status: await model.status(after: rows), framing: model.metal?.framing)
+    return Self.state(rows: rows, theme: model.theme, framing: model.metal?.framing)
   }
 
   /// move_view (web/main.ts `movePanelView`): ease the first panel's window
@@ -48,18 +55,21 @@ import SwiftUI
     let number = { (key: String) in (target[key] as? NSNumber)?.doubleValue }
     let spin = number("spin")
     guard case .camera = framing else {
-      let range = { (key: String) -> (Double, Double)? in
-        guard let pair = (target[key] as? [Any])?.compactMap({ ($0 as? NSNumber)?.doubleValue }), pair.count == 2,
-          pair[0].isFinite, pair[1].isFinite, pair[0] != pair[1]
+      let pair = { (key: String) -> [Double]? in
+        guard let pair = (target[key] as? [Any])?.compactMap({ ($0 as? NSNumber)?.doubleValue }), pair.count == 2
         else { return nil }
-        return (min(pair[0], pair[1]), max(pair[0], pair[1]))
+        return pair
       }
       if spin != nil { return #"{"error":"spin turns the 3D camera; this graph is 2D"}"# }
-      guard range("x") != nil || range("y") != nil else {
-        return #"{"error":"give the window as x: [min, max] and y: [min, max]"}"#
+      let (x, y) = (pair("x"), pair("y"))
+      if x == nil && y == nil { return #"{"error":"the graph is 2D: give x and/or y ranges"}"# }
+      if [x, y].contains(where: { $0.map { !($0[1] > $0[0]) } ?? false }) {
+        return #"{"error":"each range must be [low, high] with high > low"}"#
       }
-      guard await canvas.glide(x: range("x"), y: range("y"), seconds: seconds) else { return Self.stopped }
-      return Self.state(rows: rows(), status: model?.status ?? [], framing: canvas.framing)
+      guard await canvas.glide(x: x.map { ($0[0], $0[1]) }, y: y.map { ($0[0], $0[1]) }, seconds: seconds),
+        case .window(let shown, let up)? = canvas.framing
+      else { return Self.stopped }
+      return "{\"x\":\(Self.list(shown)),\"y\":\(Self.list(up)),\"seconds\":\(JS.string(seconds))}"
     }
     var move = CameraMove(theta: number("theta"), phi: number("phi"), radius: number("radius"))
     if let point = (target["target"] as? [Any])?.compactMap({ ($0 as? NSNumber)?.doubleValue }), point.count == 3 {
@@ -68,16 +78,14 @@ import SwiftUI
     if move.isEmpty {
       guard let spin else { return #"{"error":"the graph is 3D: give theta, phi, radius, target and/or spin"}"# }
       canvas.setSpin(spin)
-      return Self.json(["spin": spin, "note": "saved in the camera row"])
+      return "{\"spin\":\(JS.string(spin)),\"note\":\"saved in the camera row\"}"
     }
     guard await canvas.glide(camera: move, seconds: seconds) else { return Self.stopped }
     // Arrive, then ease into the spin: the camera never jerks from rest to full speed.
     if let spin { canvas.setSpin(spin) }
     guard case .camera(let camera, let turning)? = canvas.framing else { return Self.notReady }
-    var answer = Self.camera(camera, spin: turning)
-    answer["seconds"] = seconds
-    if spin != nil { answer["note"] = "spinning now; saved in the camera row" }
-    return Self.json(answer)
+    let note = spin != nil ? ",\"note\":\"spinning now; saved in the camera row\"" : ""
+    return "{\(Self.camera(camera, spin: turning).dropFirst().dropLast()),\"seconds\":\(JS.string(seconds))\(note)}"
   }
 
   /// A move a hand cut short by taking the graph, or one a new graph replaced.
@@ -99,7 +107,7 @@ import SwiftUI
     else {
       let names = sliders.compactMap(named)
       let known = names.isEmpty ? "" : "; sliders: \(names.joined(separator: ", "))"
-      return Self.json(["error": "no slider named \"\(name)\"\(known)"])
+      return Self.object([("error", Self.quoted("no slider named \"\(name)\"\(known)"))])
     }
     // The slider's own value now; and where its range lets it stop.
     let start = from ?? slider.value
@@ -118,18 +126,34 @@ import SwiftUI
         let value = start + (goal - start) * k
         model.setSlider(row: index, to: form.whole ? value.rounded() : value)
         written = self?.rows()[index]
-        if k >= 1 { return }
+        if k >= 1 {
+          // The whole glide is one undo step.
+          model.endGesture()
+          return
+        }
         try? await Task.sleep(for: .milliseconds(16))
       }
     }
-    var answer: [String: Any] = ["slider": name, "from": start, "to": end, "seconds": seconds]
-    if end != to { answer["note"] = "held to the slider's range" }
-    return Self.json(answer)
+    return Self.object([
+      ("slider", Self.quoted(name)), ("from", JS.string(start)), ("to", JS.string(end)),
+      ("seconds", JS.string(seconds)), ("note", end != to ? Self.quoted("held to the slider's range") : nil),
+    ])
   }
 
+  /// check (lib/assistant-tools.ts `checkRows`): what the rows would draw, without drawing them.
   func check(_ rows: [String]) async -> String {
-    guard let model else { return Self.notReady }
-    return Self.state(rows: rows, status: await model.status(after: rows), framing: nil)
+    let texts = rows.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty }
+    let analysis = analyze(texts)
+    let entries = texts.indices.map { k -> String in
+      let report = analysis.describe(row: k, texts: texts, kindMeanings: Self.kindMeanings)
+      return Self.object([
+        ("row", Self.quoted(texts[k])), ("kind", report.kind.map(Self.quoted)),
+        ("meaning", report.meaning.map(Self.quoted)), ("value", report.value.map(Self.quoted)),
+        ("error", report.error.map(Self.quoted)), ("hint", report.hint.map(Self.quoted)),
+        ("warning", report.warning.map(Self.quoted)),
+      ])
+    }
+    return "[\(entries.joined(separator: ","))]"
   }
 
   func listKinds() async -> String { Self.lookups?.listKinds() ?? Self.noLookups }
@@ -141,45 +165,70 @@ import SwiftUI
   /// `Math.round(v * 1e6) / 1e6`, as the site's reports round.
   private static func round6(_ v: Double) -> Double { (v * 1e6).rounded() / 1e6 }
 
+  // The answers are written key by key, in the order the site's objects
+  // have theirs: it is text a model reads.
+
+  /// A JSON string.
+  private static func quoted(_ text: String) -> String {
+    let data = try? JSONSerialization.data(withJSONObject: text, options: [.fragmentsAllowed, .withoutEscapingSlashes])
+    return data.flatMap { String(data: $0, encoding: .utf8) } ?? "\"\""
+  }
+
+  /// A JSON object of the fields that have a value, in order.
+  private static func object(_ fields: [(String, String?)]) -> String {
+    "{" + fields.compactMap { key, value in value.map { "\(quoted(key)):\($0)" } }.joined(separator: ",") + "}"
+  }
+
+  private static func list(_ values: [Double]) -> String {
+    "[" + values.map { JS.string(round6($0)) }.joined(separator: ",") + "]"
+  }
+
   /// The live camera as get_graph reports it, spin included, so a move can
   /// be relative ("turn a bit left").
-  private static func camera(_ camera: Camera3D, spin: Double) -> [String: Any] {
-    [
-      "theta": round6(camera.shownTheta), "phi": round6(camera.phi), "radius": round6(camera.radius),
-      "target": [camera.target.x, camera.target.y, camera.target.z].map(round6), "spin": spin,
-    ]
+  private static func camera(_ camera: Camera3D, spin: Double) -> String {
+    object([
+      ("theta", JS.string(round6(camera.shownTheta))), ("phi", JS.string(round6(camera.phi))),
+      ("radius", JS.string(round6(camera.radius))),
+      ("target", list([camera.target.x, camera.target.y, camera.target.z])), ("spin", JS.string(spin)),
+    ])
   }
 
-  private static func json(_ object: [String: Any]) -> String {
-    guard let data = try? JSONSerialization.data(withJSONObject: object), let text = String(data: data, encoding: .utf8)
-    else { return notReady }
-    return text
-  }
-
-  /// The graph as the tools report it (the site's `GraphState`): the mode,
-  /// the first panel's window or camera, and every row.
-  private static func state(rows: [String], status: [RowStatus], framing: MetalCanvas.Framing?) -> String {
-    var state: [String: Any] = [
-      "mode": "2d",
-      "rows": rows.enumerated().map { k, text in
-        var row: [String: Any] = ["row": text]
-        if k < status.count {
-          if let error = status[k].error { row["error"] = error }
-          if let info = status[k].info { row["info"] = info }
-        }
-        return row
-      },
-    ]
+  /// The graph as the tools report it (the site's `GraphState`, web/main.ts
+  /// `panelGraph`): the mode, the first panel's window or camera, and every
+  /// row as `rowStatus` describes it (EquationRender `describe`, the port
+  /// of lib/assistant-tools.ts `describeRow`) with the color it draws in.
+  /// Not reported: a curve's intercepts in view (`points`).
+  private static func state(rows: [String], theme: GraphTheme, framing: MetalCanvas.Framing?) -> String {
+    let read = GraphAnalysis(
+      rows: rows.enumerated().map { GraphRow(id: -1 - $0.offset, text: $0.element) }, theme: theme)
+    let analysis = read.content.analysis
+    let entries = rows.indices.map { k -> String in
+      let report = analysis.describe(row: k, texts: rows, kindMeanings: kindMeanings)
+      let row = analysis.rows[k]
+      // The color of a row that draws something, as hex.
+      let draws =
+        report.error == nil && row.classified != nil && row.definition == nil && !row.comment && row.view == nil
+        && report.warning?.hasPrefix("not drawn") != true
+      let color = draws ? read.status[k].color.flatMap { $0.count == 3 ? $0 : nil } : nil
+      let hex = color.map { "#" + $0.map { String(format: "%02x", Int(($0 * 255).rounded())) }.joined() }
+      return object([
+        ("index", "\(k)"), ("text", quoted(rows[k])), ("status", quoted(report.status)),
+        ("error", report.error.map(quoted)), ("hint", report.hint.map(quoted)), ("kind", report.kind.map(quoted)),
+        ("meaning", report.meaning.map(quoted)), ("value", report.value.map(quoted)),
+        ("animated", report.animated ? "true" : nil), ("warning", report.warning.map(quoted)),
+        ("color", hex.map(quoted)),
+      ])
+    }
+    var fields: [(String, String?)] = []
     switch framing {
     case .window(let x, let y)?:
-      state["window"] = ["x": x, "y": y]
+      fields = [("mode", quoted("2d")), ("window", object([("x", list(x)), ("y", list(y))]))]
     case .camera(let camera, let spin)?:
-      state["mode"] = "3d"
-      state["camera"] = Self.camera(camera, spin: spin)
+      fields = [("mode", quoted("3d")), ("camera", Self.camera(camera, spin: spin))]
     case nil:
-      break
+      fields = [("mode", quoted(analysis.is3D ? "3d" : "2d"))]
     }
-    return json(state)
+    return object(fields + [("rows", "[\(entries.joined(separator: ","))]")])
   }
 }
 

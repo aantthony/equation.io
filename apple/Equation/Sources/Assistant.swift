@@ -23,6 +23,20 @@ struct RowStatus: Decodable, Equatable {
   /// Syntax colors over the row's text, in UTF-16 offsets.
   var spans: [Span]
   var slider: Slider?
+  /// Why the app does not draw a row the site does: not an error, and not
+  /// the model's to fix. (Absent from the evals' service, which reads everything.)
+  var unsupported: String?
+  /// The display toggles the row offers, as the site's buttons under it
+  /// (web/main.ts `rowToggles`, `makeLevelsBtn`).
+  var toggles: [Toggle]?
+
+  struct Toggle: Decodable, Equatable {
+    /// levels, sums, streamlines or arrows.
+    var id: String
+    var label: String
+    var help: String
+    var on: Bool
+  }
 
   struct Span: Decodable, Equatable {
     var start: Int

@@ -7,6 +7,10 @@ struct DocumentView: View {
   @Binding var document: GraphDocument
   /// The app's own graph handling, on iPhone and iPad; nil in a document window.
   var library: LibraryActions? = nil
+  /// The document registers its changes for undo (a Mac document window),
+  /// so the graph groups a gesture's rewrites into one step there.
+  var registersUndo = false
+  @Environment(\.undoManager) private var undoManager
   @State private var model = GraphModel()
   @State private var chat = GraphChat()
   /// Bumped to put the cursor in Ask's field.
@@ -57,7 +61,9 @@ struct DocumentView: View {
     EquationEditor(
       document: $document,
       status: model.status,
-      slide: { [model] row, value in model.setSlider(row: row, to: value) }
+      slide: { [model] row, value in model.setSlider(row: row, to: value) },
+      slid: { [model] in model.endGesture() },
+      flip: { [model] row, toggle in model.flip(toggle, row: row) }
     )
   }
 
@@ -84,6 +90,7 @@ struct DocumentView: View {
     chat.access.rows = { document.wrappedValue.rows.map(\.text) }
     chat.access.apply = { rows in document.wrappedValue.setLines(rows) }
     chat.access.model = model
+    model.undoManager = registersUndo ? undoManager : nil
   }
 
   /// Shares the graph as its equation.io link, which opens (and unfurls
