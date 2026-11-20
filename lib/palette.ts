@@ -1,8 +1,6 @@
 /**
  * Row colors: the palettes, which rows take a color from them, and which slot
- * each takes. The app (web/main.ts, web/theme.ts) and the share image
- * (worker/og.ts) both color through here, so a shared link opens in the
- * colors its preview showed.
+ * each takes, for the app (web/main.ts, web/theme.ts).
  */
 import type { CpuPlan } from './compiler.ts';
 import { noteColor } from './statements.ts';
@@ -49,7 +47,7 @@ export interface ColorRow {
 export function takesColor(row: ColorRow): boolean {
   if (!row.text.trim() || row.comment || (row.def && !row.point) || row.view || noteColor(row.text)) return false;
   const plan = row.cpu;
-  return !(plan?.type === 'note' || plan?.type === 'metric' || (plan?.type === 'value' && !plan.shade));
+  return !(plan?.type === 'note' || (plan?.type === 'value' && !plan.shade));
 }
 
 /**

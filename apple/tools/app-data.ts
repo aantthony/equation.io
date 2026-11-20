@@ -14,9 +14,8 @@
  *   pnpm app:data
  */
 import { mkdirSync, writeFileSync } from 'node:fs';
-import { examplesIndex } from '../../lib/assistant-tools.ts';
+import { KIND_MEANINGS, examplesIndex } from '../../lib/assistant-tools.ts';
 import { type AssistantData, assistantData } from '../../lib/reference.ts';
-import { KIND_MEANINGS } from '../../lib/row-kind.ts';
 import { splitStatements } from '../../lib/statements.ts';
 import { builtinTable } from '../../lib/syntax-help.ts';
 import { readReference } from '../../scripts/reference.ts';

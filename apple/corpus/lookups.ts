@@ -8,9 +8,15 @@
  *   pnpm swift:lookups   (pnpm swift:corpus runs it too)
  */
 import { writeFileSync } from 'node:fs';
-import { functionDoc, kindExamples, listKinds, searchFunctions, shape } from '../../lib/assistant-tools.ts';
+import {
+  KIND_MEANINGS,
+  functionDoc,
+  kindExamples,
+  listKinds,
+  searchFunctions,
+  shape,
+} from '../../lib/assistant-tools.ts';
 import { DIST_FAMILIES } from '../../lib/dist-families.ts';
-import { KIND_MEANINGS } from '../../lib/row-kind.ts';
 import { builtinHelp, builtinNames } from '../../lib/syntax-help.ts';
 import { languageData, lookupData } from '../tools/app-data.ts';
 

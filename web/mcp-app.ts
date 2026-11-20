@@ -21,6 +21,12 @@ interface WidgetState {
   privateContent?: { source?: string; equations?: unknown };
 }
 
+// Corner brackets at top-right and bottom-left, opening out (expand) or in (collapse).
+const icon = (d: string) =>
+  `<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="${d}"/></svg>`;
+const EXPAND_ICON = icon('M9.5 3H13v3.5M6.5 13H3V9.5');
+const COLLAPSE_ICON = icon('M13 6.5H9.5V3M3 9.5h3.5V13');
+
 const strings = (value: unknown): value is string[] =>
   Array.isArray(value) && value.every(row => typeof row === 'string');
 
@@ -45,6 +51,14 @@ export async function connectGraphApp(editor: GraphEditor) {
   const open = document.getElementById('app-open') as HTMLAnchorElement;
   const expand = document.getElementById('app-expand') as HTMLButtonElement;
   const reset = document.getElementById('app-reset') as HTMLButtonElement;
+  // The page markup says "Expand" in text; swap in the icon before any host context.
+  const labelExpand = (label: 'Expand' | 'Collapse') => {
+    if (expand.getAttribute('aria-label') === label) return;
+    expand.setAttribute('aria-label', label);
+    expand.title = label;
+    expand.innerHTML = label === 'Collapse' ? COLLAPSE_ICON : EXPAND_ICON;
+  };
+  labelExpand('Expand');
   const configuredOrigin = document.querySelector<HTMLMetaElement>('meta[name="equation-origin"]')!.content;
   const origin = configuredOrigin === '__EQUATION_ORIGIN__' ? location.origin : new URL(configuredOrigin).origin;
   // Optional ChatGPT persistence; all communication uses the standard bridge.
@@ -78,11 +92,6 @@ export async function connectGraphApp(editor: GraphEditor) {
   observer.observe(document.getElementById('gl')!);
   document.addEventListener('visibilitychange', visibility, { signal: events.signal });
   visibility();
-  const toolbar = document.getElementById('app-toolbar')!;
-  const toolbarSize = new ResizeObserver(() => {
-    document.documentElement.style.setProperty('--app-toolbar-height', `${toolbar.getBoundingClientRect().height}px`);
-  });
-  toolbarSize.observe(toolbar);
   const fonts = document.createElement('style');
   fonts.id = 'equation-host-fonts';
   document.head.append(fonts);
@@ -177,7 +186,7 @@ export async function connectGraphApp(editor: GraphEditor) {
     }
     const nextMode = context.displayMode === 'fullscreen' ? 'inline' : 'fullscreen';
     expand.hidden = !context.availableDisplayModes?.includes(nextMode);
-    expand.textContent = context.displayMode === 'fullscreen' ? 'Collapse' : 'Expand';
+    labelExpand(context.displayMode === 'fullscreen' ? 'Collapse' : 'Expand');
     if (connected && context.displayMode !== 'fullscreen') {
       const dims = context.containerDimensions;
       const height = dims && 'height' in dims ? dims.height : Math.min(520, dims?.maxHeight ?? 520);
@@ -295,19 +304,6 @@ export async function connectGraphApp(editor: GraphEditor) {
   });
 
   reset.addEventListener('click', resetGraph, { signal: events.signal });
-  open.addEventListener(
-    'click',
-    event => {
-      link(editor.getRows()); // Include edits still waiting for the throttled callback.
-      if (connected && app.getHostCapabilities()?.openLinks) {
-        event.preventDefault();
-        void app.openLink({ url: open.href }).catch(() => {
-          status.textContent = 'Could not open the link. Try again.';
-        });
-      }
-    },
-    { signal: events.signal },
-  );
   async function requestMode(mode: 'inline' | 'fullscreen') {
     if (closing || !connected || changingMode || !context.availableDisplayModes?.includes(mode)) return;
     changingMode = true;
@@ -344,7 +340,6 @@ export async function connectGraphApp(editor: GraphEditor) {
       cancelPreview();
       events.abort();
       observer.disconnect();
-      toolbarSize.disconnect();
       editor.onChange(() => {});
       try {
         editor.flush();

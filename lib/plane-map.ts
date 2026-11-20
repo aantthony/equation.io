@@ -41,7 +41,7 @@ const CONSTANTS = new Set(['pi', 'e']);
 export function parsePlaneMap(src: string, env: Record<string, number> = {}, doc: MapDoc = {}): PlaneMap {
   let parsed: Expr;
   try {
-    parsed = parseExpr(src);
+    parsed = parseExpr(src, undefined, undefined, doc.valueNames);
   } catch {
     throw new Error(USAGE);
   }
@@ -175,12 +175,6 @@ export function planeToWorld(map: PlaneMap, X: number, Y: number): [number, numb
 /** ∂x/∂X, ∂x/∂Y, ∂y/∂X, ∂y/∂Y at screen point (X, Y). */
 export function planeJacobian(map: PlaneMap, X: number, Y: number): [number, number, number, number] {
   return compiled(map).j(X, Y);
-}
-
-/** The inverse of row-major 2×2 matrix m (non-finite where it is singular). */
-export function invert2([a, b, c, d]: readonly [number, number, number, number]): [number, number, number, number] {
-  const det = a * d - b * c;
-  return [d / det, -b / det, -c / det, a / det];
 }
 
 /** How far x and y move across one pixel at screen point (X, Y), a pixel

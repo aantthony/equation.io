@@ -23,12 +23,26 @@ The old UI remains usable at [graph.equation.io](https://graph.equation.io).
 
 ## Architecture
 
-Deployed as a Cloudflare Worker.
+Deployed as a Cloudflare Worker. The page is `web/`; the mathematics is `lib/`.
 
-- `lib/` — tokenizer, shunting-yard parser, symbolic expression core (`expr.ts`),
-  and a GLSL compiler (`glsl.ts`) used for plotting.
-- `web/` — the grapher. Every equation is compiled to a GLSL scalar field F whose
-  zero set is the graph:
+- `lib/expr.ts` is the tokenizer, the shunting-yard parser, and the expression
+  tree. `lib/defs.ts` resolves names and definitions. Resolve-time expansions
+  live with the mathematics they implement: `vector-calculus.ts` (gradient,
+  divergence, curl), `sums.ts` (Σ and Π), and the integral, curve, and surface
+  passes in `integrate.ts`, `curves.ts`, and `surface-geometry.ts`.
+- Distributions are `lib/dist.ts`. It re-exports base laws (`dist-base.ts`),
+  continuous sampling (`dist-sample.ts`), discrete laws (`dist-discrete.ts`),
+  and the random-variable system (`dist-system.ts`). The family table is
+  `dist-families.ts`.
+- Geometry, tensors, measures, lists, and automata make up the rest of `lib/`:
+  `geom.ts`, `pga.ts`, `clifford.ts`, `tensor.ts`, `measure.ts`, `list.ts`,
+  `automaton.ts`, and the modules beside them. `compiler.ts` turns a classified
+  row into a CPU plan and a GLSL plan (`glsl.ts`).
+- `web/main.ts` is the equation editor and the boot. `web/session.ts` owns the
+  document, the panels, and the shared WebGL renderers. `web/scene.ts` builds
+  one frame and hands it to the 2D and 3D renderers. Mutable state those three
+  share lives on `web/app-state.ts`.
+- Every equation is compiled to a GLSL scalar field F whose zero set is the graph:
   - **2D**: fullscreen-quad fragment shader; the curve is drawn where the
     distance estimate |F|/|∇F| is under a pixel, with a two-scale consistency
     test rejecting fake lines at poles/asymptotes (e.g. `y=tan(x)`).
@@ -44,13 +58,9 @@ of equations is linkable and the address bar is the share mechanism.
 Agent-facing surface:
 
 - `/llms.txt` — link format + expression syntax reference
-  ([`web/public/llms.txt`](web/public/llms.txt)), and `/docs/`, the same
-  reference as pages for people: both generated from
-  [`docs/reference/`](docs/reference) (`pnpm reference` rewrites llms.txt;
-  [`web/docs/pages.ts`](web/docs/pages.ts) writes the pages at build time)
+  ([`web/public/llms.txt`](web/public/llms.txt))
 - `/g/<eqs>` — share form of a graph link; the worker injects og:/twitter:
-  meta tags and `/api/og/<eqs>` renders the preview PNG on the CPU
-  (expressions compile to a stack machine — no WebGL in Workers)
+  meta tags (the graph's equations as the title, over the site card)
 - `/mcp` — stateless MCP server (Streamable HTTP) with `encode_graph_url`
   (validates rows, returns links), `decode_graph_url` (decodes links for editing),
   and `show_graph` (renders the interactive grapher inside MCP Apps hosts).
@@ -70,36 +80,6 @@ pnpm typecheck  # lib + web + worker
 pnpm web:build  # build to dist-web/ (client + worker)
 pnpm deploy     # build and deploy to Cloudflare
 ```
-
-### Voice mode (credit keys)
-
-A mic button talks to an OpenAI Realtime model
-([`web/voice.ts`](web/voice.ts)) over WebRTC, and the model edits the graph
-with `get_graph` / `set_graph` tools, which report each row's readouts (values,
-intercepts, extrema in view). `look_at_graph` puts a screenshot of the canvas
-into the conversation as an image.
-
-The page never holds an OpenAI credential. It opens a control WebSocket to the
-Worker ([`worker/voice-call.ts`](worker/voice-call.ts)) and sends its WebRTC
-offer with a **credit key**. The Worker checks the key's balance in D1, creates
-the call with a fixed session, and attaches a sideband WebSocket to it before
-answering. The sideband charges every response's token usage to the key
-([`worker/voice-credit.ts`](worker/voice-credit.ts)); the call is hung up when
-the balance runs out, after 30 minutes, if the page changes the session, or
-when the page's control socket closes. Audio flows between the browser and OpenAI directly.
-
-```sh
-wrangler secret put OPENAI_API_KEY     # locally: in .dev.vars
-wrangler d1 migrations apply DB --remote   # locally: --local
-node scripts/voice-key.ts create "Sam" 5   # a key with $5; prints it once
-node scripts/voice-key.ts list             # balances and spend
-node scripts/voice-key.ts grant <id> 10    # top up; disable/enable <id>
-```
-
-Each `scripts/voice-key.ts` command takes `--remote` for the deployed database.
-Visit any page once with `#voice=<key>` to show the mic in that browser
-(`#voice=` forgets it). `?voice=<key>` works too, but a query string reaches
-the server, which may log it; the fragment never does.
 
 ### Traffic and MCP usage
 
@@ -147,6 +127,11 @@ Account Analytics: Read, for the script to include them.
 - `a = 2` — a named constant with a slider; other equations can use `a`, and
   it compiles to a uniform so dragging never rebuilds a shader. `b = a^2 + t`
   defines a computed/animated constant
+- `a := 2`, `f(x) := x^2` — the same definitions written explicitly. `:=` can
+  also take over `e`, `pi`, `i`, `w` or `t` as a value (not a function) for
+  the whole graph (`e := 0.6` is a slider; `t := 0.5` stops all animation);
+  `u` and `v` take an interval (`u := interval(0, 2pi)`); `x`, `y`, `z` and
+  `d` stay the language's
 - `(2, 3)` / `(3, 12, 0)` — points. In 2D, coordinates that are plain numbers
   or slider names can be dragged on the canvas, and the drag rewrites them:
   `a = 1; b = 2; (a, b)` moves both sliders, `(2sin(t), 3)` only its literal

@@ -1,4 +1,3 @@
-import { landingForGroup } from '../../lib/landings.ts';
 import { initTheme, onThemeChange, theme, toggleTheme } from '../theme.ts';
 import { shotUrls, themedShot } from '../themed-shot.ts';
 import { startHeroField } from './hero-field.ts';
@@ -86,13 +85,6 @@ groups.forEach((group, gi) => {
   const title = el('div', 'group-title');
   title.append(el('span', 'counter', counter), el('h2', 'display small', group));
   head.append(title);
-  const landing = landingForGroup(group);
-  if (landing) {
-    const a = el('a', 'more', landing.nav + ' →');
-    a.href = landing.path;
-    a.title = landing.title;
-    head.append(a);
-  }
   const grid = el('div', 'grid');
   for (const it of items) {
     const card = el('a', 'card');

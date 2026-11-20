@@ -2,7 +2,7 @@
  * projections: only names stores definitions, and a vector owns its aliases. */
 import type { FnDef, StateDef, TableDef } from './defs.ts';
 import type { RV } from './dist.ts';
-import { type Expr, evaluate, freeVars } from './expr.ts';
+import { type Expr, evaluate, freeVars, reboundName } from './expr.ts';
 import { pointComps, vecStateComps } from './geom.ts';
 import type { Seq } from './list.ts';
 import type { Mat } from './mat.ts';
@@ -109,6 +109,11 @@ function aliases(name: string, binding: Binding): string[] {
     throw new Error('State derivative and initial dimensions must match.');
   return binding.role === 'state' ? vecStateComps(name, dim) : pointComps(name, dim);
 }
+
+/** A written name as this document binds it: `e` is `#e` where a row
+ *  redefined e (`e := 0.6`), and itself everywhere else. */
+export const boundIn = (env: Env, name: string): string =>
+  env.names.has(reboundName(name)) ? reboundName(name) : name;
 
 export class Env {
   private readonly owned = new Map<string, NameEntry>();

@@ -25,7 +25,11 @@
  * κ = 0 — a space curve's N and B, and torsion — is left to come out NaN.
  */
 import { add, div, mul, neg, pow, sub } from './diff.ts';
-import { type Expr, substVars } from './expr.ts';
+import { childrenOf, exprKey, type Expr, freeVars, substVars } from './expr.ts';
+import { applyDiff, throughFields, type Ctx } from './defs.ts';
+import { lowerGeom } from './geom.ts';
+import { intervalsIn, replaceIntervals } from './interval.ts';
+import { SCALAR_REDUCTIONS } from './list.ts';
 
 /** d/du, as the resolver takes it (symbolic, with its fallbacks). */
 export type AlongU = (e: Expr) => Expr;
@@ -144,4 +148,119 @@ export function frameOf(r: readonly Expr[], d: AlongU, u0: Expr): Expr {
   const P: Expr = { kind: 'vec', items: p };
   const heads: Expr[] = frame.map(v => ({ kind: 'vec', items: plus(p, v) }));
   return call('vector', P, { kind: 'list', items: heads });
+}
+
+/** Axis names, as in lib/defs.ts. Local so this file's tables do not read defs during startup. */
+const SPACE: ReadonlySet<string> = new Set(['x', 'y', 'z']);
+
+/** The operators on a parametric curve in u. */
+export const CURVE_OPS: ReadonlySet<string> = new Set(['curvature', 'torsion', 'osculating', 'frame']);
+const CURVE_OP_EXAMPLE: Record<string, string> = {
+  curvature: 'curvature(C) or curvature(C, 0.25)',
+  torsion: 'torsion(C) or torsion(C, 0.25)',
+  osculating: 'osculating(C, 0.25)',
+  frame: 'frame(C, 0.25)',
+};
+/** The curve parameter: a definition over it is a named curve. A named
+ *  field over x, y or z is written out too, to be refused. */
+const ALONG: ReadonlySet<string> = new Set(['u', ...SPACE]);
+
+/**
+ * What a curve operator acts on, as its components in u: a tuple, a named
+ * curve (c = (cos(2pi u), sin(2pi u)), written out through any scalar it
+ * uses), or a function of one parameter, called at u. A curve over one
+ * interval instead (`u = interval(0, 2pi)` above, or `s = interval(…)`) is
+ * read over that interval's own values, written as u; `over` is the interval,
+ * to put back where the result is a function along the curve.
+ */
+function curveOperand(name: string, arg: Expr, ctx: Ctx): { items: readonly Expr[]; over?: Expr } {
+  const usage = `${name} takes a parametric curve in u, like ${CURVE_OP_EXAMPLE[name]} with C = (cos(2pi u), sin(2pi u)).`;
+  const U: Expr = { kind: 'var', name: 'u' };
+  const uInterval = ctx.opts.interval?.('u');
+  let r: Expr = arg;
+  if (arg.kind === 'var') {
+    const fn = ctx.getFn(arg.name);
+    if (fn) {
+      if (fn.params.length !== 1 || fn.recursive) throw new Error(usage);
+      r = substVars(fn.body, { [fn.params[0]]: uInterval ?? U });
+    }
+  }
+  if (ctx.opts.comps) r = lowerGeom(r, ctx.opts.comps, () => null, ctx.opts.isList);
+  r = throughFields(r, ctx.opts, ALONG);
+  if (r.kind === 'var' && arg.kind === 'var') {
+    const n = arg.name;
+    const what = ctx.opts.consts?.[n] !== undefined ? 'a number' : ctx.opts.isList?.(n) ? 'a list' : null;
+    if (what) throw new Error(`${name}: ${n} is ${what}, not a curve in u. ${usage}`);
+    if (!ctx.opts.documentNames?.has(n)) {
+      throw new Error(`${name}: ${n} is not a curve — define one first, like ${n} = (cos(2pi u), sin(2pi u)).`);
+    }
+  }
+  // The interval the curve runs along, read at its own values as u: u's own
+  // (`u = interval(0, 2pi)`), or else the one interval of a curve without u.
+  // Any other interval stays, a family of curves.
+  const hidden = intervalsIn(r);
+  const uKey = uInterval && exprKey(uInterval);
+  const along =
+    hidden.find(h => h.key === uKey) ?? (hidden.length === 1 && !freeVars(r).has('u') ? hidden[0] : undefined);
+  if (along) r = replaceIntervals(r, h => (h.key === along.key ? U : h.node));
+  if (r.kind !== 'vec' || (r.items.length !== 2 && r.items.length !== 3)) throw new Error(usage);
+  const vars = freeVars(r);
+  if (!vars.has('u')) throw new Error(`${name} needs a curve, which moves with u — this is a fixed point. ${usage}`);
+  if (vars.has('v') || [...SPACE].some(n => vars.has(n))) throw new Error(usage);
+  return { items: r.items, over: along?.node };
+}
+
+/** Whether e is a list: a literal, a data column or a named list, or one
+ *  mapped over, filtered (s[s > 0.3]) or sliced — not one reduced or
+ *  indexed to a number (as staysList). */
+function listValued(e: Expr, ctx: Ctx): boolean {
+  if (e.kind === 'list' || e.kind === 'data') return true;
+  if (e.kind === 'var') return !!ctx.opts.isList?.(e.name);
+  if (e.kind === 'index') return e.args[1].kind === 'range' || listValued(e.args[1], ctx);
+  if (
+    e.kind === 'call' &&
+    (SCALAR_REDUCTIONS.has(e.name) || ((e.name === 'min' || e.name === 'max') && e.args.length === 1))
+  )
+    return false;
+  return childrenOf(e).some(c => listValued(c, ctx));
+}
+
+/**
+ * curvature and torsion (along u, or at a point u0 of the curve), the
+ * osculating circle at u0 and the Frenet frame at u0.
+ */
+export function curveGeometry(name: string, args: readonly Expr[], ctx: Ctx): Expr {
+  const example = CURVE_OP_EXAMPLE[name];
+  const needsPoint = name === 'osculating' || name === 'frame';
+  if (args.length !== 2 && (needsPoint || args.length !== 1)) {
+    throw new Error(
+      needsPoint
+        ? `${name} takes a curve and where on it: ${example}.`
+        : `${name} takes a curve, and optionally where on it: ${example}.`,
+    );
+  }
+  const { items: r, over } = curveOperand(name, args[0], ctx);
+  const u0 = args[1];
+  // κ(u) and τ(u) are functions of u, so k(u) = curvature(C, u) is κ; the
+  // circle and frame are drawn over u of their own, which a u0 in u
+  // would capture.
+  const ownU = !needsPoint && !!ctx.opts.params?.has('u');
+  if (u0 && (u0.kind === 'vec' || (freeVars(u0).has('u') && !ownU))) {
+    throw new Error(`${name}: the second argument is where on the curve — a number, slider or t, not u: ${example}.`);
+  }
+  // Several points map element by element (the formulas have no branch), and the
+  // circles make a family; the frame's arrows take one point at a time.
+  if (name === 'frame' && u0 && listValued(u0, ctx)) {
+    throw new Error(
+      'frame takes one point on the curve at a time — a number, slider or t, like frame(C, 0.25) — not a list.',
+    );
+  }
+  if (name === 'torsion' && r.length !== 3) {
+    throw new Error('torsion needs a curve in space — a plane curve has none, and its curvature is signed.');
+  }
+  const d = (e: Expr): Expr => applyDiff(e, 'u', 1, ctx.opts, ctx.getFn);
+  if (name === 'osculating') return osculatingOf(r, d, u0);
+  if (name === 'frame') return frameOf(r, d, u0);
+  const along = name === 'curvature' ? curvatureOf(r, d) : torsionOf(r, d);
+  return u0 ? substVars(along, { u: u0 }) : over ? substVars(along, { u: over }) : along;
 }

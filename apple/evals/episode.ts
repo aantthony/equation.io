@@ -15,9 +15,8 @@ import type { Variant } from '../../lib/assistant-instructions.ts';
 import { type AssistantData, assistantData } from '../../lib/reference.ts';
 import { EXAMPLES } from '../../web/examples.ts';
 import { readReference } from '../../scripts/reference.ts';
-import type { MoveViewTarget } from '../../web/voice.ts';
 import { type Check, type Outcome, type ToolCall, grade } from './checks.ts';
-import { EvalGraph, readSyntax } from './graph.ts';
+import { EvalGraph, type MoveViewTarget, readSyntax } from './graph.ts';
 
 const num = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v);
 const text = (v: unknown): string => (typeof v === 'string' ? v : '');

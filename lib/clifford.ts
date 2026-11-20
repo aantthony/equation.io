@@ -172,7 +172,6 @@ export const geometric = (a: Multivector, b: Multivector): Multivector => produc
 /** The outer product: the part of the geometric product whose grades add. */
 export const outerMv = (a: Multivector, b: Multivector): Multivector => product(a, b, (i, j) => (i & j) === 0);
 /** The left contraction a ⌋ b: the part of grade grade(b) − grade(a). */
-export const innerMv = (a: Multivector, b: Multivector): Multivector => product(a, b, (i, j) => (i & j) === i);
 
 /** Flip each grade k whose sign(k) is −1. */
 const gradeSigns = (a: Multivector, sign: (k: number) => number): Multivector => ({
@@ -367,9 +366,6 @@ export function mvOfNode(e: Expr): Multivector | null {
   const quat = e.args[1].kind === 'num' && e.args[1].value === 1;
   return { dim, data: e.args.slice(2), ...(quat ? { quat: true as const } : {}) };
 }
-
-/** The blades a readout lists, in their written order: [blade, name, sign]. */
-export const readoutBlades = (dim: Dim) => SPELLING[dim];
 
 /**
  * `1 + 2 e_xy - e_zx`, or `1 + 2i + 3j - 4k` for a quaternion, from the

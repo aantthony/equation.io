@@ -42,7 +42,7 @@ describe('assignColors', () => {
 
   it('counts only the finished document, however the new rows got there', () => {
     // Pasting three curves over a whole [blue, red, green] document, or
-    // voice mode inserting a row above a kept one: new rows are uncolored
+    // a row inserted above a kept one: new rows are uncolored
     // until the document is final, so nothing removed or half-built counts.
     expect(color([-1, -1, -1])).toEqual([0, 1, 2]);
     expect(color([-1, 0])).toEqual([1, 0]);

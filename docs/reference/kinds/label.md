@@ -35,5 +35,4 @@ color. Use it as a whole row. Examples:
 
 The point may be a tuple, a named point, or point arithmetic, in 2D or 3D, and
 may use constants, sliders, states, and `t`; it cannot use free x/y/z or u/v.
-The text is plain and fixed. The MCP classifies these rows as `label`; static
-previews draw the other rows but leave label text out (see preview_omits).
+The text is plain and fixed. The MCP classifies these rows as `label`.

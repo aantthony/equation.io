@@ -11,7 +11,7 @@
 <body>
   <canvas id="gl" aria-label="Interactive graph"></canvas>
   <canvas id="overlay"></canvas>
-  <div id="panel" style="visibility: hidden">
+  <div id="panel">
     <div id="panel-grip" title="Click to hide the panel; drag to move it" aria-hidden="true"></div>
     <div id="panel-resize" role="separator" aria-orientation="vertical" tabindex="0" aria-label="Resize the equations panel"></div>
     <button id="theme-toggle" type="button" aria-label="Toggle dark mode" title="Toggle dark mode">☾</button>
@@ -20,7 +20,7 @@
     <details id="data-files" hidden><summary>data files</summary><div id="data-files-list"></div></details>
     <div id="panel-links"><button id="open-csv" type="button">+ csv</button></div>
   </div>
-  <button id="panel-chip" class="shown" type="button" aria-label="Show the equations">y=</button>
+  <button id="panel-chip" type="button" hidden aria-label="Show the equations">y=</button>
   <footer id="app-toolbar">
     <span id="app-status" role="status">Waiting for graph…</span>
     <button id="app-reset" type="button" hidden title="Reset to the original graph">Reset</button>

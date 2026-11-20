@@ -1,7 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { analyze } from '../worker/graph.ts';
 import { type Expr, evaluate } from './expr.ts';
-import { canRenderOg, renderRaster } from '../worker/og.ts';
 import { hull2, hull3, hullFaces, hullMesh } from './hull.ts';
 
 type P3 = [number, number, number];
@@ -141,23 +140,6 @@ describe('shading', () => {
         ]),
       ).indices,
     ).toHaveLength(0);
-  });
-  it('lights the static preview: faces are filled in shades of the row colour, darker than its edges', () => {
-    const rows = ['hull(([-2,2],[-2,2],[-2,2]))'];
-    expect(canRenderOg(rows)).toBe(true);
-    const { px } = renderRaster(rows, 160, 120); // RGB
-    const areas = new Map<string, number>();
-    for (let k = 0; k < px.length; k += 3) {
-      if (px[k] === px[k + 1] && px[k + 1] === px[k + 2]) continue; // paper and grid
-      const key = `${px[k]},${px[k + 1]},${px[k + 2]}`;
-      areas.set(key, (areas.get(key) ?? 0) + 1);
-    }
-    const big = [...areas].filter(([, n]) => n > 100).map(([key]) => key.split(',').map(Number));
-    // The edge colour, and at least two differently lit faces (the top, and
-    // the sides — which may share a shade when both face away from the light).
-    expect(big.length).toBeGreaterThanOrEqual(3);
-    const brightness = big.map(c => c[0] + c[1] + c[2]).sort((a, b) => b - a);
-    expect(new Set(brightness).size).toBe(brightness.length);
   });
 });
 

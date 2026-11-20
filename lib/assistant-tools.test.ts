@@ -3,6 +3,7 @@ import { EXAMPLES } from '../web/examples.ts';
 import { readReference } from '../scripts/reference.ts';
 import { analyzeRows } from './analysis.ts';
 import {
+  KIND_MEANINGS,
   checkRows,
   examplesIndex,
   functionDoc,
@@ -13,7 +14,6 @@ import {
   shape,
 } from './assistant-tools.ts';
 import { assistantData } from './reference.ts';
-import { KIND_MEANINGS } from './row-kind.ts';
 
 describe('check', () => {
   it('reads each row as set_graph would, without a graph', () => {
@@ -69,7 +69,7 @@ describe('kind_examples', () => {
     expect(dims).toContain(true);
     expect(dims).toContain(false);
     // Kinds no short menu example draws: the reference's examples stand alone.
-    expect(Object.keys(KIND_MEANINGS).filter(kind => !index.kinds[kind])).toEqual(['label', 'dlist']);
+    expect(Object.keys(KIND_MEANINGS).filter(kind => !index.kinds[kind])).toEqual(['label', 'geodesic', 'dlist']);
   });
   it("leads with the reference's examples, then the menu's, three in all", () => {
     for (const [kind, examples] of Object.entries(data.kinds)) {

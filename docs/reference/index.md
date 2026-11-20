@@ -103,9 +103,6 @@ nothing themselves.
 - graph
 - lattice
 
-## Curvature and spacetime (brief)
+## Curvature (brief)
 
 - geodesic
-- metric
-- lightcone
-- tidal

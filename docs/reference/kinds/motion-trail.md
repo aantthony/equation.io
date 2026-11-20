@@ -45,5 +45,4 @@ sampling at most 60 times a second. Undefined positions or pauses over half a
 second break the line instead of joining unobserved motion. Editing equations
 or restarting the simulation clears history; framing/comment edits preserve
 it. Trails start afresh on opening a graph and are not saved in shared URLs.
-The MCP classifies these rows as `trail`; static previews use the fallback
-card because a still image cannot reproduce accumulated live history.
+The MCP classifies these rows as `trail`.

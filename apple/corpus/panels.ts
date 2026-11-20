@@ -84,23 +84,28 @@ const windows = {
   fit: SPECS.flatMap(spec => SIZES.map(([w, h]) => ({ spec, w, h, out: fitView2D(spec, w, h) }))),
   linked: WINDOWS.flatMap(own =>
     SHARED.flatMap(shared =>
-      [
-        {},
-        { x: WINDOWS[1] },
-        { y: WINDOWS[2] },
-        { x: WINDOWS[2], y: WINDOWS[1] },
-      ].map(from => ({ own, shared, from, out: linkedWindow(own, shared, from) })),
+      [{}, { x: WINDOWS[1] }, { y: WINDOWS[2] }, { x: WINDOWS[2], y: WINDOWS[1] }].map(from => ({
+        own,
+        shared,
+        from,
+        out: linkedWindow(own, shared, from),
+      })),
     ),
   ),
   panel: SPECS.flatMap(spec =>
     SHARED.flatMap(shared =>
-      WINDOWS.map(linked => ({ spec, shared, linked, w: 800, h: 480, out: fitPanelWindow(spec, 800, 480, shared, linked) })),
+      WINDOWS.map(linked => ({
+        spec,
+        shared,
+        linked,
+        w: 800,
+        h: 480,
+        out: fitPanelWindow(spec, 800, 480, shared, linked),
+      })),
     ),
   ),
 };
 const scenes = new URL('../EquationCore/Tests/EquationRenderTests/Scenes/Panels/', import.meta.url);
 mkdirSync(scenes, { recursive: true });
 writeFileSync(new URL('windows.json', scenes), JSON.stringify(windows, num) + '\n');
-console.log(
-  `${layouts.length} layouts; ${windows.fit.length + windows.linked.length + windows.panel.length} windows`,
-);
+console.log(`${layouts.length} layouts; ${windows.fit.length + windows.linked.length + windows.panel.length} windows`);

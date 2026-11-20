@@ -1,4 +1,4 @@
-/** The subset of JSON Schema the app's tool definitions use (MCP and voice). */
+/** The subset of JSON Schema the app's tool definitions use (MCP). */
 export type JsonSchema =
   | {
       type: 'object';

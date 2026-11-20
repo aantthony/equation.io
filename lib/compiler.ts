@@ -10,9 +10,6 @@ import type { IntShade } from './intshade.ts';
 import type { Classified, ColorSpace, LevelSetSpec, PointSource } from './math-object.ts';
 import { FAMILY_NODES, countNodes } from './size.ts';
 import type { GeodesicSpec } from './surface-geometry.ts';
-import type { LightConeSpec } from './light-cone.ts';
-import type { TidalSpec } from './tidal.ts';
-import { metricSummary } from './metric.ts';
 
 export interface CpuGrid {
   name: string;
@@ -36,7 +33,7 @@ export type CpuPlan =
   | { type: 'pregion'; comps: [Expr, Expr] }
   /** The region a family over u ∈ [0, 1] sweeps (see MathObject). */
   | { type: 'projected2d'; relation: 'eq' | 'ineq'; constraints: Array<{ residual: Expr; strict: boolean }> }
-  | { type: 'scalar2d'; expr: Expr; autoscale?: true; rounding?: Expr; pulled?: true }
+  | { type: 'scalar2d'; expr: Expr; autoscale?: true }
   | { type: 'scalar3d'; expr: Expr }
   | { type: `${ColorSpace}2d`; channels: Expr[] }
   | { type: 'complex2d'; expr: Expr }
@@ -48,12 +45,6 @@ export type CpuPlan =
   | { type: 'label'; dim: 2 | 3; coords: Expr[]; text: string }
   | { type: 'orbit'; dim: 2 | 3; paths: Expr[][]; series: boolean; from: Expr; to: Expr }
   | ({ type: 'geodesic' } & GeodesicSpec)
-  /** Light cones of a panel's metric, drawn on the CPU as the view changes
-   *  (lib/light-cone.ts coneGlyphs). */
-  | ({ type: 'lightcone' } & LightConeSpec)
-  /** Tidal glyphs of a panel's metric, drawn on the CPU as the view changes
-   *  (lib/tidal.ts tidalGlyphs). */
-  | ({ type: 'tidal' } & TidalSpec)
   /** `pts` flat, or with `over` one vertex template run over the columns. */
   | {
       type: 'polygon';
@@ -109,9 +100,7 @@ export type CpuPlan =
       flat?: { readonly dim: 2 | 3; readonly grade: number };
       length?: number;
     }
-  | { type: 'note'; expr: Expr; variable: boolean; constant?: string; identity?: true }
-  /** A panel's metric (a ds^2 row): its readout, nothing drawn. */
-  | { type: 'metric'; text: string };
+  | { type: 'note'; expr: Expr; variable: boolean; constant?: string; identity?: true };
 
 export type GpuPlan = { params: string[]; uniforms?: Record<string, number> } & (
   | { type: 'none' }
@@ -294,8 +283,6 @@ export function compileCpu(classified: Classified): CpuPlan {
             type: 'scalar2d',
             expr: real(object.expr),
             ...(object.autoscale ? { autoscale: true as const } : {}),
-            ...(object.rounding ? { rounding: object.rounding } : {}),
-            ...(object.pulled ? { pulled: true as const } : {}),
           };
     // Like domain coloring, these expressions are rendered per pixel on the GPU.
     case 'color-field':
@@ -343,14 +330,6 @@ export function compileCpu(classified: Classified): CpuPlan {
     case 'geodesic': {
       const { kind: _, ...spec } = object;
       return { type: 'geodesic', ...spec };
-    }
-    case 'lightcone': {
-      const { kind: _, ...spec } = object;
-      return { type: 'lightcone', ...spec };
-    }
-    case 'tidal': {
-      const { kind: _, ...spec } = object;
-      return { type: 'tidal', ...spec };
     }
     case 'figure':
       return {
@@ -433,8 +412,6 @@ export function compileCpu(classified: Classified): CpuPlan {
         ...(object.blades ? { blades: object.blades } : {}),
         ...(object.flat ? { flat: object.flat } : {}),
       };
-    case 'metric':
-      return { type: 'metric', text: metricSummary(object) };
     case 'note':
       return {
         type: 'note',
@@ -694,8 +671,6 @@ export function compileGpu(classified: Classified): GpuPlan {
     case 'label':
     case 'orbit':
     case 'geodesic':
-    case 'lightcone':
-    case 'tidal':
     case 'figure':
     case 'system':
     case 'list':
@@ -704,7 +679,6 @@ export function compileGpu(classified: Classified): GpuPlan {
     case 'value':
     case 'tuple':
     case 'note':
-    case 'metric':
     case 'automaton':
     case 'lattice':
     case 'graph':
@@ -826,9 +800,6 @@ export function cpuStructureKey(plan: CpuPlan): string {
     case 'note':
       structure = exprKey(plan.expr);
       break;
-    case 'metric':
-      structure = plan.text;
-      break;
     case 'fractal2d':
       structure = [exprKey(plan.step), plan.seed, plan.maxIter];
       break;
@@ -848,23 +819,6 @@ export function cpuStructureKey(plan: CpuPlan): string {
         plan.params,
         ...[plan.surface, plan.derivatives, plan.start, plan.direction, plan.domain].map(expressions),
         plan.length && exprKey(plan.length),
-        plan.metric && [
-          plan.metric.n,
-          plan.metric.motion,
-          ...[plan.metric.components, plan.metric.derivatives, plan.metric.jacobian ?? []].map(expressions),
-        ],
-      ];
-      break;
-    case 'lightcone':
-      structure = [plan.n, ...[plan.components, plan.jacobian ?? [], plan.at ?? []].map(expressions)];
-      break;
-    case 'tidal':
-      structure = [
-        plan.n,
-        plan.time,
-        ...plan.params,
-        ...(plan.symbols ?? []),
-        ...[plan.curvature, plan.chart ?? [], plan.at ?? []].map(expressions),
       ];
       break;
     case 'polygon':

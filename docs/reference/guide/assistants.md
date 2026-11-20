@@ -18,8 +18,8 @@ summary: How an AI assistant should build, edit and share graphs.
   taken (`i` is the imaginary unit), so `i = [0..9]` is a claim about i, not
   a definition, and every later `i` stays complex. Use `k = [0..9]`.
 - The graph state lives entirely in the link, and the link is the interface.
-  The only server endpoints are /mcp (an MCP server that validates equations
-  and emits links) and /api/og (link-preview images).
+  The only server endpoint is /mcp (an MCP server that validates equations
+  and emits links).
 - If you are unsure whether a form is supported, emit the link anyway.
   Unsupported input fails loudly and visibly (an inline error on the offending
   row), never silently — so a graph either renders correctly or tells the user

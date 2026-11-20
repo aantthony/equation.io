@@ -1,8 +1,8 @@
-/** Production sandbox smoke test. Start wrangler on 5196 after web:build. */
+/** Production sandbox smoke test, run by scripts/prod-test.ts (wrangler on 5198). */
 import assert from 'node:assert/strict';
 import { chromium } from 'playwright';
 
-const origin = process.env.MCP_TEST_ORIGIN ?? 'http://localhost:5196';
+const origin = process.env.MCP_TEST_ORIGIN ?? 'http://localhost:5198';
 async function rpc(method: string, params: object = {}) {
   const res = await fetch(`${origin}/mcp`, {
     method: 'POST',
@@ -179,13 +179,12 @@ try {
     await frame.evaluate(() => (window as any).earlyRow === document.querySelector('.eq-line')),
     'Matching result does not rebuild the graph',
   );
-  assert.ok(await frame.locator('#panel').isHidden(), 'Embedded editor starts tucked away');
-  assert.ok(await frame.locator('#panel-chip').isVisible(), 'Equation chip remains available');
-  const chipBox = await frame.locator('#panel-chip').boundingBox();
-  assert.ok(chipBox && chipBox.x >= 28 && chipBox.y >= 30, 'Chip respects host safe areas');
-  await frame.locator('#panel-chip').click();
+  assert.ok(await frame.locator('#panel').isVisible(), 'Embedded editor starts open');
+  assert.ok(await frame.locator('#panel-chip').isHidden(), 'Chip stays hidden while the editor is open');
+  const panelBox = await frame.locator('#panel').boundingBox();
+  assert.ok(panelBox && panelBox.x >= 28 && panelBox.y >= 30, 'Panel respects host safe areas');
   await frame.locator('.eq-slider input[type=range]').waitFor();
-  assert.ok(await frame.locator('#panel-chip').isHidden(), 'Opening the editor hides its chip');
+  assert.equal(await frame.locator('#equations').evaluate(el => getComputedStyle(el).fontSize), '13px');
   assert.equal(await frame.locator('#shot').count(), 0, 'screenshot control is site-only');
   assert.equal(await frame.locator('#rec').count(), 0, 'record control is site-only');
   assert.equal(await frame.locator('#try-another').count(), 0, 'random is site-only');
@@ -251,11 +250,10 @@ try {
       (m: any) => m.method === 'ui/update-model-context' && m.params.structuredContent.equations[0].includes('a = 2'),
     ),
   );
-  await frame.locator('#app-open').click();
-  await page.waitForFunction(() => (window as any).messages.some((m: any) => m.method === 'ui/open-link'));
+  assert.ok(await frame.locator('#app-open').isHidden(), 'The share link is not shown in chat');
   await frame.locator('#app-expand').click();
-  await frame.waitForFunction(() => document.getElementById('app-expand')?.textContent === 'Collapse');
-  assert.equal(await frame.locator('#app-expand').textContent(), 'Collapse');
+  await frame.waitForFunction(() => document.getElementById('app-expand')?.getAttribute('aria-label') === 'Collapse');
+  assert.equal(await frame.locator('#app-expand').getAttribute('aria-label'), 'Collapse');
   await page.evaluate(() => (window as any).sendContext({ availableDisplayModes: ['fullscreen'] }));
   await frame.locator('#app-expand').waitFor({ state: 'hidden' });
   const beforeRequests = await page.evaluate(
@@ -272,7 +270,7 @@ try {
   await page.evaluate(() => (window as any).sendContext({ availableDisplayModes: ['inline'] }));
   await frame.locator('#app-expand').waitFor({ state: 'visible' });
   await frame.locator('body').press('Escape');
-  await frame.waitForFunction(() => document.getElementById('app-expand')?.textContent === 'Expand');
+  await frame.waitForFunction(() => document.getElementById('app-expand')?.getAttribute('aria-label') === 'Expand');
   assert.ok(await frame.locator('#app-expand').isHidden(), 'Cannot expand when only inline is allowed');
   await page.evaluate(() => {
     (window as any).forcedMode = 'inline';
@@ -284,7 +282,7 @@ try {
   await frame.locator('#app-expand').click();
   await frame.waitForFunction(() => !(document.getElementById('app-expand') as HTMLButtonElement).disabled);
   assert.equal(
-    await frame.locator('#app-expand').textContent(),
+    await frame.locator('#app-expand').getAttribute('aria-label'),
     'Expand',
     'Use the host-returned mode if fullscreen is declined',
   );

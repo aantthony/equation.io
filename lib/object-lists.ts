@@ -15,7 +15,6 @@ import { GEOM_STATEMENTS, lowerGeom } from './geom.ts';
 import { type Axis, axesOf, isDataScatter, lowerLists, SCALAR_REDUCTIONS, unionAxes, withAxes } from './list.ts';
 
 export const FAMILY_MAX = 32;
-export const FAMILY_3D_MAX = 8;
 /** Point figures are a handful of numbers each, evaluated on the CPU — not a
  *  shader draw — so a family of them can be a whole lattice of arrows. */
 export const FIGURE_FAMILY_MAX = 1024;

@@ -86,8 +86,6 @@ summary: view(…) and camera(…) rows: the window, log axes and the 3D camera.
   names the exact picture on screen. Without a viewport row, interaction
   stays ephemeral and the default framing applies.
 - Bounds and angles may use `pi` and defined constants, evaluated at load.
-- The /g/ preview card honors these
-  rows, so they show the framing you chose.
 - A trailing `locked` pins a window or camera (`view(x = -1..1, y = -1..1,
   locked)`, `camera(0.4, 0.3, 8, locked)`): dragging and zooming leave it
   where the row puts it.

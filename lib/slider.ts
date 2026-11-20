@@ -121,11 +121,13 @@ export function sliderBounds(
   form: SliderForm,
   env: Record<string, number>,
   userFns: ReadonlySet<string> = new Set(),
+  /** The document's shadowed names: a bound may read a redefined `pi`. */
+  valueNames: ReadonlySet<string> = new Set(),
 ): [number, number] | null {
   if (!form.bounds) return null;
   try {
-    const lo = evaluate(parseExpr(form.bounds.lo, userFns), env);
-    const hi = evaluate(parseExpr(form.bounds.hi, userFns), env);
+    const lo = evaluate(parseExpr(form.bounds.lo, userFns, undefined, valueNames), env);
+    const hi = evaluate(parseExpr(form.bounds.hi, userFns, undefined, valueNames), env);
     return Number.isFinite(lo) && Number.isFinite(hi) && lo < hi ? [lo, hi] : null;
   } catch {
     return null;

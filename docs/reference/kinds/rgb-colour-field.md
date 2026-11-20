@@ -31,4 +31,3 @@ point (x, y).
   field can fade into the graph paper: `rgb(1, 0, 0, exp(-x^2-y^2))`.
   RGB, HSL and OKLCH rows share the same layer and draw in row order;
   curves and regions draw over them.
-  Static share-card previews use the site card; the live graph renders the field.

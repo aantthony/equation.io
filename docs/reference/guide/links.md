@@ -19,11 +19,10 @@ Format:
   equation in half.
 - Every equation gets its own row and color. Definitions (constants,
   functions, coordinate fields) are rows too — order does not matter.
-- `/g/` links unfurl with a rendered preview image (og:image) in chat apps
-  and social cards; the image itself is served at
-  `https://equation.io/api/og/<same payload>`. An equivalent fragment form,
-  `https://equation.io/#<same payload>`, also opens the graph and keeps the
-  equations out of server logs, but gets no preview card.
+- `/g/` links unfurl in chat apps and social cards with the equations as
+  the title. An equivalent fragment form, `https://equation.io/#<same payload>`,
+  also opens the graph and keeps the equations out of server logs, but its
+  card is the generic site card.
 
 Examples (paste-ready):
 

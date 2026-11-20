@@ -1,7 +1,6 @@
 import { evaluateFrame } from './env.ts';
 import { describe, expect, it } from 'vitest';
 import { analyze } from '../worker/graph.ts';
-import { canRenderOg, renderRaster } from '../worker/og.ts';
 import { evaluate, parseExpr } from './expr.ts';
 
 import { fieldEvaluator, FLOW_GLYPH_N, FLOW_SEEDS, FLOW_STEPS, streamline, traceField } from './flow.ts';
@@ -306,12 +305,14 @@ describe('solver extensions and comparison notes', () => {
   it('explains a slider named after a constant or d', () => {
     // Still a claim about e, but one that says why no slider appeared.
     const [e, pi] = runRows(['e = 0.6', 'pi = pi']).rows;
-    expect(e.info).toBe('Never true (2.71828 ≠ 0.6) — e is a constant; name a slider something else');
+    expect(e.info).toBe(
+      'Never true (2.71828 ≠ 0.6) — e is a constant; name a slider something else, like k (e := … replaces e across the whole graph)',
+    );
     expect(pi.info).toBe('Always true (3.14159 = 3.14159)');
     // `i` is the imaginary unit: an index named i is a claim about it, as a
     // number, as a family of claims (once, not per member), or as a family
     // too large to draw.
-    const hint = 'i is the imaginary unit; name it something else, like k';
+    const hint = 'i is the imaginary unit; name it something else, like k (i := … replaces it across the whole graph)';
     expect(runRows(['i = 2']).rows[0].info).toBe(`Never true (0+1i ≠ 2) — ${hint}`);
     expect(runRows(['i = [0..1]']).rows[0].info).toBe(`[Never true (0+1i ≠ 0); Never true (0+1i ≠ 1)] — ${hint}`);
     expect(analyze(['i = [0..239]']).rows[0].error).toBe(`An object family needs 1–32 members (got 240) — ${hint}.`);
@@ -323,20 +324,5 @@ describe('solver extensions and comparison notes', () => {
     // Derivatives and names merely starting with d are unaffected.
     const ok = runRows(['dx = 1', 'y = d/dx (x^2)', 'y = d^2/dx^2 (x^3)']).rows;
     expect(ok.map(r => r.error)).toEqual([undefined, undefined, undefined]);
-  });
-  it('has real preview paths or explicit fallback for new objects', () => {
-    for (const rows of [
-      ['A=(1,2,3)', 'vector(A)'],
-      ["(x',y',z')=(-y,x,0)"],
-      ['y=[1,2,3]x'],
-      ['(x^2+y^2+z^2,z)=(9,1)'],
-    ]) {
-      expect(canRenderOg(rows), rows.join()).toBe(true);
-      const r = renderRaster(rows, 160, 120);
-      expect(r.px.some(v => v < 100)).toBe(true);
-    }
-    const one = renderRaster(['y=x'], 160, 120),
-      family = renderRaster(['y=[1,2,3]x'], 160, 120);
-    expect(family.px).not.toEqual(one.px);
   });
 });

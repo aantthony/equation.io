@@ -16,9 +16,54 @@ import { describeRow, is3D, sliderOf } from '../../lib/assistant-tools.ts';
 import { LIGHT_PALETTE, assignColors, takesColor } from '../../lib/palette.ts';
 import { writeSlider } from '../../lib/slider.ts';
 import { noteColor } from '../../lib/statements.ts';
-import { searchSyntax, syntaxEntries } from '../../lib/syntax-search.ts';
-import type { GraphState, RowStatus, MoveViewTarget } from '../../web/voice.ts';
-import { readFileSync } from 'node:fs';
+import { llmsTxt } from '../../lib/reference.ts';
+import { readReference } from '../../scripts/reference.ts';
+import { searchSyntax, syntaxEntries } from './syntax-search.ts';
+
+/** What get_graph and set_graph say about one row. */
+export interface RowStatus {
+  index: number;
+  text: string;
+  status: 'ok' | 'error';
+  error?: string;
+  /** The public kind, e.g. "implicit2d", "definition (const)". */
+  kind?: string;
+  /** What the row IS, in words: "defines r: a scalar constant …", "2D curve …". */
+  meaning?: string;
+  /** Drawing color as hex, for rows that draw something. */
+  color?: string;
+  /** The readout under the row (`= 4`, a probability) or a slider's value. */
+  value?: string;
+  animated?: boolean;
+  /** Axis intercepts within the visible window (2D curves only). */
+  points?: string[];
+  /** Valid, but probably not what was meant (a definition nothing uses). */
+  warning?: string;
+  /** For an error: what probably went wrong, when the message alone misleads. */
+  hint?: string;
+}
+
+/** get_graph's answer: the rows and the view. */
+export interface GraphState {
+  mode: '2d' | '3d';
+  /** The visible 2D window; absent in 3D. */
+  window?: { x: [number, number]; y: [number, number] };
+  /** The 3D orbit camera (radians; spin in radians per second); absent in 2D. */
+  camera?: { theta: number; phi: number; radius: number; target: [number, number, number]; spin: number };
+  rows: RowStatus[];
+}
+
+/** move_view's target: a 2D window, or any part of the 3D orbit camera. */
+export interface MoveViewTarget {
+  x?: [number, number];
+  y?: [number, number];
+  theta?: number;
+  phi?: number;
+  radius?: number;
+  target?: [number, number, number];
+  /** 3D: keep orbiting about the vertical axis afterwards, radians per second. */
+  spin?: number;
+}
 
 /** The window a fresh 2D graph opens on in the app's window (12 units on the short side). */
 export const START_WINDOW = { x: [-8, 8] as [number, number], y: [-6, 6] as [number, number] };
@@ -41,7 +86,7 @@ let reference: ReturnType<typeof syntaxEntries> | undefined;
 
 /** read_syntax as the app answered it until list_kinds and the rest replaced it: 4 entries, 2,500 characters. */
 export function readSyntax(query: string): string {
-  reference ??= syntaxEntries(readFileSync(new URL('../../web/public/llms.txt', import.meta.url), 'utf8'));
+  reference ??= syntaxEntries(llmsTxt(readReference()));
   return searchSyntax(reference, query, 4, 2500);
 }
 

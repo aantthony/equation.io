@@ -8,8 +8,7 @@
  *   node --experimental-transform-types --no-warnings apple/corpus/reports.ts
  */
 import { writeFileSync } from 'node:fs';
-import { checkRows } from '../../lib/assistant-tools.ts';
-import { KIND_MEANINGS } from '../../lib/row-kind.ts';
+import { KIND_MEANINGS, checkRows } from '../../lib/assistant-tools.ts';
 import { splitStatements } from '../../lib/statements.ts';
 import { EXAMPLES } from '../../web/examples.ts';
 
@@ -66,9 +65,7 @@ const CASES: string[] = [
 ];
 
 const docs = [
-  ...EXAMPLES.flatMap(([category, items]) =>
-    items.map(([label, text]) => ({ name: `${category} / ${label}`, text })),
-  ),
+  ...EXAMPLES.flatMap(([category, items]) => items.map(([label, text]) => ({ name: `${category} / ${label}`, text }))),
   ...CASES.map((text, k) => ({ name: `case ${k + 1}`, text })),
 ];
 const recorded = docs.map(({ name, text }) => {

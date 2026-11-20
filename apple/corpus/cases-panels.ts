@@ -20,7 +20,12 @@ export function recordGridFields(analysis: Analysis): unknown[] {
   });
   return analysis.gridFields.map(spec => {
     try {
-      return { name: spec.name, panel: panelOf.get(spec.name) ?? 0, cpu: compileGridCpu(spec), gpu: compileGridGpu(spec) };
+      return {
+        name: spec.name,
+        panel: panelOf.get(spec.name) ?? 0,
+        cpu: compileGridCpu(spec),
+        gpu: compileGridGpu(spec),
+      };
     } catch (err) {
       return { name: spec.name, error: (err as Error).message };
     }

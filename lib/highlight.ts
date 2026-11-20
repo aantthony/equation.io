@@ -7,7 +7,7 @@
  */
 import { flatName, flatOfNode } from './pga.ts';
 import { isViewportText } from './analysis.ts';
-import { type Binding, type Env, lookupValue } from './env.ts';
+import { type Binding, type Env, boundIn, lookupValue } from './env.ts';
 import { CONSTANTS, GLYPH_CHARS, NAME_SRC, SUPERSCRIPT_CHARS, canonicalName, freeVars } from './expr.ts';
 import { familyOf } from './dist-families.ts';
 import { isComplexValued } from './complex.ts';
@@ -60,7 +60,7 @@ function rowLocals(text: string): Set<string> {
 const RELATION_RE = /<=|>=|:=|[=<>≤≥≠~∈:]/y;
 
 function nameClass(name: string, env: Env, called: boolean): SpanClass | undefined {
-  const binding = lookupValue(env, name);
+  const binding = lookupValue(env, boundIn(env, name));
   if (binding) return binding.tag === 'fn' ? 'fn' : 'name';
   const dot = name.indexOf('.');
   if (dot > 0 && env.names.has(name.slice(0, dot))) return 'name';
@@ -238,7 +238,9 @@ const BUILTIN_VALUES: Record<string, [string, string]> = {
 
 /** What a name means where the document stands: its type, and for a
  *  document's own names, which definition to jump to. */
-export function describeName(name: string, env: Env, called = false): NameInfo | null {
+export function describeName(written: string, env: Env, called = false): NameInfo | null {
+  // A redefined built-in (`e := 0.6`) is the document's, under its alias.
+  const name = boundIn(env, written);
   const entry = env.names.get(name);
   if (entry?.kind === 'component') {
     const binding = lookupValue(env, name)!;
@@ -246,7 +248,7 @@ export function describeName(name: string, env: Env, called = false): NameInfo |
     const role = binding.tag === 'scalar' && binding.role === 'state' ? 'state' : 'number';
     return { signature: name, type: role, description: `Component ${axis} of ${entry.owner}`, defined: entry.owner };
   }
-  if (entry?.kind === 'binding') return { ...bindingInfo(name, entry.binding), defined: name };
+  if (entry?.kind === 'binding') return { ...bindingInfo(written, entry.binding), defined: name };
   const dot = name.indexOf('.');
   if (dot > 0) {
     const head = name.slice(0, dot);

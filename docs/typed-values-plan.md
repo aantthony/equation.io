@@ -529,9 +529,8 @@ architecture that enables them.
 ## References
 
 - [Mathematical objects and invariants](math-objects.md)
-- [Point arguments](point-arguments-plan.md)
+- Point arguments: `[comp]` in [expr.ts](../lib/expr.ts), covered by [point-arguments.test.ts](../lib/point-arguments.test.ts)
 - [Lists and tables](lists-tables-plan.md)
-- [Object completion criteria](objects-finish-plan.md)
 - [Definitions and binding](../lib/defs.ts), [state integration](../lib/state.ts)
 - [Expression syntax](../lib/expr.ts), [geometry lowering](../lib/geom.ts)
 - [Classification](../lib/plot.ts), [complex typing](../lib/complex.ts)

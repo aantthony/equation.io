@@ -6,8 +6,7 @@ import { analyzeRows } from '../../lib/analysis.ts';
 import type { CpuPlan } from '../../lib/compiler.ts';
 import { complexParts } from '../../lib/complex-parts.ts';
 import { type Expr, evaluate } from '../../lib/expr.ts';
-import type { RowStatus } from '../../web/voice.ts';
-import type { EvalGraph } from './graph.ts';
+import type { EvalGraph, RowStatus } from './graph.ts';
 
 export interface ToolCall {
   tool: string;

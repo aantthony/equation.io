@@ -1,26 +1,17 @@
-import { GRAPH_CSP, LANDING_CSP } from '../lib/csp.ts';
-import { landingFromPath, graphUrl, type Landing } from '../lib/landings.ts';
-import { decodePayload, encodePayload } from '../lib/link.ts';
+import { GRAPH_CSP } from '../lib/csp.ts';
+import { decodePayload } from '../lib/link.ts';
 import { handleDiscovery } from './discovery.ts';
 import { handleMcp } from './mcp.ts';
-import { OG_HEIGHT, OG_WIDTH, canRenderOg, renderOgPng } from './og.ts';
-import { handleVoiceConnect } from './voice.ts';
 
-/** Static card used when a graph is not one the preview renderer can draw. */
-const FALLBACK_OG = '/shots/hero.png';
+/** The site's static card: share links unfurl with it. */
+const SITE_OG = '/shots/hero.png';
 
 const escapeAttr = (s: string) =>
   s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 
 /**
- * Title and og:/twitter: pairs for a share link.
- *
- * The page never analyzes its graph: a heavy graph (thousands of list
- * elements) can take a second or more of CPU to analyze, past the Worker's
- * limit, and the page must load regardless. The preview image is always
- * advertised; /api/og/ decides whether it can draw the graph and otherwise
- * redirects to the static site card — a truthful generic card beats a
- * picture of an empty grid, which reads as a broken graph.
+ * Title and og:/twitter: pairs for a share link: the graph's equations as
+ * text, over the static site card.
  *
  * Split out from handleShare so this is testable without the Workers
  * runtime (HTMLRewriter is a runtime global).
@@ -36,51 +27,16 @@ export function shareMeta(equations: string[], payload: string, origin: string):
     ['og:description', description],
     ['og:type', 'website'],
     ['og:url', `${origin}/g/${payload}`],
-    ['og:image', `${origin}/api/og/${payload}`],
-    ['og:image:width', String(OG_WIDTH)],
-    ['og:image:height', String(OG_HEIGHT)],
+    ['og:image', `${origin}${SITE_OG}`],
     ['twitter:card', 'summary_large_image'],
-    ['twitter:image', `${origin}/api/og/${payload}`],
+    ['twitter:image', `${origin}${SITE_OG}`],
   ];
   return { title, meta };
 }
 
 /**
- * Title and og:/twitter: pairs for an intent landing page.
- *
- * `preview` pages advertise the CPU-rendered /api/og/ of the hero graph.
- * `shot` pages use a stable PNG in /shots/ — the preview renderer cannot
- * draw those heroes (complex potentials, domain coloring), and a generic
- * site card would be a lie.
- */
-export function landingMeta(
-  page: Landing,
-  origin: string,
-): { title: string; description: string; canonical: string; meta: string[][] } {
-  const title = `${page.title} — Equation.io`;
-  const description = page.lead;
-  const canonical = `${origin}${page.path}`;
-  const image =
-    page.og === 'preview' ? `${origin}/api/og/${encodePayload(page.heroEqs)}` : `${origin}/shots/${page.slug}.png`;
-  const width = page.og === 'preview' ? String(OG_WIDTH) : '900';
-  const height = page.og === 'preview' ? String(OG_HEIGHT) : '600';
-  const meta: string[][] = [
-    ['og:title', title],
-    ['og:description', description],
-    ['og:type', 'website'],
-    ['og:url', canonical],
-    ['og:image', image],
-    ['og:image:width', width],
-    ['og:image:height', height],
-    ['twitter:card', 'summary_large_image'],
-    ['twitter:image', image],
-  ];
-  return { title, description, canonical, meta };
-}
-
-/**
  * /g/<payload>: the share form of a graph link. Serves the app shell with
- * og:/twitter: meta tags injected so the link unfurls with a rendered preview
+ * og:/twitter: meta tags injected so the link unfurls with the graph's title
  * (crawlers never see URL fragments, which is why this form exists). The web
  * app boots from the path and keeps the address bar on the canonical /g/ form.
  */
@@ -101,9 +57,8 @@ async function handleShare(request: Request, url: URL, env: Env): Promise<Respon
     .join('\n  ');
   return (
     new HTMLRewriter()
-      // The shell carries the site's own og:/twitter: tags (the homepage card).
-      // Crawlers take the first og:image, so leaving them in would unfurl every
-      // graph as the site card; drop them and append the graph's.
+      // The shell carries the homepage's own og:/twitter: tags; crawlers take
+      // the first of each, so drop them and append the graph's.
       .on('meta[property^="og:"], meta[name^="twitter:"]', {
         element(el) {
           el.remove();
@@ -123,121 +78,9 @@ async function handleShare(request: Request, url: URL, env: Env): Promise<Respon
   );
 }
 
-/**
- * /implicit/, /slope-field/, /complex/, … — intent pages. The shell is the
- * shared /landing/ template; title, description, canonical, and og: tags
- * are injected here so crawlers see them without running JS.
- */
-async function handleLanding(request: Request, url: URL, env: Env, page: Landing): Promise<Response> {
-  if (url.pathname !== page.path) {
-    return Response.redirect(new URL(page.path, url).toString(), 301);
-  }
-  const shell = await env.ASSETS.fetch(new Request(new URL('/landing/', url), request));
-  if (!shell.headers.get('content-type')?.includes('text/html')) return shell;
-
-  const { title, description, canonical, meta } = landingMeta(page, url.origin);
-  const share = `${url.origin}${graphUrl(page.heroEqs)}`;
-  const extra = meta
-    .filter(([k]) => k === 'twitter:card' || k === 'twitter:image' || k === 'og:image:width' || k === 'og:image:height')
-    .map(([p, c]) => `<meta ${p.startsWith('twitter:') ? 'name' : 'property'}="${p}" content="${escapeAttr(c)}">`)
-    .join('\n  ');
-  return withCsp(
-    new HTMLRewriter()
-      .on('head', {
-        element(el) {
-          el.append(`${extra}\n  `, { html: true });
-        },
-      })
-      .on('title', {
-        element(el) {
-          el.setInnerContent(title);
-        },
-      })
-      .on('meta[name="description"]', {
-        element(el) {
-          el.setAttribute('content', description);
-        },
-      })
-      .on('link[rel="canonical"]', {
-        element(el) {
-          el.setAttribute('href', canonical);
-        },
-      })
-      .on('meta[property="og:title"]', {
-        element(el) {
-          el.setAttribute('content', title);
-        },
-      })
-      .on('meta[property="og:description"]', {
-        element(el) {
-          el.setAttribute('content', description);
-        },
-      })
-      .on('meta[property="og:url"]', {
-        element(el) {
-          el.setAttribute('content', canonical);
-        },
-      })
-      .on('meta[property="og:image"]', {
-        element(el) {
-          const image = meta.find(([k]) => k === 'og:image')![1];
-          el.setAttribute('content', image);
-        },
-      })
-      .on('h1#h1', {
-        element(el) {
-          el.setInnerContent(page.h1);
-        },
-      })
-      .on('p#lead', {
-        element(el) {
-          el.setInnerContent(page.lead);
-        },
-      })
-      .on('noscript', {
-        element(el) {
-          el.prepend(`<p>${escapeAttr(page.lead)}</p><p><a href="${escapeAttr(share)}">${escapeAttr(share)}</a></p>`, {
-            html: true,
-          });
-        },
-      })
-      .transform(shell),
-    LANDING_CSP,
-  );
-}
-
-async function handleOgImage(url: URL): Promise<Response> {
-  const payload = url.pathname.slice('/api/og/'.length);
-  let equations: string[] = [];
-  try {
-    equations = decodePayload(payload);
-  } catch {
-    return Response.json({ error: 'bad_payload' }, { status: 400 });
-  }
-  // handleShare advertises this URL for every graph without analyzing it, so
-  // this is where an undrawable graph is sent to the static site image rather
-  // than rendered as an empty grid.
-  if (!canRenderOg(equations)) {
-    return Response.redirect(new URL(FALLBACK_OG, url).toString(), 302);
-  }
-  const png = await renderOgPng(equations);
-  return new Response(png as unknown as BodyInit, {
-    headers: {
-      'Content-Type': 'image/png',
-      'Cache-Control': 'public, max-age=86400',
-    },
-  });
-}
-
-async function handleApi(request: Request, url: URL, env: Env): Promise<Response> {
+function handleApi(url: URL): Response {
   if (url.pathname === '/api/health') {
     return Response.json({ ok: true });
-  }
-  if (url.pathname === '/api/voice/connect') {
-    return handleVoiceConnect(request, env);
-  }
-  if (url.pathname.startsWith('/api/og/')) {
-    return handleOgImage(url);
   }
   return Response.json({ error: 'not_found' }, { status: 404 });
 }
@@ -278,13 +121,11 @@ export default {
       return handleMcp(request, url, env);
     }
     if (url.pathname === '/api' || url.pathname.startsWith('/api/')) {
-      return handleApi(request, url, env);
+      return handleApi(url);
     }
     if (url.pathname.startsWith('/g/')) {
       return handleShare(request, url, env);
     }
-    const landing = landingFromPath(url.pathname);
-    if (landing) return handleLanding(request, url, env, landing);
     return withCharset(await env.ASSETS.fetch(request));
   },
 } satisfies ExportedHandler<Env>;

@@ -45,5 +45,3 @@ and y, a slope field `y' = f(x, y)`, or a system `(x', y') = (…)`.
   through the coordinate Jacobian; singular chart locations are undefined.
   In 2D, click to trace trajectories just as for Cartesian vector fields. A lone
   prime on a field is invalid; an otherwise unbound name still defines a state.
-  Static previews draw direction arrows for vector fields and points/curves
-  for coordinate and complex-root systems.

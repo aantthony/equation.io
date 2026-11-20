@@ -74,9 +74,9 @@ try {
   await page.screenshot({ path: '/private/tmp/equation-objects-geometry.png' });
   assert.deepEqual(errors, []);
   console.log('PASS 3D points, triangle and arrow');
-  // A point list in space is one batched draw of all its dots.
+  // Every dot in space is one batched draw: the 8 of the cube's corners and the 2 vectors.
   await load(['([0,1],[0,1],[0,1])', '[0,1] e_x + 2 e_z']);
-  await page.waitForFunction(() => (window as any).objectTest.dots === 8);
+  await page.waitForFunction(() => (window as any).objectTest.dots === 10);
   await page.screenshot({ path: '/private/tmp/equation-objects-point-list.png' });
   assert.deepEqual(errors, []);
   console.log('PASS 3D point lists and unit vectors');

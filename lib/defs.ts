@@ -1,7 +1,7 @@
 import { Env, type Components, type ValueDefinitions, lowerValueRef } from './env.ts';
 import { MAP, childrenOf, LOOP_LIMIT, LOOP_LIMIT_MAX, RECUR, isRecur, loopLeaves } from './expr.ts';
 import { mapChildren, notACondition, structuralDiagnostic, legacyCallArgs } from './expr.ts';
-import { exprKey, INTERVAL, type ProductGlyph } from './expr.ts';
+import { INTERVAL } from './expr.ts';
 /**
  * User definitions and derivative syntax.
  *
@@ -16,19 +16,19 @@ import { exprKey, INTERVAL, type ProductGlyph } from './expr.ts';
  * - `f(x) = x^3 - a x` defines a function; calls are inlined symbolically.
  * - `d/dx (…)` (also `d^2/dx^2`, any single-letter variable) differentiates
  *   symbolically at resolve time via diff().
- * - `grad(f)`, `div(F)`, `curl(F)` and `laplacian(f)` (also ∇f, ∇·F, ∇×F,
- *   ∇²f) expand the same way: grad to the tuple (∂f/∂x, ∂f/∂y), so it plots
- *   as a vector field, and the rest to what they are by definition. They
- *   differentiate through named fields and vectors (see throughFields).
+ * - `grad(f)`, `div(F)`, `curl(F)`, `laplacian(f)`, `jacobian` and `hessian`
+ *   (also ∇f, ∇·F, ∇×F, ∇²f) expand in lib/vector-calculus.ts, through named
+ *   fields (see throughFields).
+ * - Curve operators (`curvature`, `torsion`, `osculating`, `frame`) expand in
+ *   lib/curves.ts. Surface operators (`gaussian`, `meancurvature`) expand in
+ *   lib/surface-geometry.ts.
  * - `sum(n=1..N, …)` / `prod(…)` (also Σ/Π, and `sum[n=1..N] …` binding the
- *   trailing product like d/dx) expand symbolically at resolve time, so the
- *   bounds must be numbers or already-known constants. A bound that uses a
- *   sequence index (`a_n = Σ(s=1..n, s)`) is left as a sum and evaluated
- *   per term instead.
- * - `int(f dx)` / `int[a..b] f dx` (also ∫) integrate at resolve time:
- *   symbolically when integrate.ts finds a verified antiderivative, and
- *   otherwise by expanding a fixed Gauss–Legendre sum the same way Σ
- *   expands — so every downstream consumer still sees ordinary expressions.
+ *   trailing product like d/dx) expand in lib/sums.ts. The bounds must be
+ *   numbers or already-known constants. A bound that uses a sequence index
+ *   (`a_n = Σ(s=1..n, s)`) is left as a sum and evaluated per term instead.
+ * - `int(f dx)` / `int[a..b] f dx` (also ∫) expand in lib/integrate.ts: a
+ *   verified antiderivative when one exists, otherwise a fixed Gauss–Legendre
+ *   sum, so every downstream consumer still sees ordinary expressions.
  */
 import { type SeqScan, sequenceResolver } from './seq.ts';
 import { lowerObjects } from './object-lists.ts';
@@ -40,10 +40,13 @@ import {
   DRAW_OP_SRC,
   NAME_SRC,
   SHADOWABLE_FNS,
-  SUM_MAX_TERMS,
   type Expr,
   builtinFn,
+  REDEFINABLE,
   canonicalName,
+  explicitAssignment,
+  reboundName,
+  writtenName,
   compDims,
   evaluate,
   markOrigins,
@@ -55,9 +58,10 @@ import {
   substVars,
 } from './expr.ts';
 import { HASH_TOKEN_LEN, shortHash } from './hash.ts';
-import { hasInterval, hiddenInterval, intervalsIn, replaceIntervals } from './interval.ts';
+import { hasInterval, hiddenInterval } from './interval.ts';
 import { isReductionCall, reduceOverSet } from './measure.ts';
-import { QUAD_TERMS, antiderivative, improperSum, quadratureSum, verifyDefinite } from './integrate.ts';
+import { expandInt, integral, stripDx, usesIntegral, type StripDx } from './integrate.ts';
+import { expandClosedSums, expandSum } from './sums.ts';
 import type { IntShade, ResolvedRow } from './intshade.ts';
 import {
   lowerGeom,
@@ -94,8 +98,11 @@ import { flatName, flatOfNode, isPoint, pointCoords, withHoisting } from './pga.
 import { isComplexValued } from './complex.ts';
 import { SPLIT_NODE_BUDGET, realValue } from './complex-parts.ts';
 import { countNodes } from './size.ts';
-import { curvatureOf, frameOf, osculatingOf, torsionOf } from './curves.ts';
-import { type Params, gaussianOf, meanCurvatureOf } from './surface-geometry.ts';
+import { CURVE_OPS, curveGeometry } from './curves.ts';
+import { SURFACE_OPS, surfaceGeometry, surfaceOperand } from './surface-geometry.ts';
+import { VECTOR_OPS, splitNablaChain, vectorCalculus } from './vector-calculus.ts';
+
+export { surfaceOperand, usesIntegral };
 import { type RegressionRow, type FitResult, fitRegression } from './regression.ts';
 
 /** The axis variables: a definition reaching one is a coordinate field. */
@@ -300,7 +307,6 @@ function positions(table: Table): Float64Array {
 }
 
 /** Expression elements of a numeric column, built once per parsed column. */
-const colExprs = new WeakMap<Column, Expr[]>();
 /** Character counts are stable for a parsed column, including filtered copies. */
 const colLengths = new WeakMap<Column, Float64Array>();
 
@@ -317,15 +323,6 @@ function textLengths(col: Column): Float64Array {
     colLengths.set(col, values);
   }
   return values;
-}
-
-export function columnExprs(col: Column): Expr[] {
-  let hit = colExprs.get(col);
-  if (!hit) {
-    hit = [...col.nums!].map((value): Expr => ({ kind: 'num', value }));
-    colExprs.set(col, hit);
-  }
-  return hit;
 }
 
 /**
@@ -493,17 +490,21 @@ export const isListName = (names: ReadonlySet<string>, n: string): boolean => {
 };
 
 /**
- * Of the names a document binds as values, the ones a late-addition builtin
- * would otherwise claim — what parseExpr needs to keep `total = 3` followed by
- * `total(x + 1)` the product it was before `total` became a reduction.
+ * Of the names a document binds as values, the ones the language would
+ * otherwise claim — what parseExpr needs to keep `total = 3` followed by
+ * `total(x + 1)` the product it was before `total` became a reduction, and to
+ * read `e` after `e := 0.6` (or in the body of `f(e) := …`) as that e.
  *
  * Folded through `builtinFn`, because that is how a call is read: `Total = 3`
  * is a legal definition and `Total(x + 1)` folds to the `total` builtin, so
  * only the folded name says which builtin this document has taken.
  */
-export const shadowedFnNames = (names: Iterable<string>): Set<string> => {
+export const shadowedNames = (names: Iterable<string>): Set<string> => {
   const out = new Set<string>();
   for (const n of names) {
+    // A redefined built-in (`e := 0.6`, or a parameter named e) is bound by
+    // its alias; every row of its scope reads the written name as that alias.
+    if (n !== writtenName(n)) out.add(writtenName(n));
     const b = builtinFn(n);
     if (b && SHADOWABLE_FNS.has(b)) out.add(b);
   }
@@ -772,6 +773,7 @@ export const formatTableRow = (name: string, file: string, hash: string): string
  * knows that quotes are not arithmetic.
  */
 export function badTableRow(text: string): string | null {
+  text = asAssignment(text);
   const m = OPEN_HEAD_RE.exec(text);
   if (!m) return null;
   if (!nameable(m[1])) {
@@ -798,6 +800,20 @@ export function badTableRow(text: string): string | null {
  *  ones old graphs may define themselves), not reserved, not a uniform. */
 export const nameable = (n: string): boolean =>
   (!FUNCTIONS.has(n) || SHADOWABLE_FNS.has(n)) && !RESERVED.has(n) && !n.startsWith('u_');
+
+/** A row written `name := …` (or `f(x) := …`, `a' := …`): explicitly a definition. */
+export const isExplicitDefinition = (text: string): boolean => explicitAssignment(text) !== null;
+
+/** The row with its `:=` read as `=`, for the scanners that match a row's
+ *  shape (definitions, data files, random variables) — the same row either way. */
+export function asAssignment(text: string): string {
+  const at = explicitAssignment(text);
+  return at ? `${text.slice(0, at[0])}=${text.slice(at[1])}` : text;
+}
+
+/** A written name as a definition binds it: a redefined built-in (or
+ *  parameter) by its alias, so it reads as what parses there (REDEFINABLE). */
+const bindable = (name: string): string => (REDEFINABLE.has(name) ? reboundName(name) : name);
 
 /**
  * A definable name for a dropped file, starting from the one its file name
@@ -828,22 +844,28 @@ const BRACED_TERM_RE = new RegExp(
 );
 
 export function scanDefinition(text: string): Definition | null {
+  // `a := …` says outright what `a = …` leaves to the name: this is a
+  // definition, so it may claim e, i, w, pi or t too.
+  const explicit = isExplicitDefinition(text);
+  text = asAssignment(text);
+  const claimable = (n: string): boolean => nameable(n) || (explicit && REDEFINABLE.has(n));
   text = text.replace(
     BRACED_TERM_RE,
     (_, head: string, braced?: string, paren?: string) => `${head}_${braced ?? paren}`,
   );
   // Captured names canonicalize (T₀ → T_0) so a definition binds the same
-  // name the tokenizer reads in expressions.
-  const name = (m: RegExpExecArray): string => canonicalName(m[1]);
+  // name the tokenizer reads in expressions — a redefined built-in's alias.
+  const written = (m: RegExpExecArray): string => canonicalName(m[1]);
+  const name = (m: RegExpExecArray): string => bindable(written(m));
   // Primes first: `a' = …` is a state, but the reserved coordinate names keep
   // their ODE meaning, so `y' = x - y` stays a slope field (see plot.ts).
   let m = STATE_RE.exec(text);
-  if (m && nameable(name(m))) return { kind: 'state', name: name(m), rhs: m[2] };
+  if (m && claimable(written(m))) return { kind: 'state', name: name(m), rhs: m[2] };
   m = INIT_RE.exec(text);
-  if (m && nameable(name(m))) return { kind: 'init', name: name(m), rhs: m[2] };
+  if (m && claimable(written(m))) return { kind: 'init', name: name(m), rhs: m[2] };
   // Before the function form: `open(…)` takes a file name, not parameters.
   m = TABLE_RE.exec(text);
-  if (m && nameable(name(m))) {
+  if (m && claimable(written(m))) {
     return { kind: 'table', name: name(m), file: m[2] ?? m[3], hash: (m[4] ?? '').toLowerCase() };
   }
   // A row that plainly means to open a file but does not parse as one is NOT
@@ -852,24 +874,39 @@ export function scanDefinition(text: string): Definition | null {
   // short hash — never runs on definition rows. Leave it to badTableRow.
   if (OPEN_HEAD_RE.test(text)) return null;
   m = FN_RE.exec(text);
-  if (m && nameable(name(m))) {
-    return { kind: 'fn', name: name(m), params: m[2].split(/\s*,\s*/).map(canonicalName), rhs: m[3] };
+  // Only as a value: the parser reads `e(2)` as e · 2 wherever e is not the
+  // document's value, so `e(x) := …` would define a function no row calls.
+  if (m && nameable(written(m))) {
+    return {
+      kind: 'fn',
+      name: name(m),
+      params: m[2].split(/\s*,\s*/).map(p => bindable(canonicalName(p))),
+      rhs: m[3],
+    };
   }
   m = CONST_RE.exec(text);
-  if (m && nameable(name(m))) return { kind: 'const', name: name(m), rhs: m[2] };
+  if (m && claimable(written(m))) return { kind: 'const', name: name(m), rhs: m[2] };
   // `u = interval(0, 2pi)` sets the range u runs over, (0, 1) by default.
-  if (m && PARAMS.has(name(m)) && INTERVAL_RHS_RE.test(m[2])) return { kind: 'const', name: name(m), rhs: m[2] };
+  if (m && PARAMS.has(written(m)) && INTERVAL_RHS_RE.test(m[2])) return { kind: 'const', name: name(m), rhs: m[2] };
   m = DRAW_RE.exec(text);
-  if (m && nameable(name(m))) return { kind: 'const', name: name(m), rhs: m[2], draw: true };
+  if (m && claimable(written(m))) return { kind: 'const', name: name(m), rhs: m[2], draw: true };
   return null;
 }
 
+/** A definition row's left side and assignment as the row wrote them, for
+ *  writing it back (`e :=`, `a(0) =`): a slider or drag keeps `:=` and the
+ *  written name, never the alias. */
+export const definitionHead = (def: Definition, text: string): string =>
+  `${writtenName(def.name)}${def.kind === 'init' ? '(0)' : ''} ${isExplicitDefinition(text) ? ':=' : '='}`;
+
 /** Why a row that reads as a binder, `p ∈ A` (or `\\in`), binds no
  *  name: the name is the language's. Null when it is not such a row. */
-export function takenBinder(text: string): string | null {
+export function takenBinder(text: string, valueNames: ReadonlySet<string> = new Set()): string | null {
   const m = DRAW_RE.exec(text);
   const n = canonicalName(m?.[1] ?? '');
   if (!m || nameable(n)) return null;
+  // After `i := 3`, i is the document's, defined once already.
+  if (REDEFINABLE.has(n) && valueNames.has(n)) return `${n} is already defined.`;
   const why = n.startsWith('u_')
     ? 'names starting u_ are'
     : FUNCTIONS.has(n)
@@ -891,18 +928,74 @@ export function takenDefinitionName(text: string): 'd' | 'e' | 'pi' | 'i' | null
   return n === 'd' || n === 'e' || n === 'pi' || n === 'i' ? n : null;
 }
 
+/** What each name a function row cannot claim already means. */
+const RESERVED_FN_MEANING: Record<string, string> = {
+  x: 'a plot axis',
+  y: 'a plot axis',
+  z: 'a plot axis',
+  t: 'animation time',
+  u: 'a curve/surface parameter',
+  v: 'a curve/surface parameter, like u',
+  w: 'the complex variable x + iy',
+};
+
+/**
+ * Why a row shaped like a function definition on a reserved name failed:
+ * `u(x, y) = x^2 + y^2` is not a definition (u is a parameter), so the
+ * parser reads u·(x, y) and reports "One side is a point and the other is a
+ * number". AI assistants reach for u, v and w as helper names. The product
+ * reading is legitimate — `x(y - 1) = 1` is x·(y − 1) = 1 — so the hint
+ * states that reading rather than assuming a definition was meant, and is
+ * only consulted for a row that already failed: no working graph changes.
+ */
+export function reservedFnHint(text: string): string | null {
+  const m = FN_RE.exec(text);
+  const n = m && canonicalName(m[1]);
+  if (!n || !(n in RESERVED_FN_MEANING)) return null;
+  const args = m![2];
+  return `${n}(${args}) reads as ${n} times (${args}), since ${n} is ${RESERVED_FN_MEANING[n]}. To define a function, use another name, like f(${args}) = …`;
+}
+
 /** Why a name from takenDefinitionName (other than `d`) names no value. */
 export function takenNameHint(name: string): string {
   return name === 'i'
-    ? 'i is the imaginary unit; name it something else, like k'
-    : `${name} is a constant; name a slider something else`;
+    ? 'i is the imaginary unit; name it something else, like k (i := … replaces it across the whole graph)'
+    : `${name} is a constant; name a slider something else, like k (${name} := … replaces ${name} across the whole graph)`;
+}
+
+/**
+ * Why a `:=` row defines nothing: it claims a name the language keeps even
+ * from an explicit definition (REDEFINABLE says which it gives up), or its
+ * left side names nothing. Null for a row that is no `:=`, or defines.
+ */
+export function explicitDefinitionError(text: string): string | null {
+  if (!isExplicitDefinition(text) || scanDefinition(text)) return null;
+  if (badTableRow(text)) return null;
+  const row = asAssignment(text);
+  const fn = FN_RE.exec(row);
+  const m = fn ?? CONST_RE.exec(row) ?? STATE_RE.exec(row);
+  const n = m && canonicalName(m[1]);
+  if (!n) return 'The left side of := names what it defines, like a := 2 or f(x) := x^2.';
+  if (fn && REDEFINABLE.has(n)) return `${n} can be redefined as a value, not a function.`;
+  const why =
+    n === 'd'
+      ? 'd starts derivatives (d/dx)'
+      : n in RESERVED_FN_MEANING
+        ? `${n} is ${RESERVED_FN_MEANING[n]}`
+        : n.startsWith('u_')
+          ? 'names starting u_ are kept for sliders'
+          : `${n} is a built-in function`;
+  if (PARAMS.has(n))
+    return `${n} is ${RESERVED_FN_MEANING[n]}, so it is redefined as the interval it runs over, like ${n} := interval(0, 2pi).`;
+  const params = SPACE.has(n) ? ` A function's parameters may still be called ${n}, like f(${n}) := ${n}^2.` : '';
+  return `${n} cannot be redefined: ${why}.${params}`;
 }
 
 export type GetFn = (name: string) => FnDef | undefined;
 
 /** A differential's name: d and one letter, Latin or Greek (dx, dθ, dτ). */
 const D_VAR = new RegExp(`^d[A-Za-z${GREEK_NAME_CHARS}]$`);
-const dVarName = (n: Expr): string | null => (n.kind === 'var' && D_VAR.test(n.name) ? n.name.slice(1) : null);
+export const dVarName = (n: Expr): string | null => (n.kind === 'var' && D_VAR.test(n.name) ? n.name.slice(1) : null);
 
 /** Match `d` or `d^k` (the numerator of a Leibniz derivative). */
 function dOrder(n: Expr): number | null {
@@ -956,7 +1049,7 @@ function numeratorWrap(n: Expr): { order: number; wrap: (x: Expr) => Expr } | nu
  *  float32 roundoff — plots evaluate the expanded expression on the GPU. */
 const FD_H = 1e-4;
 
-function applyDiff(e: Expr, v: string, order: number, opts?: ResolveOpts, getFn?: GetFn): Expr {
+export function applyDiff(e: Expr, v: string, order: number, opts?: ResolveOpts, getFn?: GetFn): Expr {
   const isList = opts?.isList;
   e = throughFields(e, opts);
   // A list is still just a name at this point, and diff() treats an unknown
@@ -1033,7 +1126,7 @@ const num = (value: number): Expr => ({ kind: 'num', value });
  * constants) stay names. `over` asks for other variables instead: u writes
  * out a named curve and the scalars over u it uses.
  */
-function throughFields(e: Expr, opts?: ResolveOpts, over: ReadonlySet<string> = SPACE): Expr {
+export function throughFields(e: Expr, opts?: ResolveOpts, over: ReadonlySet<string> = SPACE): Expr {
   const lookup = opts?.definition;
   if (!lookup) return e;
   const closed = (name: string, seen: ReadonlySet<string>): Expr | null => {
@@ -1058,6 +1151,9 @@ function throughFields(e: Expr, opts?: ResolveOpts, over: ReadonlySet<string> = 
 }
 
 export interface ResolveOpts {
+  /** The document's shadowed names (shadowedNames), for every parse of its
+   *  rows' parts: `e` after `e := 2` reads as that e in a sequence too. */
+  valueNames?: ReadonlySet<string>;
   /** A sequence term by name (a_3, a_k) or index (a_[…]). `open` are the
    *  names still unbound here — a sequence row's own index. */
   sequenceTerm?: (name: string, index: Expr | undefined, open: ReadonlySet<string> | undefined) => Expr | null;
@@ -1146,12 +1242,6 @@ export interface ResolveOpts {
    * and y.
    */
   surface?: { readonly embed: readonly [Expr, Expr, Expr] };
-  /**
-   * A plane panel's own metric (a ds^2 row, lib/metric-curvature.ts): there
-   * gaussian(x, y) is its curvature, K in x and y, which `gaussian` writes
-   * out (or throws why the panel has none to read).
-   */
-  metric?: { readonly gaussian: () => Expr };
 }
 
 /**
@@ -1175,7 +1265,7 @@ function unitVector(name: string, opts: ResolveOpts): Expr | null {
   return blade ? mvNode(blade) : { kind: 'vec', items: axis!.map(num) };
 }
 
-interface Ctx {
+export interface Ctx {
   getFn: GetFn;
   opts: ResolveOpts;
   /** Terms expanded so far across every Σ/Π in this resolve (nesting multiplies). */
@@ -1184,16 +1274,18 @@ interface Ctx {
    *  when it is a plain definite integral, null otherwise (indefinite, or
    *  carrying an enclosing integral's measure). */
   ints?: Array<IntShade | null>;
+  /** The resolver. Expansion passes in other files recurse through it. */
+  rx: (e: Expr, ctx: Ctx) => Expr;
 }
 
 /** A Σ/Π call: args [index, lo, hi] (header awaiting a body) or [index, lo, hi, body]. */
-type SumCall = Expr & { kind: 'call'; name: 'sum' | 'prod' };
+export type SumCall = Expr & { kind: 'call'; name: 'sum' | 'prod' };
 
-const isSumHeader = (e: Expr): e is SumCall =>
+export const isSumHeader = (e: Expr): e is SumCall =>
   e.kind === 'call' && (e.name === 'sum' || e.name === 'prod') && e.args.length === 3;
 
 /** An ∫ header awaiting its body: `int[a..b]` (bounds) or a bare `int`/∫. */
-const isIntHeader = (e: Expr): boolean =>
+export const isIntHeader = (e: Expr): boolean =>
   (e.kind === 'call' && e.name === 'int' && e.args.length === 2) || (e.kind === 'var' && e.name === 'int');
 
 /**
@@ -1233,492 +1325,6 @@ const intCallOf = (header: Expr, body: Expr): Expr => {
   const b = intBounds(header);
   return { kind: 'call', name: 'int', args: b ? [b[0], b[1], body] : [body] };
 };
-
-/** The vector-calculus operators, each also written with ∇ (see splitNablaChain). */
-const VECTOR_OPS: ReadonlySet<string> = new Set(['grad', 'div', 'curl', 'laplacian', 'jacobian', 'hessian']);
-const VECTOR_OP_EXAMPLE: Record<string, string> = {
-  grad: 'grad(x^2 + y^2)',
-  div: 'div((x y, y^2))',
-  curl: 'curl((-y, x))',
-  laplacian: 'laplacian(x^2 - y^2)',
-  jacobian: 'jacobian((x^2 - y^2, 2 x y))',
-  hessian: 'hessian(x^2 - y^2)',
-};
-
-/**
- * `∇` as a prefix operator. It tokenizes as a bare `grad` factor, and like
- * d/dx binds the rest of its product chain: `∇f`, `∇ x^2 y`, `∇f(x, y)`.
- * A written `·` or `×` right after it makes `∇·F` (div) and `∇×F` (curl);
- * `∇^2 f` (also `∇²f`) is laplacian(f). The operand stops at the next
- * written `·` or `×`, so `∇f · v` is (∇f)·v. `∇(…)` parses as a call and
- * never gets here. Returns the rewritten chain, or null when it has no ∇.
- */
-function splitNablaChain(e: Expr, ctx: Ctx): Expr | null {
-  type Factor = { e: Expr; op: '*' | '/'; glyph?: ProductGlyph };
-  const factors: Factor[] = [];
-  let node: Expr = e;
-  while (node.kind === 'bin' && (node.op === '*' || node.op === '/')) {
-    factors.unshift({ e: node.b, op: node.op, glyph: node.glyph });
-    node = node.a;
-  }
-  factors.unshift({ e: node, op: '*' });
-  const header = (f: Expr): { laplacian: boolean; negate: boolean } | null => {
-    if (f.kind === 'neg') {
-      const h = header(f.a);
-      return h && { ...h, negate: !h.negate };
-    }
-    const bare = (n: Expr) =>
-      n.kind === 'var' &&
-      n.name === 'grad' &&
-      // A graph that defines its own `grad` keeps it (it is shadowable).
-      !ctx.getFn('grad') &&
-      !ctx.opts.definition?.('grad');
-    if (bare(f)) return { laplacian: false, negate: false };
-    if (f.kind === 'bin' && f.op === '^' && bare(f.a) && f.b.kind === 'num' && f.b.value === 2)
-      return { laplacian: true, negate: false };
-    return null;
-  };
-  const at = factors.findIndex(f => header(f.e));
-  // A Σ/∫ further left binds the ∇ into its own body, which resolves on its own.
-  if (at < 0 || factors.slice(0, at).some(f => isSumHeader(f.e) || isIntHeader(f.e))) return null;
-  const h = header(factors[at].e)!;
-  const first = factors[at + 1];
-  if (!first) return null; // a bare ∇: classify says to write it with parentheses
-  if (first.op === '/') throw new Error('∇ needs something to act on: ∇f, ∇·F, ∇×F or ∇²f.');
-  if (h.laplacian && first.glyph) throw new Error('∇² takes a scalar field: write ∇²f.');
-  if (first.glyph === 'outer' || first.glyph === 'wedge' || first.glyph === 'geometric')
-    throw new Error('∇ makes ∇f, ∇·F, ∇×F or ∇²f — not ⊗, ∧ or ⟑.');
-  let end = at + 2;
-  while (end < factors.length && !factors[end].glyph) end++;
-  let operand = first.e;
-  for (const f of factors.slice(at + 2, end)) operand = { kind: 'bin', op: f.op, a: operand, b: f.e };
-  const name = h.laplacian ? 'laplacian' : first.glyph === 'dot' ? 'div' : first.glyph === 'cross' ? 'curl' : 'grad';
-  let out: Expr = { kind: 'call', name, args: [operand] };
-  if (h.negate) out = { kind: 'neg', a: out };
-  if (at > 0) {
-    let coeff = factors[0].e;
-    for (const f of factors.slice(1, at))
-      coeff = { kind: 'bin', op: f.op, a: coeff, b: f.e, ...(f.glyph && { glyph: f.glyph }) };
-    out = { kind: 'bin', op: factors[at].op, a: coeff, b: out, ...(factors[at].glyph && { glyph: factors[at].glyph }) };
-  }
-  for (const f of factors.slice(end))
-    out = { kind: 'bin', op: f.op, a: out, b: f.e, ...(f.glyph && { glyph: f.glyph }) };
-  return out;
-}
-
-/**
- * What a vector operator differentiates. A bare function name stands for the
- * function at its own parameters (`grad(f)` with f(x, y) = …), a named
- * vector for its components, and named fields are written out (throughFields)
- * — otherwise each would differentiate as a constant and quietly give 0.
- */
-function vectorOperand(name: string, arg: Expr, ctx: Ctx): Expr {
-  if (arg.kind === 'var') {
-    const fn = ctx.getFn(arg.name);
-    if (fn) {
-      const bad = fn.params.find(p => !SPACE.has(p) && p !== 't');
-      if (bad !== undefined || fn.recursive) {
-        throw new Error(
-          `${name}(${arg.name}) needs ${arg.name} to be a function of x, y, z or t; write ${name}(${arg.name}(x, y)) to choose.`,
-        );
-      }
-      return fn.body;
-    }
-    // Differentiated as it stands, an unknown name is a constant: say so
-    // rather than draw grad(f) as the point (0, 0).
-    if (
-      !SPACE.has(arg.name) &&
-      arg.name !== 't' &&
-      ctx.opts.definition &&
-      !ctx.opts.definition(arg.name) &&
-      !ctx.opts.comps?.(arg.name) &&
-      !ctx.opts.isList?.(arg.name)
-    ) {
-      throw new Error(
-        `${name}(${arg.name}): ${arg.name} is not defined. Define a function ${arg.name}(x, y) = … or a field ${arg.name} = … first.`,
-      );
-    }
-  }
-  const lowered = ctx.opts.comps ? lowerGeom(arg, ctx.opts.comps, () => null, ctx.opts.isList) : arg;
-  return throughFields(lowered, ctx.opts);
-}
-
-/** grad, div, curl and laplacian — and the matrices jacobian and hessian —
- *  expanded symbolically as d/dx is. */
-function vectorCalculus(name: string, args: readonly Expr[], ctx: Ctx): Expr {
-  const example = VECTOR_OP_EXAMPLE[name];
-  if (args.length !== 1) throw new Error(`${name} takes one expression: ${example}.`);
-  const f = vectorOperand(name, args[0], ctx);
-  if (f.kind === 'list' || f.kind === 'eq' || f.kind === 'ineq') {
-    throw new Error(
-      `${name} needs ${name === 'div' || name === 'curl' ? 'a vector field' : 'a scalar expression'}, like ${example}.`,
-    );
-  }
-  const d = (g: Expr, v: string, order = 1) => applyDiff(g, v, order, ctx.opts, ctx.getFn);
-  const AXES = ['x', 'y', 'z'];
-  const matrix = (rows: Expr[][]): Expr => ({ kind: 'vec', items: rows.map(items => ({ kind: 'vec', items })) });
-  if (name === 'hessian') {
-    if (f.kind === 'vec')
-      throw new Error('hessian takes a scalar field, like hessian(x^2 - y^2); for a map, jacobian.');
-    // The matrix of second derivatives: in the plane unless f uses z.
-    const axes = AXES.slice(0, freeVars(f).has('z') ? 3 : 2);
-    const firsts = axes.map(v => d(f, v));
-    return matrix(firsts.map(fi => axes.map(v => d(fi, v))));
-  }
-  if (name === 'jacobian') {
-    if (f.kind !== 'vec' || (f.items.length !== 2 && f.items.length !== 3)) {
-      throw new Error(`jacobian takes a map of 2 or 3 components, like ${example}; for a scalar f, hessian(f).`);
-    }
-    // Row i is the gradient of component i, over as many axes as components.
-    const axes = AXES.slice(0, f.items.length);
-    return matrix(f.items.map(c => axes.map(v => d(c, v))));
-  }
-  if (name === 'grad' || name === 'laplacian') {
-    if (f.kind === 'vec') {
-      throw new Error(
-        name === 'grad'
-          ? 'grad takes a scalar field; for a vector field F, div(F) is its divergence and curl(F) its curl.'
-          : 'laplacian takes a scalar field, like laplacian(x^2 - y^2); the Laplacian of a vector field is not supported.',
-      );
-    }
-    // z joins only when f uses it, so a plane field stays in the plane.
-    const axes = AXES.slice(0, freeVars(f).has('z') ? 3 : 2);
-    if (name === 'grad') return { kind: 'vec', items: axes.map(v => d(f, v)) };
-    return axes.map(v => d(f, v, 2)).reduce((s, term) => add(s, term));
-  }
-  if (f.kind !== 'vec' || (f.items.length !== 2 && f.items.length !== 3)) {
-    throw new Error(
-      `${name} takes a vector field of 2 or 3 components, like ${example}; for a scalar f, grad(f) is its gradient.`,
-    );
-  }
-  const [P, Q, R] = f.items;
-  if (name === 'div') return f.items.map((c, k) => d(c, AXES[k])).reduce((s, term) => add(s, term));
-  // In the plane, the scalar ∂Q/∂x − ∂P/∂y (the z-component of the 3D curl).
-  if (!R) return sub(d(Q, 'x'), d(P, 'y'));
-  return { kind: 'vec', items: [sub(d(R, 'y'), d(Q, 'z')), sub(d(P, 'z'), d(R, 'x')), sub(d(Q, 'x'), d(P, 'y'))] };
-}
-
-/** The operators on a parametric curve in u (lib/curves.ts). */
-const CURVE_OPS: ReadonlySet<string> = new Set(['curvature', 'torsion', 'osculating', 'frame']);
-const CURVE_OP_EXAMPLE: Record<string, string> = {
-  curvature: 'curvature(C) or curvature(C, 0.25)',
-  torsion: 'torsion(C) or torsion(C, 0.25)',
-  osculating: 'osculating(C, 0.25)',
-  frame: 'frame(C, 0.25)',
-};
-/** The curve parameter: a definition over it is a named curve. A named
- *  field over x, y or z is written out too, to be refused. */
-const ALONG: ReadonlySet<string> = new Set(['u', ...SPACE]);
-
-/**
- * What a curve operator acts on, as its components in u: a tuple, a named
- * curve (c = (cos(2pi u), sin(2pi u)), written out through any scalar it
- * uses), or a function of one parameter, called at u. A curve over one
- * interval instead (`u = interval(0, 2pi)` above, or `s = interval(…)`) is
- * read over that interval's own values, written as u; `over` is the interval,
- * to put back where the result is a function along the curve.
- */
-function curveOperand(name: string, arg: Expr, ctx: Ctx): { items: readonly Expr[]; over?: Expr } {
-  const usage = `${name} takes a parametric curve in u, like ${CURVE_OP_EXAMPLE[name]} with C = (cos(2pi u), sin(2pi u)).`;
-  const U: Expr = { kind: 'var', name: 'u' };
-  const uInterval = ctx.opts.interval?.('u');
-  let r: Expr = arg;
-  if (arg.kind === 'var') {
-    const fn = ctx.getFn(arg.name);
-    if (fn) {
-      if (fn.params.length !== 1 || fn.recursive) throw new Error(usage);
-      r = substVars(fn.body, { [fn.params[0]]: uInterval ?? U });
-    }
-  }
-  if (ctx.opts.comps) r = lowerGeom(r, ctx.opts.comps, () => null, ctx.opts.isList);
-  r = throughFields(r, ctx.opts, ALONG);
-  if (r.kind === 'var' && arg.kind === 'var') {
-    const n = arg.name;
-    const what = ctx.opts.consts?.[n] !== undefined ? 'a number' : ctx.opts.isList?.(n) ? 'a list' : null;
-    if (what) throw new Error(`${name}: ${n} is ${what}, not a curve in u. ${usage}`);
-    if (!ctx.opts.documentNames?.has(n)) {
-      throw new Error(`${name}: ${n} is not a curve — define one first, like ${n} = (cos(2pi u), sin(2pi u)).`);
-    }
-  }
-  // The interval the curve runs along, read at its own values as u: u's own
-  // (`u = interval(0, 2pi)`), or else the one interval of a curve without u.
-  // Any other interval stays, a family of curves.
-  const hidden = intervalsIn(r);
-  const uKey = uInterval && exprKey(uInterval);
-  const along =
-    hidden.find(h => h.key === uKey) ?? (hidden.length === 1 && !freeVars(r).has('u') ? hidden[0] : undefined);
-  if (along) r = replaceIntervals(r, h => (h.key === along.key ? U : h.node));
-  if (r.kind !== 'vec' || (r.items.length !== 2 && r.items.length !== 3)) throw new Error(usage);
-  const vars = freeVars(r);
-  if (!vars.has('u')) throw new Error(`${name} needs a curve, which moves with u — this is a fixed point. ${usage}`);
-  if (vars.has('v') || [...SPACE].some(n => vars.has(n))) throw new Error(usage);
-  return { items: r.items, over: along?.node };
-}
-
-/** Whether e is a list: a literal, a data column or a named list, or one
- *  mapped over, filtered (s[s > 0.3]) or sliced — not one reduced or
- *  indexed to a number (as staysList). */
-function listValued(e: Expr, ctx: Ctx): boolean {
-  if (e.kind === 'list' || e.kind === 'data') return true;
-  if (e.kind === 'var') return !!ctx.opts.isList?.(e.name);
-  if (e.kind === 'index') return e.args[1].kind === 'range' || listValued(e.args[1], ctx);
-  if (
-    e.kind === 'call' &&
-    (SCALAR_REDUCTIONS.has(e.name) || ((e.name === 'min' || e.name === 'max') && e.args.length === 1))
-  )
-    return false;
-  return childrenOf(e).some(c => listValued(c, ctx));
-}
-
-/**
- * curvature and torsion (along u, or at a point u0 of the curve), the
- * osculating circle at u0 and the Frenet frame at u0.
- */
-function curveGeometry(name: string, args: readonly Expr[], ctx: Ctx): Expr {
-  const example = CURVE_OP_EXAMPLE[name];
-  const needsPoint = name === 'osculating' || name === 'frame';
-  if (args.length !== 2 && (needsPoint || args.length !== 1)) {
-    throw new Error(
-      needsPoint
-        ? `${name} takes a curve and where on it: ${example}.`
-        : `${name} takes a curve, and optionally where on it: ${example}.`,
-    );
-  }
-  const { items: r, over } = curveOperand(name, args[0], ctx);
-  const u0 = args[1];
-  // κ(u) and τ(u) are functions of u, so k(u) = curvature(C, u) is κ; the
-  // circle and frame are drawn over u of their own, which a u0 in u
-  // would capture.
-  const ownU = !needsPoint && !!ctx.opts.params?.has('u');
-  if (u0 && (u0.kind === 'vec' || (freeVars(u0).has('u') && !ownU))) {
-    throw new Error(`${name}: the second argument is where on the curve — a number, slider or t, not u: ${example}.`);
-  }
-  // Several points map element by element (the formulas have no branch), and the
-  // circles make a family; the frame's arrows take one point at a time.
-  if (name === 'frame' && u0 && listValued(u0, ctx)) {
-    throw new Error(
-      'frame takes one point on the curve at a time — a number, slider or t, like frame(C, 0.25) — not a list.',
-    );
-  }
-  if (name === 'torsion' && r.length !== 3) {
-    throw new Error('torsion needs a curve in space — a plane curve has none, and its curvature is signed.');
-  }
-  const d = (e: Expr): Expr => applyDiff(e, 'u', 1, ctx.opts, ctx.getFn);
-  if (name === 'osculating') return osculatingOf(r, d, u0);
-  if (name === 'frame') return frameOf(r, d, u0);
-  const along = name === 'curvature' ? curvatureOf(r, d) : torsionOf(r, d);
-  return u0 ? substVars(along, { u: u0 }) : over ? substVars(along, { u: over }) : along;
-}
-
-/** The operators on a parametric surface in u and v (lib/surface-geometry.ts). */
-const SURFACE_OPS: ReadonlySet<string> = new Set(['gaussian', 'meancurvature']);
-const SURFACE_PARAMS: ReadonlySet<string> = new Set(['u', 'v', ...SPACE]);
-
-/** Whether a surface operator's first argument names or writes a surface,
- *  rather than a point of the panel's surface. */
-function surfaceLike(arg: Expr, ctx: Ctx): boolean {
-  if (arg.kind === 'vec') return arg.items.length === 3;
-  if (arg.kind !== 'var') return false;
-  const fn = ctx.getFn(arg.name);
-  if (fn) return fn.params.length === 2;
-  const { opts } = ctx;
-  return (
-    !!opts.documentNames?.has(arg.name) &&
-    (opts.comps?.(arg.name)?.length ?? 0) !== 2 &&
-    opts.consts?.[arg.name] === undefined &&
-    !opts.isList?.(arg.name)
-  );
-}
-
-/**
- * What a surface operator acts on, as its components in u and v: a tuple, a
- * named surface (S = (u, v, u v)) or a function of two parameters, called at
- * u and v. A surface over intervals (`u = interval(0, 2pi)` above) is read
- * over their values, written as u and v; `over` holds them, to put back
- * where the result is a function on the surface.
- */
-export function surfaceOperand(
-  name: string,
-  arg: Expr,
-  getFn: GetFn,
-  opts: ResolveOpts,
-): { items: [Expr, Expr, Expr]; over: { u?: Expr; v?: Expr } } {
-  const usage = `${name} takes a parametric surface in u and v, like ${name}(S) with S = (u, v, u^2 - v^2).`;
-  const U: Expr = { kind: 'var', name: 'u' };
-  const V: Expr = { kind: 'var', name: 'v' };
-  const uInterval = opts.interval?.('u');
-  const vInterval = opts.interval?.('v');
-  let r: Expr = arg;
-  if (arg.kind === 'var') {
-    const fn = getFn(arg.name);
-    if (fn) {
-      if (fn.params.length !== 2 || fn.recursive) throw new Error(usage);
-      r = substVars(fn.body, { [fn.params[0]]: uInterval ?? U, [fn.params[1]]: vInterval ?? V });
-    }
-  }
-  if (opts.comps) r = lowerGeom(r, opts.comps, () => null, opts.isList);
-  r = throughFields(r, opts, SURFACE_PARAMS);
-  if (r.kind === 'var' && arg.kind === 'var' && !opts.documentNames?.has(arg.name))
-    throw new Error(`${name}: ${arg.name} is not a surface — define one first, like ${arg.name} = (u, v, u^2 - v^2).`);
-  const keys = { u: uInterval && exprKey(uInterval), v: vInterval && exprKey(vInterval) };
-  const hidden = intervalsIn(r);
-  const over: { u?: Expr; v?: Expr } = {};
-  for (const h of hidden) {
-    if (h.key === keys.u) over.u = h.node;
-    else if (h.key === keys.v) over.v = h.node;
-    else throw new Error(`${name} reads a surface over u and v; this one sweeps another interval. ${usage}`);
-  }
-  if (hidden.length) r = replaceIntervals(r, h => (h.key === keys.u ? U : V));
-  if (r.kind !== 'vec' || r.items.length !== 3) throw new Error(usage);
-  const vars = freeVars(r);
-  if (!vars.has('u') || !vars.has('v'))
-    throw new Error(`${name} needs a surface, which moves with both u and v. ${usage}`);
-  if ([...SPACE].some(n => vars.has(n))) throw new Error(usage);
-  return { items: r.items as [Expr, Expr, Expr], over };
-}
-
-/** A point's two coordinates from a surface operator's trailing arguments:
- *  (u0, v0) as one tuple or a named point, or as two numbers. */
-function pointArgs(name: string, args: readonly Expr[], ctx: Ctx, example: string): [Expr, Expr] {
-  if (args.length === 2 && args.every(a => a.kind !== 'vec')) return [args[0], args[1]];
-  if (args.length === 1) {
-    const [p] = args;
-    if (p.kind === 'vec' && p.items.length === 2) return [p.items[0], p.items[1]];
-    const comps = p.kind === 'var' ? ctx.opts.comps?.(p.name) : null;
-    if (comps?.length === 2) return comps.map(c => ({ kind: 'var', name: c }) as Expr) as [Expr, Expr];
-  }
-  throw new Error(`${name}: where on the surface is two numbers, a point or a tuple: ${example}.`);
-}
-
-/**
- * gaussian(S) and meancurvature(S): K and H of the surface, functions of u
- * and v, or read at a point of it, gaussian(S, u0, v0). On a panel drawn on
- * a surface (on(…)) the surface is the panel's, in its x and y:
- * gaussian(x, y) is K over it, a field the panel paints on the surface.
- */
-function surfaceGeometry(name: string, args: readonly Expr[], ctx: Ctx): Expr {
-  const panel = ctx.opts.surface;
-  const onPanel = !!panel && args.length > 0 && !surfaceLike(args[0], ctx);
-  // A plane panel with a metric (a ds^2 row): K of that metric.
-  const metric = panel ? undefined : ctx.opts.metric;
-  // Only for a point: two numbers, or one argument with two components (a
-  // pair, a named 2D point, P + (0, 1)) — anything else (gaussian(T), T
-  // undefined) is read as a surface, and says so.
-  let at: [Expr, Expr] | null = null;
-  if (metric && args.length === 2 && args.every(a => a.kind !== 'vec') && !surfaceLike(args[0], ctx))
-    at = [args[0], args[1]];
-  else if (metric && args.length === 1 && !surfaceLike(args[0], ctx)) {
-    let lowered: Expr | null = null;
-    try {
-      lowered = ctx.opts.comps ? lowerGeom(args[0], ctx.opts.comps, () => null, ctx.opts.isList) : args[0];
-    } catch {
-      /* not a at */
-    }
-    if (lowered?.kind === 'vec' && lowered.items.length === 2) at = [lowered.items[0], lowered.items[1]];
-  }
-  if (metric && at) {
-    if (name !== 'gaussian')
-      throw new Error(
-        `${name}(x, y) needs a surface in space; a metric (this panel's ds^2 row) has a Gaussian curvature, gaussian(x, y), and no ${name}.`,
-      );
-    return substVars(metric.gaussian(), { x: at[0], y: at[1] });
-  }
-  const example = onPanel ? `${name}(x, y) or ${name}(P)` : `${name}(S) or ${name}(S, 0.5, 0.25)`;
-  if (!args.length) throw new Error(`${name} takes a surface, and optionally where on it: ${example}.`);
-  let r: readonly Expr[];
-  let params: Params;
-  let point: [Expr, Expr] | null;
-  let over: { u?: Expr; v?: Expr } = {};
-  if (onPanel) {
-    r = panel.embed;
-    params = ['x', 'y'];
-    point = pointArgs(name, args, ctx, example);
-  } else {
-    if (args.length > 3) throw new Error(`${name} takes a surface, and optionally where on it: ${example}.`);
-    // gaussian(x, y) or gaussian((1, 2)): a point of a surface the panel lacks.
-    const named = args[0].kind === 'var' && (!!ctx.getFn(args[0].name) || !!ctx.opts.documentNames?.has(args[0].name));
-    const pointOnly =
-      (args.length === 2 && args.every(a => a.kind !== 'vec') && !named) ||
-      (args[0].kind === 'vec' && args[0].items.length === 2);
-    if (!panel && pointOnly)
-      throw new Error(
-        `${name}(x, y) reads the surface of its panel's on(…) row, or its metric (a ds^2 row), and this panel has neither: write ${name}(S) with S = (u, v, u^2 - v^2).`,
-      );
-    ({ items: r, over } = surfaceOperand(name, args[0], ctx.getFn, ctx.opts));
-    params = ['u', 'v'];
-    point = args.length > 1 ? pointArgs(name, args.slice(1), ctx, example) : null;
-  }
-  const d = (e: Expr, v: string): Expr => applyDiff(e, v, 1, ctx.opts, ctx.getFn);
-  const field = name === 'gaussian' ? gaussianOf(r, d, params) : meanCurvatureOf(r, d, params);
-  if (point) return substVars(field, { [params[0]]: point[0], [params[1]]: point[1] });
-  const back: Record<string, Expr> = {};
-  if (over.u) back.u = over.u;
-  if (over.v) back.v = over.v;
-  return Object.keys(back).length ? substVars(field, back) : field;
-}
-
-interface StripDx {
-  v: string;
-  integrand: Expr;
-  /** Factors after this integral's measure that carry ANOTHER d-var: they
-   *  belong to an enclosing ∫ (`int[0..1] int[0..y] x dx dy` pairs inside
-   *  out), so the expansion multiplies them back on for the outer level. */
-  residual: Expr | null;
-}
-
-/**
- * Split the integration variable off a body: the first d<letter> factor in
- * its multiplicative structure (`x^2 dx` → v = x, integrand x^2). Written
- * touching, `1/(1+x^2)dx`, the dx binds tighter than '/' and sits inside the
- * denominator product — the measure is recognized on either side and the
- * rest of that denominator stays a true denominator. A tail after
- * the measure folds into the integrand (`∫ dx/(1+x^2)`) unless it carries
- * its own d-var, in which case it is the enclosing integral's (residual).
- * Sums integrate termwise, so every term must end in the same dx.
- */
-function stripDx(body: Expr): StripDx | null {
-  if (body.kind === 'neg') {
-    const m = stripDx(body.a);
-    return m && { ...m, integrand: neg(m.integrand) };
-  }
-  if (body.kind === 'bin' && (body.op === '+' || body.op === '-')) {
-    const a = stripDx(body.a);
-    const b = stripDx(body.b);
-    if (!a && !b) return null;
-    if (!a || !b || a.v !== b.v || a.residual || b.residual) {
-      throw new Error(`Every term under one ∫ must end in the same d${a?.v ?? b?.v ?? 'x'}.`);
-    }
-    return { v: a.v, integrand: { kind: 'bin', op: body.op, a: a.integrand, b: b.integrand }, residual: null };
-  }
-  const factors: Array<{ e: Expr; inv: boolean }> = [];
-  const walk = (e: Expr, inv: boolean): void => {
-    if (e.kind === 'bin' && (e.op === '*' || e.op === '/')) {
-      walk(e.a, inv);
-      walk(e.b, e.op === '/' ? !inv : inv);
-      return;
-    }
-    factors.push({ e, inv });
-  };
-  walk(body, false);
-  const at = factors.findIndex(f => dVarName(f.e) !== null);
-  if (at < 0) return null;
-  const v = dVarName(factors[at].e)!;
-  const tail = factors.slice(at + 1);
-  const tailHasDx = tail.some(f => dVarName(f.e) !== null);
-  const inside = tailHasDx ? factors.slice(0, at) : factors.filter((_, i) => i !== at);
-  const product = (fs: Array<{ e: Expr; inv: boolean }>): Expr => {
-    let numr: Expr | null = null;
-    let den: Expr | null = null;
-    for (const f of fs) {
-      if (f.inv) den = den === null ? f.e : { kind: 'bin', op: '*', a: den, b: f.e };
-      else numr = numr === null ? f.e : { kind: 'bin', op: '*', a: numr, b: f.e };
-    }
-    let out: Expr = numr ?? num(1);
-    if (den) out = { kind: 'bin', op: '/', a: out, b: den };
-    return out;
-  };
-  return { v, integrand: product(inside), residual: tailHasDx ? product(tail) : null };
-}
 
 const SEQ_LETTER = new RegExp(`^[A-Za-z${GREEK_NAME_CHARS}]$`);
 
@@ -1949,331 +1555,9 @@ function sourceFreeVars(e: Expr, out = new Set<string>()): Set<string> {
   return out;
 }
 
-const SUM_MAX_TOTAL = 2000;
+export const SUM_MAX_TOTAL = 2000;
 /** Runs one state family may start: the point-figure family budget. */
 const FAMILY_MAX = 1024;
-
-/** Expand a Σ/Π into an explicit sum/product of per-index terms. */
-function expandSum(header: SumCall, body: Expr, ctx: Ctx): Expr {
-  const sym = header.name === 'sum' ? 'Σ' : 'Π';
-  // A literal in the body is written once: every term's copy is that one
-  // list, so the terms pair up element by element rather than crossing.
-  markOrigins(body);
-  const [idxE, loE, hiE] = header.args;
-  if (idxE.kind !== 'var') throw new Error(`Expected ${header.name}(n=1..N, …).`);
-  const idx = idxE.name;
-  if (RESERVED.has(idx)) throw new Error(`Cannot use "${idx}" as a ${sym} index (it is reserved).`);
-  const listed = boundList(loE, hiE, sym, ctx);
-  if (listed) {
-    const { name, seq, values } = listed;
-    // Each element's sum would itself be a list: a family of families.
-    const inner =
-      [...freeVars(body)].find(n => n !== name && ctx.opts.isList?.(n)) ??
-      (containsListLiteral(body) ? 'a list literal' : null);
-    if (inner) throw new Error(`${sym} over the list ${name} cannot also use ${inner} in its body.`);
-    const before = ctx.terms;
-    const items = values.map(v => {
-      const at = (e: Expr) => substIdx(e, name, num(v));
-      try {
-        return expandSum({ ...header, args: [idxE, at(loE), at(hiE)] }, at(body), ctx);
-      } catch (err) {
-        if (ctx.terms <= SUM_MAX_TOTAL) throw err;
-        throw new Error(
-          `${sym} over the list ${name} expands to over ${ctx.terms - before} terms across its values (limit ${SUM_MAX_TOTAL} total).`,
-        );
-      }
-    });
-    return withAxes<Expr>({ kind: 'list', items }, namedAxes(name, seq));
-  }
-  // A bound that uses an open name (the sequence index) cannot be expanded
-  // here: the sum stays a call and evaluate() runs it once that name is a number.
-  const bound = (b: Expr): { expr: Expr; value?: number } => {
-    const r = rx(b, ctx);
-    const env: Record<string, number> = {};
-    let open = false;
-    for (const fv of freeVars(r)) {
-      const v = ctx.opts.consts?.[fv];
-      if (v !== undefined) {
-        ctx.opts.boundConsts?.add(fv);
-        env[fv] = v;
-        continue;
-      }
-      if (ctx.opts.openVars?.has(fv)) {
-        open = true;
-        continue;
-      }
-      if (fv === 't' || RESERVED.has(fv)) throw new Error(`${sym} bounds cannot depend on ${fv}.`);
-      throw new Error(`${sym} bounds must be constant — add "${fv} = 5" in a row above.`);
-    }
-    if (open) return { expr: r };
-    const v = evaluate(r, env);
-    if (!isFinite(v)) throw new Error(`${sym} bound is not finite.`);
-    return { expr: r, value: v };
-  };
-  const lo = bound(loE);
-  const hi = bound(hiE);
-  if (lo.value === undefined || hi.value === undefined) {
-    const saved = ctx.opts;
-    const openVars = new Set(saved.openVars);
-    openVars.add(idx);
-    ctx.opts = { ...saved, openVars };
-    try {
-      return { kind: 'call', name: header.name, args: [{ kind: 'var', name: idx }, lo.expr, hi.expr, rx(body, ctx)] };
-    } finally {
-      ctx.opts = saved;
-    }
-  }
-  const start = Math.ceil(lo.value - 1e-9);
-  const end = Math.floor(hi.value + 1e-9);
-  const count = end - start + 1;
-  if (count > SUM_MAX_TERMS) throw new Error(`${sym} expands to ${count} terms (limit ${SUM_MAX_TERMS}).`);
-  ctx.terms += Math.max(count, 0);
-  if (ctx.terms > SUM_MAX_TOTAL) {
-    throw new Error(`Nested ${sym} expand to too many terms (limit ${SUM_MAX_TOTAL} total).`);
-  }
-  const combine = header.name === 'sum' ? add : mul;
-  let acc: Expr | null = null;
-  for (let k = start; k <= end; k++) {
-    const term = foldNums(rx(substIdx(body, idx, num(k)), ctx));
-    acc = acc === null ? term : combine(acc, term);
-  }
-  return acc ?? num(header.name === 'sum' ? 0 : 1);
-}
-
-const containsListLiteral = (e: Expr): boolean => e.kind === 'list' || childrenOf(e).some(containsListLiteral);
-
-/**
- * The list a Σ/Π bound names, with its numeric values — or null when the
- * bounds name none. One list at a time: two would have to cross or zip, and
- * neither reading is obvious from `sum(n=A..B, …)`.
- */
-function boundList(loE: Expr, hiE: Expr, sym: string, ctx: Ctx): { name: string; seq: Seq; values: number[] } | null {
-  const get = ctx.opts.getList;
-  if (!get) return null;
-  const names = [...new Set([...freeVars(loE), ...freeVars(hiE)])].filter(
-    n => ctx.opts.consts?.[n] === undefined && !ctx.opts.openVars?.has(n) && ctx.opts.isList?.(n),
-  );
-  if (!names.length) return null;
-  if (names.length > 1) throw new Error(`${sym} bounds can use one list at a time (found ${names.join(' and ')}).`);
-  const [name] = names;
-  let seq: Expr | null = null;
-  try {
-    seq = get(name);
-  } catch {
-    /* reported below */
-  }
-  const values = !seq
-    ? null
-    : seq.kind === 'data'
-      ? [...seq.values]
-      : seq.kind === 'list' && seq.items.every(it => it.kind === 'num')
-        ? seq.items.map(it => (it as Expr & { kind: 'num' }).value)
-        : null;
-  if (!seq || !isSeq(seq) || !values)
-    throw new Error(`${sym} bounds need a list of plain numbers — ${name} is not one.`);
-  if (values.length > SUM_MAX_TERMS)
-    throw new Error(`${name} has too many elements to bound a ${sym} (limit ${SUM_MAX_TERMS}).`);
-  return { name, seq, values };
-}
-
-/**
- * Cache of expanded integrals. The expansion is a pure function of the
- * resolved integrand and bounds — slider VALUES stay symbolic inside it — so
- * a slider drag's per-keystroke recompiles hit this instead of re-running
- * the symbolic engine and its verification quadratures.
- */
-const intMemo = new Map<string, Expr>();
-
-/**
- * Expand an ∫: a verified antiderivative when integrate.ts finds one
- * (definite values additionally checked against adaptive quadrature — the
- * fundamental theorem lies across a non-integrable singularity), otherwise
- * a fixed Gauss–Legendre sum in ordinary Expr form.
- */
-/** ±1 for a bound written as ±inf/±∞, 0 for a finite (or absent) bound. */
-const infOf = (e: Expr | null): 1 | -1 | 0 => {
-  if (!e) return 0;
-  if (e.kind === 'var' && e.name === 'inf') return 1;
-  if (e.kind === 'neg' && e.a.kind === 'var' && e.a.name === 'inf') return -1;
-  return 0;
-};
-
-/**
- * Stand-in argument for an antiderivative's limit at ±∞. Far beyond any plot
- * range, so F(±BIG) matches the true limit wherever F converges by then —
- * and verifyDefinite runs the REAL improper quadrature, so a
- * not-yet-converged (or divergent) limit is rejected, never reported.
- */
-const INT_BIG = 1e8;
-
-function expandInt(bounds: [Expr, Expr] | null, rawBody: Expr, ctx: Ctx): Expr {
-  // Resolve the body FIRST: a d/dt inside consumes its own dt, user
-  // functions inline, and nested (parenthesized) integrals expand — only
-  // then is the surviving d<letter> factor unambiguous.
-  const m = stripDx(resolveIntegrand(rawBody, ctx));
-  if (!m) throw new Error('∫ needs its variable as a dx factor: int(x^2 dx) or int[0..2] x^2 dx.');
-  const v = m.v;
-  const integrand = m.integrand;
-  const lo = bounds && rx(bounds[0], ctx);
-  const hi = bounds && rx(bounds[1], ctx);
-  ctx.ints?.push(lo && hi && !m.residual ? { body: integrand, v, lo, hi } : null);
-  const out = integral(integrand, v, lo, hi, ctx);
-  // An enclosing integral's measure rides along: (∫ inner) · residual.
-  return m.residual ? { kind: 'bin', op: '*', a: out, b: m.residual } : out;
-}
-
-const containsReduction = (e: Expr): boolean => isReductionCall(e) || childrenOf(e).some(containsReduction);
-
-/**
- * An ∫ body, resolved with its variable bound: a reduction inside runs over
- * its own continuous sets for each value of it, so ∫₀¹ total({0 < u < 1:
- * x u}) dx is ∫₀¹ x/2 dx, not a total over every x as well. The variable is
- * certain only once the body has resolved (see expandInt), so a body with a
- * reduction is resolved again when the dx read off it first was not it.
- */
-function resolveIntegrand(rawBody: Expr, ctx: Ctx): Expr {
-  if (!containsReduction(rawBody)) return rx(rawBody, ctx);
-  const bound = (v: string | undefined): Expr => {
-    if (!v) return rx(rawBody, ctx);
-    const saved = ctx.opts;
-    ctx.opts = { ...saved, params: new Set([...(saved.params ?? []), v]) };
-    try {
-      return rx(rawBody, ctx);
-    } finally {
-      ctx.opts = saved;
-    }
-  };
-  let guess: string | undefined;
-  try {
-    guess = stripDx(rawBody)?.v;
-  } catch {
-    guess = undefined;
-  }
-  const body = bound(guess);
-  const v = stripDx(body)?.v;
-  return v === guess ? body : bound(v);
-}
-
-/**
- * ∫ integrand dv from lo to hi (resolved; null bounds for the indefinite
- * integral anchored at 0). Shared by ∫ rows and the reductions over
- * continuous sets that become integrals (lib/measure.ts).
- */
-function integral(integrand: Expr, v: string, lo: Expr | null, hi: Expr | null, ctx: Ctx): Expr;
-function integral(
-  integrand: Expr,
-  v: string,
-  lo: Expr | null,
-  hi: Expr | null,
-  ctx: Ctx,
-  exactOnly: boolean,
-): Expr | null;
-/** With `exactOnly`, a verified closed form or null — never the fixed-order
- *  numeric fallback (the caller integrates adaptively instead). */
-function integral(
-  integrand: Expr,
-  v: string,
-  lo: Expr | null,
-  hi: Expr | null,
-  ctx: Ctx,
-  exactOnly = false,
-): Expr | null {
-  const bounds = lo && hi;
-  let loI = infOf(lo);
-  let hiI = infOf(hi);
-  // Normalize a downhill infinite range (int[inf..0]) to the negated uphill one.
-  let flip = false;
-  if (loI === 1 || hiI === -1) {
-    [lo, hi] = [hi, lo];
-    [loI, hiI] = [hiI, loI];
-    flip = true;
-    if (loI === 1 || hiI === -1) return num(0); // int[inf..inf]: equal bounds
-  }
-  const memoKey = exprKey([v, integrand, lo, hi, exactOnly]);
-  const done = (out: Expr): Expr => (flip ? neg(out) : out);
-  const hit = intMemo.get(memoKey);
-  if (hit) return done(hit);
-
-  const F = antiderivative(integrand, v);
-  let out: Expr | null = null;
-  if (!bounds) {
-    out = F;
-  } else if (F) {
-    const loSub = loI ? num(loI * INT_BIG) : lo!;
-    const hiSub = hiI ? num(hiI * INT_BIG) : hi!;
-    const val = foldNums(sub(substVars(F, { [v]: hiSub }), substVars(F, { [v]: loSub })));
-    const loChk = loI ? num(loI * Infinity) : lo!;
-    const hiChk = hiI ? num(hiI * Infinity) : hi!;
-    if (verifyDefinite(val, integrand, v, loChk, hiChk)) out = val;
-  }
-  if (!out && exactOnly) return null;
-  if (!out) {
-    // Numeric fallback. An indefinite ∫ anchors at 0: F(x) = ∫₀ˣ; infinite
-    // ranges transform onto a finite interval first (improperSum).
-    ctx.terms += QUAD_TERMS;
-    if (ctx.terms > SUM_MAX_TOTAL) {
-      throw new Error(`Nested Σ/∫ expand to too many terms (limit ${SUM_MAX_TOTAL} total).`);
-    }
-    out = foldNums(
-      loI || hiI
-        ? improperSum(integrand, v, loI ? null : lo, hiI ? null : hi)
-        : quadratureSum(integrand, v, lo ?? num(0), hi ?? { kind: 'var', name: v }),
-    );
-    if (exprKey(out).length > 400_000) {
-      throw new Error('∫ has no closed form here and its numeric expansion is too large.');
-    }
-  }
-  if (intMemo.size > 500) intMemo.clear();
-  intMemo.set(memoKey, out);
-  return done(out);
-}
-
-/** Whether a parsed (unresolved) expression uses ∫ anywhere — after
- *  resolution the integral is gone, so row readouts test the parse. */
-export function usesIntegral(e: Expr): boolean {
-  switch (e.kind) {
-    case 'index':
-    case 'range':
-    case 'eqtest':
-    case 'comp':
-    case 'figure':
-    case 'lazy':
-    case 'trail':
-    case 'label':
-    case 'hist':
-    case 'family':
-      return childrenOf(e).some(usesIntegral);
-    case 'num':
-      return false;
-    case 'var':
-      return e.name === 'int';
-    case 'neg':
-      return usesIntegral(e.a);
-    case 'bin':
-      return usesIntegral(e.a) || usesIntegral(e.b);
-    case 'call':
-      return e.name === 'int' || e.args.some(usesIntegral);
-    case 'eq':
-      return usesIntegral(e.l) || usesIntegral(e.r);
-    case 'ineq':
-      return usesIntegral(e.l) || usesIntegral(e.r);
-    case 'vec':
-      return e.items.some(usesIntegral);
-    case 'list':
-      return e.items.some(usesIntegral);
-    case 'data':
-    case 'str':
-    case 'text':
-      return false;
-    case 'piecewise':
-      return (
-        e.cases.some(c => usesIntegral(c.cond) || usesIntegral(c.value)) ||
-        (e.otherwise ? usesIntegral(e.otherwise) : false)
-      );
-    case 'loop':
-      return childrenOf(e).some(usesIntegral);
-  }
-}
 
 /**
  * Resolve a whole row, also reporting the ∫ it consists of: `integral` is set
@@ -2285,7 +1569,7 @@ export function usesIntegral(e: Expr): boolean {
  * classifyRow (lib/plot.ts) turns them into the area a value row shades.
  */
 export function resolveRow(e: Expr, getFn: GetFn, opts: ResolveOpts = {}): ResolvedRow {
-  const ctx: Ctx = { getFn, opts, terms: 0, ints: [] };
+  const ctx: Ctx = { getFn, opts, terms: 0, ints: [], rx };
   const expr = rx(e, ctx);
   const m = splitSumChain(e);
   const call = !m ? e : !m.coeff && isIntHeader(m.header) ? intCallOf(m.header, m.body) : null;
@@ -2455,7 +1739,7 @@ export function stackCall(name: string, args: readonly Expr[]): Expr | null {
 }
 
 export function resolveExpr(e: Expr, getFn: GetFn, opts: ResolveOpts = {}): Expr {
-  return rx(e, { getFn, opts, terms: 0 });
+  return rx(e, { getFn, opts, terms: 0, rx });
 }
 
 /** What a map's row knows of its document: the names it defines, its
@@ -2464,7 +1748,7 @@ export function resolveExpr(e: Expr, getFn: GetFn, opts: ResolveOpts = {}): Expr
  *  whole numbers). `budget` counts
  *  the terms written out so far, shared by a row's maps and components
  *  under one limit as a row's tuple is. */
-export type MapDoc = Pick<ResolveOpts, 'documentNames' | 'boundConsts' | 'isList' | 'getList'> & {
+export type MapDoc = Pick<ResolveOpts, 'documentNames' | 'boundConsts' | 'isList' | 'getList' | 'valueNames'> & {
   fnNames?: ReadonlySet<string>;
   budget?: { terms: number };
 };
@@ -2803,7 +2087,7 @@ function rx(e: Expr, ctx: Ctx): Expr {
           }
           const comp = (k: number): Expr =>
             arg.kind === 'vec' ? arg.items[k] : { kind: 'comp', value: arg, index: k, arity: n, functionName: e.name };
-          return substVars(fn.body, Object.fromEntries(fn.params.map((p, k) => [p, comp(k)])));
+          return expandClosedSums(substVars(fn.body, Object.fromEntries(fn.params.map((p, k) => [p, comp(k)]))), ctx);
         }
         if (args.length !== n) {
           throw new Error(`${e.name} takes ${n} argument${n === 1 ? '' : 's'}.`);
@@ -2839,10 +2123,13 @@ function rx(e: Expr, ctx: Ctx): Expr {
           });
           return { kind: 'call', name: MAP, args: [{ kind: 'str', value: e.name }, substVars(fn.body, env), ...pairs] };
         }
-        const inlined = substVars(fn.body, {
-          ...Object.fromEntries(fn.params.map((p, k) => [p, args[k]])),
-          ...coordParams(fn, args, e.name, ctx.opts),
-        });
+        const inlined = expandClosedSums(
+          substVars(fn.body, {
+            ...Object.fromEntries(fn.params.map((p, k) => [p, args[k]])),
+            ...coordParams(fn, args, e.name, ctx.opts),
+          }),
+          ctx,
+        );
         // The body's named conditions, now that its parameters are its
         // arguments and cannot capture their variables (namedCondition). In
         // another function's body they wait for that function's call.
@@ -2856,11 +2143,6 @@ function rx(e: Expr, ctx: Ctx): Expr {
         throw new Error(
           'geodesic(S, (u0, v0), (du, dv)) draws a curve, so it must be the whole row — on a panel drawn on a surface, geodesic(P, (dx, dy)).',
         );
-      if (e.name === 'lightray')
-        throw new Error('lightray(P, (dx, dy)) draws a light ray, so it must be the whole row.');
-      if (e.name === 'lightcone') throw new Error('lightcone(P) draws a light cone, so it must be the whole row.');
-      if (e.name === 'tidal')
-        throw new Error('tidal(P) draws the tidal forces at a point, so it must be the whole row.');
       if (e.name === 'fourier' || e.name === 'reconstruct') {
         const params = ctx.opts.params;
         const opts: ResolveOpts = params?.size
@@ -3019,13 +2301,14 @@ export function buildDefs(raw: Definition[], tables?: TableSource, sequences: Se
   const stateNames = new Set(raw.filter(d => d.kind === 'state').map(d => d.name));
   // Names this document binds as values shadow a late-addition builtin of the
   // same name, so `total = 3` still reads `total(x + 1)` as a product.
-  const valueNames = shadowedFnNames(raw.filter(d => d.kind !== 'fn').map(d => d.name));
+  const valueNames = shadowedNames(raw.filter(d => d.kind !== 'fn').map(d => d.name));
   const msg = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
   // Numeric values of constants resolved so far: Σ/Π bounds in later
   // definitions may use them (bounds need a value at expansion time).
   const numEnv: Record<string, number> = {};
   const ropts: ResolveOpts = {
+    valueNames,
     inDefinition: true,
     consts: numEnv,
     boundConsts: new Set(),
@@ -3055,7 +2338,7 @@ export function buildDefs(raw: Definition[], tables?: TableSource, sequences: Se
     // and index too, p[2], since an argument may be a tuple or a multiset of
     // them (docs/multisets.md §3).
     if (!p) {
-      const values = d.kind === 'fn' ? new Set([...valueNames, ...shadowedFnNames(d.params)]) : valueNames;
+      const values = d.kind === 'fn' ? new Set([...valueNames, ...shadowedNames(d.params)]) : valueNames;
       const names = d.kind === 'fn' ? new Set([...indexNamesOf(defs), ...d.params]) : indexNamesOf(defs);
       parsed.set(key, (p = parseExpr(d.rhs, fnNames, names, values)));
     }

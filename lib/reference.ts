@@ -1,8 +1,10 @@
 /**
- * The language reference (docs/reference/), read into one structure that
- * three outputs are generated from: the site's docs pages (web/docs), the
- * single-file web/public/llms.txt, and the Apple app's lookup tools
- * (list_kinds, kind_examples, function_doc, shape; lib/assistant-tools.ts).
+ * The Apple app's language reference (docs/reference/), read into one
+ * structure that its outputs are generated from: the app's lookup tools
+ * (list_kinds, kind_examples, function_doc, shape; lib/assistant-tools.ts),
+ * and the whole reference as one file (llmsTxt), which the app's evals search
+ * (read_syntax) or put in context. The site's own reference,
+ * web/public/llms.txt, is written by hand and is not generated from here.
  *
  * The source is Markdown, a page per file, each opening with `key: value`
  * front matter between `---` lines:
@@ -383,7 +385,7 @@ function shapesSection(ref: Reference): string {
   return [`## ${ref.shapesPage.title}`, plain(ref.shapesPage.intro), ...ref.shapes.map(shape)].join('\n\n');
 }
 
-/** web/public/llms.txt: the whole reference as one file, for MCP clients and other assistants. */
+/** The whole reference as one file, in the layout of the site's llms.txt: what the evals' read_syntax searches. */
 export function llmsTxt(ref: Reference): string {
   const out = [`# equation.io\n\n${ref.blurb.trim()}`];
   const listed = new Set<string>();

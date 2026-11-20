@@ -35,6 +35,6 @@ they declare a random variable. Bare distribution aliases are case-insensitive,
 including `exp`/`EXP`. For a declared data list, `Y ~ exp(a X)` is an
 exponential regression model in any capitalization; with an undeclared
 left-hand name, `Z ~ exp(2)` declares an exponential random variable.
-Missing CSV data stays device-local in MCP and
-previews, including curves that depend on its fitted coefficients. Fits over
-literal data and their model curves work in shared links and static previews.
+Missing CSV data stays device-local in MCP, including curves that depend on
+its fitted coefficients. Fits over literal data and their model curves work in
+shared links.

@@ -4,21 +4,32 @@ summary: Sliders, functions, named points, states, data files, lists, matrices, 
 ---
 
 - Reserved names — never define these, use them as a constant, or put a
-  slider on them: `t` is animation time in seconds (it plays on its own; any
-  row using t animates), `x`, `y`, `z` are the plot axes, `w` is the
+  slider on them: `t` is animation time in seconds (it plays on its own;
+  any row using t animates), `x`, `y`, `z` are the plot axes, `w` is the
   complex variable x + iy, `i` is the imaginary unit, `e` is Euler's
   number, `pi` is π, and `d` is the derivative operator. `u` and `v` are
   the curve/surface parameters: they can't be numbers either, but they can
   be redefined as another interval (`u = interval(0, 2pi)`; the default is
-  `interval(0, 1)`). Pick any other name for your own numbers:
+  `interval(0, 1)`). None of these can name a function either: a reserved
+  name followed by `(…)` multiplies, so `x(y - 1) = 1` is x·(y − 1) = 1,
+  and `u(x, y) = x^2 + y^2` is u times a point ("u(x, y) reads as u times
+  (x, y)"). Name your own functions f, g, h or a word, write
+  `f(x, y) = …` and call f. Pick any other name for your own numbers:
   - Don't: `t = 3` then `(cos(2pi u), sin(2pi t u))` — t is time, so
     `t = 3` is rejected ("t is reserved for time") and the curve would keep
     changing as t counts up.
   - Do: `k = 3` then `(cos(2pi u), sin(2pi k u))` — a Lissajous figure with
     k lobes, and k becomes a draggable slider.
     (Good names: k, n, m, a, b, c, s, r, or a word like `twist`.)
+  Only when you really mean to replace a built-in across the whole graph,
+  define it with `:=` — `e := 0.6`, `pi := 3`, `i := 3`, `w := x - y`, or
+  `t := 0.5`, which stops all animation — and the built-in meaning is gone
+  from every row (`i := 3` makes `(1 + 2i)` the number 7). Only as a value:
+  `e(x) := …` is rejected. `x`, `y`, `z` and `d` can't be redefined.
 - Constant: `a = 2` — the UI shows a draggable slider for it. Computed
-  constants allowed: `b = a^2 + t`.
+  constants allowed: `b = a^2 + t`. Every definition may be written with
+  `:=` instead (`a := 2`, `f(x) := x^2`): the same row, said explicitly,
+  and the only way to redefine e, pi, i, w or t (see Reserved names).
 - Slider range and step: `a = clamp(0.4, 0, 1)` is a slider over [0, 1],
   and `n = round(5)` (or floor/ceil) steps by whole numbers; they combine,
   `r = round(clamp(30, 0, 255))`. The value is what the expression says —
@@ -132,8 +143,8 @@ summary: Sliders, functions, named points, states, data files, lists, matrices, 
   parsing (`1,5` is 1.5). Columns without comma-form numbers keep dot decimals
   (`1.234` is 1.234). The readout reports decimal-comma interpretation.
   Because the bytes never
-  enter the URL, opening the link on another device (or rendering it
-  server-side, as share-link previews do) reports the data as
+  enter the URL, opening the link on another device (or validating it
+  server-side, as the MCP does) reports the data as
   device-local instead of drawing it; dropping the same file there restores
   it. The row's readout opens a preview of the first rows as they parsed.
   `adults = person[person.age >= 18]` names a filtered copy of a file (see the

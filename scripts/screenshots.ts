@@ -18,7 +18,6 @@ import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node
 import { dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { chromium } from 'playwright';
-import { LANDINGS } from '../lib/landings.ts';
 import { HERO, SHOWCASE, type ShowcaseItem, hashUrl } from '../web/about/showcase.ts';
 import { EXAMPLES, exampleShotPath } from '../web/examples.ts';
 import { splitStatements } from '../lib/statements.ts';
@@ -221,16 +220,6 @@ try {
         }
       }),
     );
-
-    // Landing pages whose hero the OG renderer cannot draw need a stable PNG
-    // at /shots/<slug>.png (the gallery file is WebP and content-hashed).
-    for (const page of LANDINGS) {
-      if (page.og !== 'shot') continue;
-      if (!wanted(page.hero) && !wanted(page.slug)) continue;
-      const item = SHOWCASE.find(i => i.slug === page.hero);
-      if (!item) throw new Error(`landing ${page.slug}: no showcase item "${page.hero}"`);
-      await shoot({ ...item, slug: page.slug }, { width: 900, height: 600, panel: false, dir: HERO_DIR });
-    }
   }
 
   const args = process.argv.slice(2);

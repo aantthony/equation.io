@@ -1,13 +1,13 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
-import { LLMS_TXT, SWIFT_INSTRUCTIONS, readReference, referenceFiles } from '../scripts/reference.ts';
+import { SWIFT_INSTRUCTIONS, readReference, referenceFiles } from '../scripts/reference.ts';
 import { analyzeRows } from './analysis.ts';
 import { CHARTED_GROUPS, swiftInstructions } from './assistant-instructions.ts';
-import { kindOf } from './assistant-tools.ts';
+import { KIND_MEANINGS, kindOf } from './assistant-tools.ts';
 import { parseCsv } from './csv.ts';
 import { builtinHelp } from './syntax-help.ts';
 import { kindNames, llmsTxt } from './reference.ts';
-import { KIND_MEANINGS, rowKind } from './row-kind.ts';
+import { rowKind } from './row-kind.ts';
 import { splitStatements } from './statements.ts';
 
 const ref = readReference();
@@ -82,12 +82,11 @@ describe('the reference', () => {
     expect(names.filter((name, k) => names.indexOf(name) !== k)).toEqual([]);
   });
 
-  it('has written web/public/llms.txt and Instructions.swift (pnpm reference)', () => {
-    expect(readFileSync(LLMS_TXT, 'utf8')).toBe(llmsTxt(ref));
+  it('has written Instructions.swift (pnpm reference)', () => {
     expect(readFileSync(SWIFT_INSTRUCTIONS, 'utf8')).toBe(swiftInstructions(kindNames(ref, CHARTED_GROUPS)));
   });
 
-  it('keeps one kind per heading in llms.txt, its name first, and More last', () => {
+  it('keeps one kind per heading in the one-file reference, its name first, and More last', () => {
     const llms = llmsTxt(ref);
     const headings = [...llms.matchAll(/^### (.+) \(`(\w+)`\)$/gm)].map(m => m[2]);
     expect(headings.sort()).toEqual(Object.keys(KIND_MEANINGS).sort());

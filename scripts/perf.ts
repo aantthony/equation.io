@@ -159,6 +159,13 @@ const SCENARIOS: Scenario[] = [
     action: page => dragSlider(page, 30),
   },
   {
+    // A clamped bound expands to the slider's maximum with each term gated
+    // on N, so the same drag only moves a uniform.
+    name: 'sum-clamp-slider-drag',
+    rows: ['N = round(clamp(3, 1, 50))', 'y = (4/pi) sum(k=1..N, sin((2k-1)x)/(2k-1))'],
+    action: page => dragSlider(page, 30),
+  },
+  {
     name: 'vector-field',
     rows: ['(-y, x)'],
     action: page => settle(page, 60),

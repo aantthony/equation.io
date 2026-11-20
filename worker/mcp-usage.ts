@@ -5,7 +5,7 @@
  *   blob1    kind     call | type
  *   blob2    tool     encode_graph_url | show_graph | decode_graph_url
  *   blob3    client   the User-Agent's product name (claude-user, node, …)
- *   blob4    type     a graph type (lib/row-kind.ts KIND_MEANINGS); '' on a call
+ *   blob4    type     a graph type (PublicKind, lib/math-object.ts); '' on a call
  *   blob5    reason   failed calls only: a FailReason, never the error message
  *   double1  rows           calls only
  *   double2  error rows     calls only: rows that came back status "error"
@@ -17,6 +17,9 @@
  * rows say or an error message (which can quote them), so no equation text
  * reaches the dataset. Calls come from the AI provider's
  * servers, so there is no person, IP or country to record either.
+ *
+ * Only production is counted: preview versions that Workers Builds uploads
+ * for PR branches share this dataset, so their test calls are skipped.
  *
  * Site traffic needs nothing like this: Cloudflare's own zone analytics
  * already count it (scripts/traffic.ts).
@@ -54,6 +57,7 @@ export function clientName(ua: string): string {
 }
 
 export function recordToolCall(env: Env, request: Request, tool: Tool, stats: CallStats): void {
+  if (new URL(request.url).hostname !== 'equation.io') return;
   const client = clientName(request.headers.get('User-Agent') ?? '');
   try {
     env.MCP_USAGE.writeDataPoint({

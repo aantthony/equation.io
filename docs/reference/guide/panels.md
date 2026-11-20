@@ -26,4 +26,4 @@ panel under the pointer.
 - A 3D surface beside its contour map:
   `z = sin(x) cos(y); --- right; view(x = -4..4, y = -4..4); sin(x) cos(y)`
 - At most 8 panels. Options: order is free, commas optional
-  (`--- below 40%, shared x`). The /g/ preview draws the panels too.
+  (`--- below 40%, shared x`).

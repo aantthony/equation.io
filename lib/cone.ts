@@ -52,24 +52,6 @@ export function buildUnitCone(sides = CONE_SIDES): {
   };
 }
 
-/** Orthonormal frame with +z along `dir`. Matches the cone instance shader. */
-export function coneBasis(dir: [number, number, number]): {
-  x: [number, number, number];
-  y: [number, number, number];
-  z: [number, number, number];
-} {
-  const len = Math.hypot(...dir);
-  const z: [number, number, number] = [dir[0] / len, dir[1] / len, dir[2] / len];
-  const h: [number, number, number] = Math.abs(z[2]) < 0.9 ? [0, 0, 1] : [1, 0, 0];
-  const cx = h[1] * z[2] - h[2] * z[1],
-    cy = h[2] * z[0] - h[0] * z[2],
-    cz = h[0] * z[1] - h[1] * z[0];
-  const cl = Math.hypot(cx, cy, cz);
-  const x: [number, number, number] = [cx / cl, cy / cl, cz / cl];
-  const y: [number, number, number] = [z[1] * x[2] - z[2] * x[1], z[2] * x[0] - z[0] * x[2], z[0] * x[1] - z[1] * x[0]];
-  return { x, y, z };
-}
-
 /**
  * One lit cone per finite run, plus a copy of `pts` whose last vertex on each
  * run sits at the cone base so the shaft does not poke through the tip.

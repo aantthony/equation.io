@@ -2,7 +2,7 @@ import { type Env } from './env.ts';
 /** Pure, tolerant editor assistance. Suggestions write ordinary equation
  * text; an incomplete expression never needs to pass through the parser.
  */
-import { pointComponentNames, shadowedFnNames } from './defs.ts';
+import { pointComponentNames, shadowedNames } from './defs.ts';
 import { DIST_FAMILIES, distFamily, distUsage, isModelName } from './dist-families.ts';
 import { tildeRow } from './regression.ts';
 import {
@@ -185,23 +185,11 @@ const signatures: Record<string, [string, string]> = {
   frame: ['frame(C, u0)', 'The Frenet frame of a curve in u at u = u0: unit T and N, and B in 3D'],
   gaussian: [
     'gaussian(S) or gaussian(S, u0, v0)',
-    'Gaussian curvature K of a surface in u, v; alone on a row it colours S by K. On an on(…) panel, or under a ds^2 = … metric row, gaussian(x, y) paints K (with a time, of space at one instant)',
+    'Gaussian curvature K of a surface in u, v; alone on a row it colours S by K. On an on(…) panel, gaussian(x, y) paints K',
   ],
   geodesic: [
     'geodesic(S, (u0, v0), (du, dv)) or geodesic(S, P, d, length)',
-    'The geodesic of a surface in u, v from a point in a direction; on an on(…) panel, or under a ds^2 = … metric row, geodesic(P, (dx, dy)) — in a spacetime (dx, dy) is the velocity d(x, y)/dt',
-  ],
-  lightcone: [
-    'lightcone(P)',
-    'The light cone of the panel’s ds^2 metric at P: on a spacetime diagram the two null directions, a wedge opening to the future; with a time beside x and y the ellipse of the speeds light can have there. lightcones alone on a row draws them over the panel',
-  ],
-  lightray: [
-    'lightray(P, (dx, dy)) or lightray(P, d, length)',
-    'A light ray of the panel’s spacetime metric (a ds^2 = … row with a time, like -(1 - 2/r) dt^2 + dr^2/(1 - 2/r) + r^2 dphi^2, or a spacetime diagram, like -dy^2 + dx^2, where it runs along the null direction nearest d) from P in a direction',
-  ],
-  tidal: [
-    'tidal(P)',
-    'The tidal forces of the panel’s ds^2 metric at P on an observer held at rest: crossed bars along the directions a small cloud of free particles is stretched (arrowheads out) or squeezed (in), as long as the tide is strong. tidal alone on a row draws them over the panel',
+    'The geodesic of a surface in u, v from a point in a direction; on an on(…) panel, geodesic(P, (dx, dy))',
   ],
   meancurvature: [
     'meancurvature(S) or meancurvature(S, u0, v0)',
@@ -366,19 +354,6 @@ export function syntaxHelp(text: string, offset: number, defs: Env, declared?: R
   values(['e_yz'], 'Bivector e_y ⟑ e_z');
   values(['e_zx'], 'Bivector e_z ⟑ e_x');
   values(['e_xyz'], 'Pseudoscalar e_x ⟑ e_y ⟑ e_z: the unit volume');
-  // The head of a metric row (lib/metric.ts), not a value of its own.
-  values(
-    ['ds'],
-    'ds^2 = …: the panel’s own metric, in differentials like dx, dr or dt; its geodesic and lightray rows follow it',
-  );
-  values(
-    ['lightcones'],
-    'lightcones alone on a row: the light cones of the panel’s ds^2 metric, drawn over the panel; lightcone(P) draws one at a point',
-  );
-  values(
-    ['tidal'],
-    'tidal alone on a row: the tidal forces of the panel’s ds^2 metric on observers held at rest, drawn over the panel; tidal(P) draws them at a point',
-  );
   // (Not a named value's hidden coefficients, M#3: no row can write them.)
   values(
     [...defs.consts.keys()].filter(n => !n.includes('#')),
@@ -450,7 +425,7 @@ export function syntaxHelp(text: string, offset: number, defs: Env, declared?: R
     return { start, end, suggestions, hint };
   }
   const call = [...stack].reverse().find(s => s.name)?.name;
-  const shadowed = shadowedFnNames([...candidates.values()].filter(s => !s.call).map(s => s.name));
+  const shadowed = shadowedNames([...candidates.values()].filter(s => !s.call).map(s => s.name));
   const blocked = call && !defs.fns.has(call) && shadowed.has(builtinFn(call) ?? '');
   // The HEAD of a ~ row — the first token right of the ~, its paren the
   // outermost one open — is a distribution name in any spelling, aliases

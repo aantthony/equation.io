@@ -99,7 +99,7 @@ export function parseAxisMap(axis: Axis, src: string, env: Record<string, number
   const usage = `An axis map writes ${axis} in terms of the screen's ${screen}, like ${axis} = 10^${screen}.`;
   let forward: Expr;
   try {
-    forward = parseExpr(src);
+    forward = parseExpr(src, undefined, undefined, doc.valueNames);
   } catch {
     throw new Error(usage);
   }
@@ -349,12 +349,6 @@ export function axisMapping(object: MathObject, maps?: AxisMaps): AxisMapping | 
     case 'note':
     case 'tuple':
       return 'none';
-    // Its geodesics are traced in x and y over the window, which a mapped
-    // panel does not show as a rectangle: not yet.
-    case 'metric':
-    case 'lightcone':
-    case 'tidal':
-      return null;
     case 'color-field':
       return 'substitute';
     case 'curve':

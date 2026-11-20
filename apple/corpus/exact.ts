@@ -15,7 +15,6 @@ import {
   complexRootLabels,
   exprToPoly,
   fpdivmod,
-  fpextgcd,
   fpgcd,
   frac,
   polynomialRoots,
@@ -127,7 +126,21 @@ for (const k of [53n, 54n, 55n, 64n, 65n, 100n, 1023n, 1024n, 1100n]) {
 const numbers = rounding.flatMap(a => [a, -a]).map(a => ({ a, number: Number(a) }));
 
 // BigInt(v) of whole doubles.
-const wholes = [0, 1, -1, 2 ** 31, 2 ** 32, 2 ** 53, 2 ** 53 + 2, -(2 ** 64), 1e15, 1e21, 1e22, 1e100, 1.7976931348623157e308];
+const wholes = [
+  0,
+  1,
+  -1,
+  2 ** 31,
+  2 ** 32,
+  2 ** 53,
+  2 ** 53 + 2,
+  -(2 ** 64),
+  1e15,
+  1e21,
+  1e22,
+  1e100,
+  1.7976931348623157e308,
+];
 for (let i = 0; i < 40; i++) wholes.push(Math.round((random() - 0.5) * 2 ** (10 + Math.floor(random() * 200))));
 const fromDouble = wholes.map(v => ({ v, big: BigInt(v) }));
 
@@ -252,29 +265,29 @@ const polys = polySources.map(src => {
     primitive: p && fp(primitive(p)),
     factors,
     real,
-    roots: roots === 'zero' ? 'zero' : roots && roots.map(r => ({ ...r, sym: r.sym ?? null, rootOf: r.rootOf ?? null })),
+    roots:
+      roots === 'zero' ? 'zero' : roots && roots.map(r => ({ ...r, sym: r.sym ?? null, rootOf: r.rootOf ?? null })),
     complex: complex && { roots: complex.roots, rootOf: complex.rootOf ?? null },
   };
 });
 
-// Division, gcd and the extended gcd, over pairs of the polynomials above.
+// Division and gcd, over pairs of the polynomials above.
 const numeric = polys.map(p => exprToPoly(p.e, 'x')).filter((p): p is FPoly => !!p && p.length > 0);
 const polyPairs: unknown[] = [];
 for (let i = 0; i < numeric.length; i++) {
   for (const j of [i, (i * 7 + 3) % numeric.length, (i * 13 + 5) % numeric.length]) {
     const [a, b] = [numeric[i], numeric[j]];
-    // (Small coefficients: the cofactors of an extended gcd grow fast, and the port's integers are slower.)
-    const small = (p: FPoly): boolean => p.length <= 12 && p.every(c => c.n < 1n << 64n && c.n > -(1n << 64n) && c.d < 1n << 64n);
+    // (Small coefficients: the port's integers are slower.)
+    const small = (p: FPoly): boolean =>
+      p.length <= 12 && p.every(c => c.n < 1n << 64n && c.n > -(1n << 64n) && c.d < 1n << 64n);
     if (!small(a) || !small(b)) continue;
     const { q, r } = fpdivmod(a, b);
-    const ext = fpextgcd(a, b);
     polyPairs.push({
       a: fp(a),
       b: fp(b),
       q: fp(q),
       r: fp(r),
       gcd: fp(fpgcd(a, b)),
-      ext: { g: fp(ext.g), s: fp(ext.s), t: fp(ext.t) },
     });
   }
 }

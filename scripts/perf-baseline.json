@@ -55,6 +55,13 @@
     "p95FrameMs": 58.3,
     "longFrames": 10
   },
+  "sum-clamp-slider-drag": {
+    "compilesAfterLoad": 5,
+    "compilesDuringAction": 0,
+    "avgFrameMs": 45.4,
+    "p95FrameMs": 75,
+    "longFrames": 29
+  },
   "vector-field": {
     "compilesAfterLoad": 5,
     "compilesDuringAction": 0,

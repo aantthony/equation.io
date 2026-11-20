@@ -70,15 +70,15 @@
     <!-- sections are rendered from showcase.ts -->
   </main>
 
-  <!-- Each panel's id is its link: /about/#claude opens that tab. Without
+  <!-- Each panel's id is its link: /about/#chatgpt opens that tab. Without
        script every panel shows, each under its own heading; about.ts turns
        them into tabs. -->
   <section class="ai" id="ai">
     <p class="kicker">MCP&nbsp;/&nbsp;AI apps</p>
     <h2 class="display small">Graphs <em>in</em> your AI chat</h2>
     <p>
-      Connect Equation.io to your AI app, then ask for a graph. In Claude and
-      ChatGPT it appears right in the conversation — edit the equations, drag
+      Connect Equation.io to your AI app, then ask for a graph. In ChatGPT and
+      Claude it appears right in the conversation — edit the equations, drag
       the sliders, rotate it in 3D — and every graph comes with a link to open
       it here. No account, no API key.
     </p>
@@ -88,10 +88,18 @@
     </div>
 
     <div class="ai-tabs" role="tablist" aria-label="AI app" hidden>
-      <a role="tab" id="tab-claude" href="#claude" aria-controls="claude">Claude</a>
       <a role="tab" id="tab-chatgpt" href="#chatgpt" aria-controls="chatgpt">ChatGPT</a>
+      <a role="tab" id="tab-claude" href="#claude" aria-controls="claude">Claude</a>
       <a role="tab" id="tab-grok" href="#grok" aria-controls="grok">Grok</a>
       <a role="tab" id="tab-other" href="#other" aria-controls="other">Other apps</a>
+    </div>
+
+    <div class="ai-panel" id="chatgpt" role="tabpanel" aria-labelledby="tab-chatgpt">
+      <h3>ChatGPT</h3>
+      <p>
+        <a href="https://chatgpt.com/plugins/plugin_asdk_app_6abeeccb394081918a1bc17f2c72b341" rel="noopener"><b>Add Equation.io to ChatGPT</b></a>,
+        then ask for a graph: <q>Graph y = a sin(x) with a slider for a.</q>
+      </p>
     </div>
 
     <div class="ai-panel" id="claude" role="tabpanel" aria-labelledby="tab-claude">
@@ -107,20 +115,6 @@
         Connectors</b>. Claude marks custom connectors as unverified —
         Equation.io needs no sign-in, and its tools only make and read graphs.
         <a href="https://claude.com/docs/connectors/custom/remote-mcp" rel="noopener">Anthropic's guide</a>
-      </p>
-    </div>
-
-    <div class="ai-panel" id="chatgpt" role="tabpanel" aria-labelledby="tab-chatgpt">
-      <h3>ChatGPT</h3>
-      <ol>
-        <li>On chatgpt.com, turn on <b>Settings → Security and login → Developer mode</b>.</li>
-        <li>Open <b>Plugins</b>, click <b>+</b>, name it <b>Equation.io</b>, paste <code>https://equation.io/mcp</code> with no authentication, and create it.</li>
-        <li>In a new chat, add Equation.io from the <b>+</b> menu and ask for a graph: <q>Graph y = a sin(x) with a slider for a.</q></li>
-      </ol>
-      <p class="note">
-        Developer mode is a beta on ChatGPT's paid plans, on the web, and ChatGPT
-        shows a warning for apps it hasn't reviewed.
-        <a href="https://help.openai.com/en/articles/12584461-developer-mode-and-mcp-apps-in-chatgpt" rel="noopener">OpenAI's guide</a>
       </p>
     </div>
 

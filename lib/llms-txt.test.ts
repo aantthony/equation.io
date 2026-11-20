@@ -40,16 +40,13 @@ describe('llms.txt', () => {
       '## Definitions',
       'Reserved names', // t is time, not a constant
       'Do: `k = 3`',
-      'https://equation.io/implicit/',
-      'https://equation.io/slope-field/',
-      'https://equation.io/complex/',
     ]) {
       expect(llms).toContain(marker);
     }
   });
 
   it('describes the MCP server its resource is served from', () => {
-    for (const marker of ['encode_graph_url', 'decode_graph_url', '`syntax` MCP resource', 'PNG preview']) {
+    for (const marker of ['encode_graph_url', 'decode_graph_url', '`syntax` MCP resource']) {
       expect(llms).toContain(marker);
     }
   });
@@ -167,6 +164,20 @@ describe('llms.txt', () => {
     expect(llms).toMatch(/`t` is animation time/);
     expect(analyzeRows(['t = 3']).rows[0].error).toMatch(/t is reserved for time/);
     const ok = analyzeRows(['k = 3', '(cos(2pi u), sin(2pi k u))']);
+    expect(ok.rows.map(r => r.error)).toEqual([undefined, undefined]);
+  });
+
+  it('documents a reserved name before (…) as a product, and the parser agrees', () => {
+    expect(llms).toContain('`x(y - 1) = 1` is x·(y − 1) = 1');
+    // The product reading is a graph, not an error, and gets no hint.
+    for (const row of ['x(y - 1) = 1', 'x(y) = 1', 'y(x) = x^2']) {
+      const r = analyzeRows([row]).rows[0];
+      expect(r.error, row).toBeUndefined();
+      expect(r.cls, row).toBeDefined();
+    }
+    expect(llms).toContain('("u(x, y) reads as u times\n  (x, y)")');
+    expect(analyzeRows(['u(x, y) = x^2 + y^2']).rows[0].error).toMatch(/^u\(x, y\) reads as u times \(x, y\)/);
+    const ok = analyzeRows(['f(x, y) = x^2 + y^2', 'z = f(x, y)']);
     expect(ok.rows.map(r => r.error)).toEqual([undefined, undefined]);
   });
 });
