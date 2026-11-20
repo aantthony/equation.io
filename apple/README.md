@@ -70,6 +70,16 @@ node ../tools/web-shot.ts --out web.png "y = sin(x)" "x^2 + y^2 = 9"  # the live
 swift run metal-shot --diff web.png metal.png --out diff.png
 ```
 
+`Render3D.swift` and `Renderer3D.swift` are `web/render3d.ts` the same way:
+its scene types, and its vertex and fragment shaders (`Frag3D.swift`)
+compiled as Metal by `GLSL3D.swift`. The language's Swift port doesn't
+compile 3D rows yet, so a 3D scene comes from the TypeScript for now:
+
+```sh
+node --experimental-transform-types ../tools/scene3d.ts "z = sin(x) cos(y)" "camera(-pi/3, 0.5, 9)" > scene.json
+swift run metal-shot --out metal.png --scene scene.json
+```
+
 The site is the reference for what a graph looks like, not a pixel target:
 where Metal offers a better trade (precision, speed, antialiasing), take it,
 and say so where the code departs.
