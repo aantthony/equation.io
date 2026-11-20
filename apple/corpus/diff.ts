@@ -348,9 +348,7 @@ for (const [src, input] of built) {
 const list = [...entries.values()];
 writeFileSync(new URL('diff-corpus.json', fixtures), JSON.stringify(list) + '\n');
 const errors = list.filter(e => e.error !== undefined);
-console.log(
-  `${list.length} derivatives, ${errors.length} errors; left out: ${oversize} too long`,
-);
+console.log(`${list.length} derivatives, ${errors.length} errors; left out: ${oversize} too long`);
 for (const [message, group] of Object.entries(Object.groupBy(errors, e => `${e.errorType}: ${e.error}`))) {
   console.log(`  ${group!.length}  ${message}`);
 }
