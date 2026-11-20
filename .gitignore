@@ -124,6 +124,8 @@ worker-configuration.d.ts
 apple/corpus/out/
 apple/EquationCore/Tests/EquationCoreTests/Fixtures/*.json
 apple/EquationCore/Tests/EquationAssistTests/Fixtures/*.json
+# Written by pnpm swift:scenes3d
+apple/EquationCore/Tests/EquationRenderTests/Scenes/3D/documents.json
 # Written by pnpm app:data
 apple/Equation/Data/
 apple/Equation/Equation.xcodeproj/

@@ -33,7 +33,7 @@ func spaceGraph(_ rows: [String], theme: GraphTheme, time: Double, explain: Bool
       FileHandle.standardError.write(Data("not drawn: \(text): \(problem)\n".utf8))
     }
   }
-  let colors = Graph2D.colors(analysis, ids: Array(rows.indices), previous: [:], theme: theme).colors
+  let colors = Graph2D.colors(analysis, ids: Array(rows.indices), previous: [:], theme: theme, sources: rows).colors
   var document = Document3D(analysis, colors: colors)
   for (k, text) in rows.enumerated() {
     guard let at = noteStart(text) else { continue }

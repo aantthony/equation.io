@@ -172,7 +172,7 @@ if let path = options["--scene"] {
       FileHandle.standardError.write(Data("not drawn: \(text): \(problem)\n".utf8))
     }
   }
-  let colors = Graph2D.colors(analysis, ids: Array(rest.indices), previous: [:], theme: theme).colors
+  let colors = Graph2D.colors(analysis, ids: Array(rest.indices), previous: [:], theme: theme, sources: rest).colors
   if flags.contains("--explain") {
     // What the language made of each row.
     for (k, row) in analysis.rows.enumerated() {
