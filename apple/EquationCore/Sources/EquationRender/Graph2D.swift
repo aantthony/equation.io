@@ -111,6 +111,8 @@ public struct Graph2D: Equatable, Sendable {
           pts.append((try? evaluate(comps[1], scope)) ?? .nan)
         }
         overlay.polylines.append(.init(pts: pts, color: css))
+      case .polygon, .label:
+        _ = drawGeometry(cpu, env, color: color, into: &overlay)
       default:
         break
       }
