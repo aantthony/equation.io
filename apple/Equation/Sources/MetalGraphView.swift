@@ -3,44 +3,112 @@ import EquationRender
 import MetalKit
 import SwiftUI
 
-/// The window onto the plane and the graph's clock, shared by the Metal view
-/// and the overlay drawn over it.
+/// One panel's window or camera as it is now: where a hand, a move or its
+/// row last put it.
+struct PanelState: Equatable {
+  var view = View2D()
+  var camera = Camera3D()
+  /// The camera's turn about the vertical axis, in radians a second, and
+  /// the factor a new spin eases in by.
+  var spin = 0.0
+  var spinScale = 1.0
+  /// Whether the panel has been given its opening window or camera.
+  var framed = false
+  /// Whether it was framed as a 3D panel.
+  var spatial = false
+  /// The text of the view(…) or camera(…) row the panel was last framed
+  /// from, or last wrote: a row that differs is a new framing to take.
+  var applied: String?
+  /// A hand or a move has changed the window since it was framed: until
+  /// then a resized view frames it again (a window comes up at one size and
+  /// settles at another, and a view(…) row's ranges should fill what it settles at).
+  var touched = false
+}
+
+/// The panels' windows and cameras and the graph's clock, shared by the
+/// Metal view and the overlay drawn over it.
 @MainActor @Observable
 final class GraphViewport {
-  var view = View2D()
+  var states: [PanelState] = []
   /// When the graph opened, which is when t was 0.
   var opened = Date.now
+  /// The Metal view's size in device pixels, and how many of them make a point.
+  var pixels = CGSize.zero
+  var scale = 1.0
+  /// The point under a drag, drawn with a halo.
+  var hot: Int?
+
+  /// Seconds since the graph opened.
+  var time: Double { Date.now.timeIntervalSince(opened) }
+
+  /// Where the panels are, in device pixels from the top-left corner.
+  func boxes(_ content: GraphPanels) -> [PanelBox] {
+    panelBoxes(content.splits, width: pixels.width, height: pixels.height, margin: (12 * scale).rounded())
+  }
+
+  /// The frame as it is at `time`: each panel's box, and what it shows
+  /// there. `overlay` adds what the CPU evaluates for the 2D panels (the
+  /// points and curves drawn over the shader passes).
+  func frames(_ content: GraphPanels, time: Double, overlay: Bool) -> [PanelFrame] {
+    let boxes = boxes(content)
+    return content.panels.indices.compactMap { k -> PanelFrame? in
+      guard k < states.count, k < boxes.count else { return nil }
+      let panel = content.panels[k]
+      if let space = panel.space {
+        return PanelFrame(
+          box: boxes[k], content: .space(camera: states[k].camera, scene: space.scene(at: time)),
+          env: space.environment(at: time), grid: panel.grid)
+      }
+      var extras: Overlay2D?
+      if overlay {
+        var drawn = panel.plane.overlay(at: time)
+        if let hot, panel.rows.contains(hot) {
+          var env = panel.plane.environment(at: time)
+          env["t"] = time
+          // The overlay doesn't say which row a dot is: the one where the held point is.
+          for at in content.analysis.grabPoints(rows: hot..<(hot + 1), env: env) {
+            for index in drawn.points.indices where drawn.points[index].x == at.x && drawn.points[index].y == at.y {
+              drawn.points[index].hot = true
+            }
+          }
+        }
+        extras = drawn
+      }
+      return PanelFrame(
+        box: boxes[k], content: .plane(view: states[k].view, layers: panel.plane.layers, overlay: extras),
+        env: panel.plane.environment(at: time), grid: panel.grid)
+    }
+  }
 }
 
 /// The graph's Metal view, with the overlay over it.
 struct MetalGraphView: View {
-  var graph: Graph2D
+  var content: GraphPanels
   var theme: GraphTheme
   var generation: Int
   var model: GraphModel
   @State private var viewport = GraphViewport()
-  @Environment(\.displayScale) private var displayScale
 
   var body: some View {
-    MetalCanvasView(graph: graph, theme: theme, generation: generation, viewport: viewport, model: model)
+    MetalCanvasView(content: content, theme: theme, generation: generation, viewport: viewport, model: model)
       .overlay {
-        // A graph that moves redraws its overlay with every frame.
-        TimelineView(.animation(paused: !graph.animated)) { timeline in
+        // A graph that moves redraws its overlay with every frame; a
+        // window or a camera that moves, as the viewport says it has.
+        TimelineView(.animation(paused: !content.animated)) { timeline in
           Overlay(
-            graph: graph, time: timeline.date.timeIntervalSince(viewport.opened), view: viewport.view,
-            scale: displayScale, theme: theme)
+            frames: viewport.frames(content, time: timeline.date.timeIntervalSince(viewport.opened), overlay: true),
+            scale: viewport.scale, theme: theme)
         }
         .allowsHitTesting(false)
       }
   }
 }
 
-/// What is drawn over the shader passes: the numbers along the axes, and the
-/// rows the CPU evaluates (EquationRender `drawLabels2D`).
-private struct Overlay: View {
-  var graph: Graph2D
-  var time: Double
-  var view: View2D
+/// What is drawn over the shader passes, panel by panel: the numbers along
+/// the axes and the rows the CPU evaluates in 2D, the axes' and points'
+/// names in 3D (EquationRender `drawPanelLabels`).
+private struct Overlay: View, Equatable {
+  var frames: [PanelFrame]
   /// Device pixels per point.
   var scale: Double
   var theme: GraphTheme
@@ -48,9 +116,7 @@ private struct Overlay: View {
   var body: some View {
     Canvas { context, size in
       context.withCGContext { ctx in
-        drawLabels2D(
-          ctx, size: size, view: view, dpr: scale, theme: theme, extras: graph.overlay(at: time),
-          numbers: graph.grid != .off)
+        drawPanelLabels(ctx, frames, size: size, dpr: scale, theme: theme)
       }
     }
   }
@@ -59,7 +125,7 @@ private struct Overlay: View {
 // MARK: - The Metal view
 
 private struct MetalCanvasView {
-  var graph: Graph2D
+  var content: GraphPanels
   var theme: GraphTheme
   var generation: Int
   var viewport: GraphViewport
@@ -75,15 +141,18 @@ private struct MetalCanvasView {
   @MainActor private func make(_ coordinator: Coordinator) -> MetalCanvas {
     let canvas = MetalCanvas(viewport: viewport)
     update(canvas, coordinator)
+    #if DEBUG
+      canvas.runDebugScript()
+    #endif
     return canvas
   }
 
   @MainActor private func update(_ canvas: MetalCanvas, _ coordinator: Coordinator) {
-    canvas.graph = graph
-    canvas.theme = theme
-    canvas.animated = graph.animated
+    canvas.model = model
     // A replaced document opens as a new graph: reframed, its clock at zero.
     if let shown = coordinator.generation, shown != generation { canvas.open() }
+    canvas.content = content
+    canvas.theme = theme
     coordinator.generation = generation
     coordinator.model = model
     model.metal = canvas
@@ -105,262 +174,5 @@ private struct MetalCanvasView {
     func makeNSView(context: Context) -> MetalCanvas { make(context.coordinator) }
     func updateNSView(_ canvas: MetalCanvas, context: Context) { update(canvas, context.coordinator) }
     static func dismantleNSView(_ canvas: MetalCanvas, coordinator: Coordinator) { dismantle(canvas, coordinator) }
-  }
-#endif
-
-/// Draws the graph, and moves its window: a drag or a two-finger scroll
-/// pans, a pinch (or Shift and a scroll) zooms about the pointer.
-final class MetalCanvas: MTKView, MTKViewDelegate {
-  let viewport: GraphViewport
-  private let renderer: Renderer2D?
-
-  var graph: Graph2D? {
-    didSet {
-      guard graph != oldValue else { return }
-      // A view(…) row that changed moves the window to what it now asks for.
-      if graph?.window != oldValue?.window, oldValue != nil { framed = false }
-      frame(in: drawableSize)
-      redraw()
-    }
-  }
-  var theme = GraphTheme.light {
-    didSet { if theme != oldValue { redraw() } }
-  }
-  /// Redraw every frame rather than on demand.
-  var animated = false {
-    didSet {
-      guard animated != oldValue else { return }
-      isPaused = !animated
-      enableSetNeedsDisplay = !animated
-      redraw()
-    }
-  }
-
-  /// Whether the view has been given its opening window.
-  private var framed = false
-  private var glide: Task<Void, Never>?
-
-  init(viewport: GraphViewport) {
-    self.viewport = viewport
-    let metal = MetalContext()
-    renderer = metal.map(Renderer2D.init)
-    super.init(frame: .zero, device: metal?.device)
-    colorPixelFormat = MetalContext.pixelFormat
-    isPaused = true
-    enableSetNeedsDisplay = true
-    delegate = self
-    #if os(macOS)
-      // The colors are sRGB, as the web renderer's are; without this they
-      // are taken as the display's own, and a wide-gamut display oversaturates them.
-      colorspace = CGColorSpace(name: CGColorSpace.sRGB)
-    #else
-      let pan = UIPanGestureRecognizer(target: self, action: #selector(panned))
-      pan.allowedScrollTypesMask = .all
-      pan.delegate = self
-      addGestureRecognizer(pan)
-      let pinch = UIPinchGestureRecognizer(target: self, action: #selector(pinched))
-      pinch.delegate = self
-      addGestureRecognizer(pinch)
-    #endif
-  }
-
-  @available(*, unavailable)
-  required init(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
-
-  /// Show a new graph: the opening window, and t from 0.
-  func open() {
-    glide?.cancel()
-    framed = false
-    viewport.opened = .now
-    frame(in: drawableSize)
-    redraw()
-  }
-
-  private func redraw() {
-    #if os(macOS)
-      needsDisplay = true
-    #else
-      setNeedsDisplay()
-    #endif
-  }
-
-  /// The opening window: the origin at the center, 12 units across the shorter side.
-  private func frame(in size: CGSize) {
-    guard !framed, size.width > 0, size.height > 0 else { return }
-    framed = true
-    viewport.view =
-      graph?.opening(width: size.width, height: size.height) ?? .opening(width: size.width, height: size.height)
-  }
-
-  // MARK: Drawing
-
-  func mtkView(_ view: MTKView, drawableSizeWillChange size: CGSize) {
-    frame(in: size)
-    redraw()
-  }
-
-  func draw(in view: MTKView) {
-    let size = drawableSize
-    frame(in: size)
-    guard let renderer, size.width > 0, size.height > 0, let pass = currentRenderPassDescriptor,
-      let drawable = currentDrawable, let buffer = renderer.metal.queue.makeCommandBuffer(),
-      let encoder = buffer.makeRenderCommandEncoder(descriptor: pass)
-    else { return }
-    let time = Date.now.timeIntervalSince(viewport.opened)
-    renderer.render(
-      encoder, target: (Int(size.width), Int(size.height)), view: viewport.view, layers: graph?.layers ?? Layers2D(),
-      time: time, env: graph?.environment(at: time) ?? [:], frame: Frame2D(grid: graph?.grid ?? .on), theme: theme)
-    encoder.endEncoding()
-    buffer.present(drawable)
-    buffer.commit()
-  }
-
-  // MARK: Moving the window
-
-  /// Device pixels per point.
-  private var scale: Double { bounds.width > 0 ? drawableSize.width / bounds.width : 1 }
-
-  /// Move the window as if the plot were dragged by (dx, dy) points, dy down the screen.
-  private func pan(dx: Double, dy: Double) {
-    glide?.cancel()
-    viewport.view.cx -= dx * scale * viewport.view.upp
-    viewport.view.cy += dy * scale * viewport.view.upp
-    redraw()
-  }
-
-  /// Zoom by `factor`, keeping the math point under `point` where it is.
-  /// `point` is in points from the view's center, y up.
-  private func zoom(at point: CGPoint, by factor: Double) {
-    guard factor > 0, factor.isFinite else { return }
-    var view = viewport.view
-    let px = point.x * scale
-    let py = point.y * scale
-    let mx = view.cx + px * view.upp
-    let my = view.cy + py * view.upp
-    view.upp = min(max(view.upp * factor, 1e-12), 1e12)
-    view.cx = mx - px * view.upp
-    view.cy = my - py * view.upp
-    viewport.view = view
-    redraw()
-  }
-
-  /// The visible window, in math units.
-  var visible: (x: [Double], y: [Double]) {
-    let view = viewport.view
-    let halfX = Double(drawableSize.width) / 2 * view.upp
-    let halfY = Double(drawableSize.height) / 2 * view.uppY
-    return ([view.cx - halfX, view.cx + halfX], [view.cy - halfY, view.cy + halfY])
-  }
-
-  /// Ease the window to show the given ranges (one alone keeps the other
-  /// axis's center, at the same scale), arriving after `seconds`.
-  func glide(x: (Double, Double)?, y: (Double, Double)?, seconds: Double) async {
-    glide?.cancel()
-    let size = drawableSize
-    guard size.width > 0, size.height > 0 else { return }
-    let from = viewport.view
-    var to = from
-    if let x { to.cx = (x.0 + x.1) / 2 }
-    if let y { to.cy = (y.0 + y.1) / 2 }
-    // The scale that shows every range asked for.
-    to.upp = max(x.map { ($0.1 - $0.0) / size.width } ?? 0, y.map { ($0.1 - $0.0) / size.height } ?? 0)
-    let start = CACurrentMediaTime()
-    let task = Task { @MainActor [weak self] in
-      while !Task.isCancelled {
-        let k = seconds > 0 ? min((CACurrentMediaTime() - start) / seconds, 1) : 1
-        let eased = k * k * (3 - 2 * k)
-        var view = from
-        view.cx = from.cx + (to.cx - from.cx) * eased
-        view.cy = from.cy + (to.cy - from.cy) * eased
-        view.upp = from.upp * pow(to.upp / from.upp, eased)
-        self?.viewport.view = view
-        self?.redraw()
-        if k >= 1 { break }
-        try? await Task.sleep(for: .milliseconds(8))
-      }
-    }
-    glide = task
-    await task.value
-  }
-
-  /// Glide the zoom about the graph's center: below 1 zooms in, above 1 out.
-  func glideZoom(by factor: Double) {
-    glide?.cancel()
-    let total = log(factor)
-    let start = CACurrentMediaTime()
-    glide = Task { @MainActor [weak self] in
-      var applied = 0.0
-      while !Task.isCancelled {
-        let k = min((CACurrentMediaTime() - start) / 0.25, 1)
-        let eased = k * k * (3 - 2 * k)
-        self?.zoom(at: .zero, by: exp(total * eased - applied))
-        applied = total * eased
-        if k >= 1 { break }
-        try? await Task.sleep(for: .milliseconds(8))
-      }
-    }
-  }
-
-  #if os(macOS)
-    private var dragged: CGPoint?
-
-    private func fromCenter(_ event: NSEvent) -> CGPoint {
-      let p = convert(event.locationInWindow, from: nil)
-      return CGPoint(x: p.x - bounds.midX, y: p.y - bounds.midY)
-    }
-
-    override func mouseDown(with event: NSEvent) {
-      glide?.cancel()
-      dragged = convert(event.locationInWindow, from: nil)
-    }
-
-    override func mouseDragged(with event: NSEvent) {
-      let p = convert(event.locationInWindow, from: nil)
-      if let last = dragged { pan(dx: p.x - last.x, dy: last.y - p.y) }
-      dragged = p
-    }
-
-    override func mouseUp(with event: NSEvent) { dragged = nil }
-
-    /// The app scrolls like Maps: two fingers (or a wheel) pan; with Shift it zooms.
-    override func scrollWheel(with event: NSEvent) {
-      let lines = event.hasPreciseScrollingDeltas ? 1.0 : 10.0
-      if event.modifierFlags.contains(.shift) {
-        // Shift turns a wheel's motion sideways.
-        let turned = event.scrollingDeltaY != 0 ? event.scrollingDeltaY : event.scrollingDeltaX
-        glide?.cancel()
-        zoom(at: fromCenter(event), by: exp(min(max(-turned * lines, -60), 60) * 0.002))
-      } else {
-        pan(dx: event.scrollingDeltaX * lines, dy: event.scrollingDeltaY * lines)
-      }
-    }
-
-    override func magnify(with event: NSEvent) {
-      glide?.cancel()
-      zoom(at: fromCenter(event), by: 1 / max(1 + event.magnification, 0.01))
-    }
-  #else
-    @objc private func panned(_ gesture: UIPanGestureRecognizer) {
-      let moved = gesture.translation(in: self)
-      gesture.setTranslation(.zero, in: self)
-      pan(dx: moved.x, dy: moved.y)
-    }
-
-    @objc private func pinched(_ gesture: UIPinchGestureRecognizer) {
-      guard gesture.scale > 0 else { return }
-      let p = gesture.location(in: self)
-      glide?.cancel()
-      zoom(at: CGPoint(x: p.x - bounds.midX, y: bounds.midY - p.y), by: 1 / gesture.scale)
-      gesture.scale = 1
-    }
-  #endif
-}
-
-#if os(iOS)
-  extension MetalCanvas: UIGestureRecognizerDelegate {
-    /// A pinch pans as its fingers move.
-    func gestureRecognizer(_ a: UIGestureRecognizer, shouldRecognizeSimultaneouslyWith b: UIGestureRecognizer) -> Bool {
-      true
-    }
   }
 #endif

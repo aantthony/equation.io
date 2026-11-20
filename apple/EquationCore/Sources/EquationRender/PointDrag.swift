@@ -78,13 +78,13 @@ private struct PairRow {
 }
 
 /// The pair a point row holds: `(1, 2)` itself, or the right-hand side of `A = (1, 2)`.
-private func pairRow(_ row: RowAnalysis, source: String) -> PairRow? {
+private func pairRow(_ row: RowAnalysis) -> PairRow? {
   guard row.error == nil, row.unsupported == nil else { return nil }
   if case .constant(let name, let rhs, false)? = row.definition {
     return PairRow(pair: rhs.trimmingCharacters(in: .whitespacesAndNewlines)) { "\(name) = \($0)" }
   }
   guard row.definition == nil, case .point(2, _)? = row.cpu else { return nil }
-  return PairRow(pair: stripNote(source).trimmingCharacters(in: .whitespacesAndNewlines)) { $0 }
+  return PairRow(pair: row.text) { $0 }
 }
 
 /// How each coordinate of a pair answers a drag: a literal is rewritten in
@@ -114,11 +114,11 @@ private func dragAxes(_ pair: String, _ analysis: DocumentAnalysis) -> (parts: [
 extension DocumentAnalysis {
   /// The points among `rows` (a panel's) that a drag can move, where they
   /// are when the constants are `env` (which has t).
-  public func grabPoints(sources: [String], rows: Range<Int>, env: [String: Double]) -> [GrabPoint] {
+  public func grabPoints(rows: Range<Int>, env: [String: Double]) -> [GrabPoint] {
     var points: [GrabPoint] = []
-    for index in rows where index < self.rows.count && index < sources.count {
+    for index in rows where index < self.rows.count {
       let row = self.rows[index]
-      guard let written = pairRow(row, source: sources[index]), dragAxes(written.pair, self) != nil else { continue }
+      guard let written = pairRow(row), dragAxes(written.pair, self) != nil else { continue }
       var at: (Double?, Double?)
       if let name = row.definition?.name {
         guard env["\(name)_z"] == nil else { continue }
@@ -140,7 +140,7 @@ extension DocumentAnalysis {
     row index: Int, to x: Double, _ y: Double, upp: (x: Double, y: Double), in sources: [String]
   ) -> [String]? {
     guard rows.indices.contains(index), sources.indices.contains(index),
-      let written = pairRow(rows[index], source: sources[index]), let drag = dragAxes(written.pair, self)
+      let written = pairRow(rows[index]), let drag = dragAxes(written.pair, self)
     else { return nil }
     var out = sources
     var text = drag.parts

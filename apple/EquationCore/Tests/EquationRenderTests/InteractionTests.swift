@@ -183,14 +183,14 @@ import Testing
     let analysis = analyze(rows)
     var env = analysis.environment(at: 0)
     env["t"] = 0
-    let points = analysis.grabPoints(sources: rows, rows: 0..<rows.count, env: env)
+    let points = analysis.grabPoints(rows: 0..<rows.count, env: env)
     #expect(points == [GrabPoint(row: 0, x: 1, y: 2), GrabPoint(row: 1, x: 1.5, y: 3)])
     // Within the grab radius, the nearest; beyond it, none.
     #expect(grabPoint(points, at: 1.3, 2.9, upp: 0.05, uppY: 0.05)?.row == 1)
     #expect(grabPoint(points, at: 1.05, 2.05, upp: 0.05, uppY: 0.05)?.row == 0)
     #expect(grabPoint(points, at: 5, 5, upp: 0.05, uppY: 0.05) == nil)
     // A panel's rows alone.
-    #expect(analysis.grabPoints(sources: rows, rows: 1..<3, env: env).map(\.row) == [1])
+    #expect(analysis.grabPoints(rows: 1..<3, env: env).map(\.row) == [1])
   }
 
   @Test func pairsSplitAtTheirTopLevelComma() {
