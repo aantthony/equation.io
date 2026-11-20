@@ -110,7 +110,7 @@ import Testing
   }
 
   @Test func whatIsNotPortedSaysSo() {
-    let rows = ["p = open(\"a.csv\")", "s_{n+1} = push(s_n, n)", "(u, v)"]
+    let rows = ["p = open(\"a.csv\")", "s_{n+1} = push(s_n, n)"]
     for text in rows {
       let row = analyze([text]).rows[0]
       #expect(row.unsupported != nil, "\(text)")
@@ -434,6 +434,7 @@ import Testing
         parametric: o["parametric"] as? Bool ?? false, angular: o["angular"] as? [Bool] ?? [],
         coordinates: o["coordinates"] == nil ? nil : try exprs("coordinates"))
     case "vfield3d": return .vfield3d(comps: try exprs("comps"))
+    case "pregion": return .pregion(comps: try exprs("comps"))
     case "psurface": return .psurface(comps: try exprs("comps"), paint: try o["paint"].map { try decode($0) })
     case "density", "pmf":
       if o["mass"] != nil { throw FixtureError(description: "a density scaled by its intervals' length") }

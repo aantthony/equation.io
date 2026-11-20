@@ -12,9 +12,8 @@
 /// (`surfacePoint`), and a vector field as arrows along the surface's
 /// tangents (`surfaceArrows`).
 ///
-/// Not ported: a surface written with a Σ or Π (`expandMapSums`), geodesics
-/// on the panel's surface and its curvature `gaussian(x, y)`, and a
-/// parametric region's mesh (`surfaceOver`), as parametric regions are not.
+/// Not ported: a surface written with a Σ or Π (`expandMapSums`), and
+/// geodesics on the panel's surface and its curvature `gaussian(x, y)`.
 
 public struct SurfaceMap: Equatable, Sendable {
   /// The right side as the row wrote it, for writing the row back.
@@ -205,6 +204,22 @@ public func surfaceArrows(
   return out
 }
 
+/// A parametric region's (x, y) carried onto the surface, in the region's
+/// own u and v: a mesh that lies on the surface wherever the region does
+/// (`surfaceOver`).
+public func surfaceOver(_ map: SurfaceMap, _ coordinates: [Expr]) -> [Expr] {
+  map.embed.map { substVars($0, ["x": coordinates[0], "y": coordinates[1]]) }
+}
+
+/// A parametric region carried onto a surface: the GLSL of its mesh there,
+/// in the region's u and v, its sliders read as uniforms (web/main.ts
+/// `surfaceRegionGLSL`).
+public func surfaceRegionGLSL(_ map: SurfaceMap, _ comps: [Expr], params: [String]) throws
+  -> (comps: [String], du: [String]?, dv: [String]?)
+{
+  try parametricGLSL(surfaceOver(map, comps), uniformSub(params))
+}
+
 /// The surface over the unit square, as a parametric surface's mesh is laid
 /// out (u, v in 0..1): x and y swept over their ranges (`surfaceInUV`). `uv`
 /// gives the same x and y, for a shader that paints rows written in them.
@@ -246,6 +261,7 @@ public func surfaceMapping(_ object: MathObject) -> SurfaceMapping? {
   switch object {
   case .value, .note, .tuple: return SurfaceMapping.none
   case .curveGraph, .curveImplicit, .region, .scalarField: return .paint
+  case .regionParametric: return .carry
   case .curveParametric(let coordinates): return coordinates.count == 2 ? .carry : .refused
   case .vectorField(let components): return components.count == 2 ? .carry : .refused
   case .point(let coordinates): return coordinates.count == 2 ? .carry : .refused

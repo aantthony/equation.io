@@ -31,6 +31,8 @@ public enum CpuPlan: Equatable, Sendable {
   /// A curve in u, with its first three derivatives in u where it has them
   /// (the renderer takes finite differences otherwise).
   case pcurve(dim: Int, comps: [Expr], d1: [Expr]?, d2: [Expr]?, d3: [Expr]?)
+  /// A region filled by (x(u, v), y(u, v)), u and v each over [0, 1].
+  case pregion(comps: [Expr])
   case vfield2d(comps: [Expr])
   case value(expr: Expr, shade: IntShade? = nil)
   case label(dim: Int, coords: [Expr], text: String)
@@ -108,6 +110,7 @@ public enum CpuPlan: Equatable, Sendable {
     case .scalar2d: "scalar2d"
     case .point: "point"
     case .pcurve: "pcurve"
+    case .pregion: "pregion"
     case .vfield2d: "vfield2d"
     case .value: "value"
     case .label: "label"
@@ -261,6 +264,8 @@ public func compileCpu(_ classified: Classified) throws -> CpuPlan {
       residual: try real(residual), equation: try realEquation(equation), levels: try levels.map(compileGridCpu))
   case .region(let constraints):
     return .ineq2d(constraints: try constraints.map { Constraint(residual: try real($0.residual), strict: $0.strict) })
+  case .regionParametric(let coordinates):
+    return .pregion(comps: try coordinates.map(real))
   case .scalarField(let expr):
     return .scalar2d(expr: try real(expr))
   case .vectorField(let components):
@@ -386,6 +391,10 @@ public func compileGpu(_ classified: Classified) throws -> GpuPlan {
     let fields = try constraints.map { (code: try scalar($0.residual), edge: !$0.strict) }
     let field = fields.dropFirst().reduce(fields[0].code) { "max(\($0), \($1.code))" }
     return plan(.ineq2d(field: field, edges: fields.filter(\.edge).map(\.code)))
+  case .regionParametric(let coordinates):
+    // In a 3D scene a planar region lies in z = 0, drawn like any surface.
+    let p = try parametricGLSL(coordinates + [.num(0)], sub)
+    return plan(.psurface(comps: p.comps, du: p.du, dv: p.dv, paint: nil))
   case .scalarField(let expr):
     return plan(.scalar2d(field: try scalar(expr)))
   case .vectorField(let components) where components.count == 3:

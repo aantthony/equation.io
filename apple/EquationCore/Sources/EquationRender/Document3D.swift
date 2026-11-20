@@ -202,6 +202,11 @@ public struct Document3D: Equatable, Sendable {
       scene.psurfaces.append(
         Scene3D.PSurface(
           uniforms: uniforms, comps: glsl, du: du, dv: dv, color: color, params: params, paint: painted, gain: gain))
+    case .pregion:
+      // A filled planar region lies in z = 0 (compileGpu gives it as a surface).
+      guard case .psurface(let glsl, let du, let dv, _)? = row.gpu?.shader else { break }
+      scene.psurfaces.append(
+        Scene3D.PSurface(uniforms: uniforms, comps: glsl, du: du, dv: dv, color: color, params: params))
     case .pcurve(_, let comps, _, _, _):
       // (A curve in the plane lies in z = 0.)
       scene.curves.append(Scene3D.Curve(pts: Self.sample(comps, env), color: color))

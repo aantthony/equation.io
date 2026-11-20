@@ -83,7 +83,7 @@ const PORTED = new Set([
 for (const type of ['polygon', 'label', 'tuple', 'tfield2d']) PORTED.add(type);
 for (const type of ['sequence', 'cobweb', 'bifurcation', 'automaton', 'lattice']) PORTED.add(type);
 // In space.
-for (const type of ['implicit3d', 'scalar3d', 'spacecurve', 'system', 'vfield3d', 'psurface']) PORTED.add(type);
+for (const type of ['implicit3d', 'scalar3d', 'spacecurve', 'system', 'vfield3d', 'psurface', 'pregion']) PORTED.add(type);
 // Random variables (lib/dist.ts): what the CPU draws of one, by its name.
 for (const type of ['density', 'pmf', 'expect', 'prob']) PORTED.add(type);
 // Lists and families (Lists.swift, ObjectLists.swift, ListPlans.swift).

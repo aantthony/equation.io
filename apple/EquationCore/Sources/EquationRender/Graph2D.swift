@@ -42,6 +42,8 @@ public struct Graph2D: Equatable, Sendable {
   let lawsDrawn = DrawnLaws()
   /// What each system row last solved (Graph2D+Systems.swift).
   let systemsSolved = SolvedSystems()
+  /// Each parametric region's triangles (Graph2D+ParametricRegions.swift).
+  let sampledRegions = SampledRegions()
 
   public struct Window: Equatable, Sendable {
     public var x: [Double]?
@@ -202,6 +204,8 @@ public struct Graph2D: Equatable, Sendable {
       case .value(_, let shade?):
         // A definite integral's row: the area it measures (Graph2D+Integrals.swift).
         drawIntegral(shade, row: index, color: color, env: env, bounds: bounds, into: &overlay)
+      case .pregion(let comps) where comps.count == 2:
+        drawParametricRegion(comps, row: index, env: env, color: color, into: &overlay)
       case .orbit:
         if let pts = orbits[index] { overlay.polylines.append(.init(pts: pts, color: css)) }
       case .trail(2, let coords):

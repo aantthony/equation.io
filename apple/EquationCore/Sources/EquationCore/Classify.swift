@@ -19,6 +19,9 @@ public indirect enum MathObject: Equatable, Sendable {
   case curveGraph(rhs: Expr, equation: Expr, levels: LevelSetSpec?)
   case curveImplicit(residual: Expr, equation: Expr, levels: LevelSetSpec?)
   case region(constraints: [Constraint])
+  /// A pair in u and v: the region it fills as both run from 0 to 1 (the
+  /// site's region of form `parametric`).
+  case regionParametric(coordinates: [Expr])
   case scalarField(expr: Expr)
   case vectorField(components: [Expr])
   case point(coordinates: [Expr])
@@ -118,6 +121,7 @@ public indirect enum MathObject: Equatable, Sendable {
     switch self {
     case .curveGraph, .curveImplicit: "implicit2d"
     case .region: "ineq2d"
+    case .regionParametric: "pregion"
     case .scalarField: "scalar2d"
     case .vectorField(let components): components.count == 3 ? "vfield3d" : "vfield2d"
     case .point: "point"
@@ -469,7 +473,7 @@ func classify(_ lowered: Expr, defined: Set<String>, fields: [String: Expr]) thr
     if vars.contains("v") && !vars.contains("u") { throw LanguageError("Parametric surfaces use u (and v).") }
     if vars.contains("u") && vars.contains("v") {
       // Two parameters in the plane fill the region they trace.
-      if items.count == 2 { throw Unsupported("parametric regions") }
+      if items.count == 2 { return done(.regionParametric(coordinates: items)) }
       return done(.surfaceParametric(coordinates: items, paint: nil))
     }
     if vars.contains("u") {

@@ -21,10 +21,10 @@
 import { analyzeRows } from '../../lib/analysis.ts';
 import { type CpuPlan, type GpuPlan, parametricGLSL } from '../../lib/compiler.ts';
 import { buildTube, curveFrames } from '../../lib/curve3d.ts';
-import { type Expr, evaluate } from '../../lib/expr.ts';
+import { type Expr, evaluate, substVars } from '../../lib/expr.ts';
 import { fanFillable, vertexSampler } from '../../lib/figure-vertices.ts';
 import { traceField } from '../../lib/flow.ts';
-import { GLSL_PRELUDE, toGLSL, withHelpers } from '../../lib/glsl.ts';
+import { GLSL_PRELUDE, toGLSL, uniformName, withHelpers } from '../../lib/glsl.ts';
 import { hullGeometrySampler } from '../../lib/hull-geometry.ts';
 import { traceIntersection } from '../../lib/intersection.ts';
 import { DARK_PALETTE, LIGHT_PALETTE, takesColor } from '../../lib/palette.ts';
@@ -37,6 +37,7 @@ import {
   surfaceArrows,
   surfaceInUV,
   surfaceMapping,
+  surfaceOver,
   surfacePoint,
 } from '../../lib/surface-map.ts';
 import { clampPhi } from '../../lib/view.ts';
@@ -377,7 +378,26 @@ export function graphJSON(
         const pts = new Float32Array(arrows.length);
         for (let k = 0; k + 2 < arrows.length; k += 3) pts.set(lifted(arrows.slice(k, k + 3)), k);
         if (pts.length) scene.curves.push({ pts, color, arrow: true });
-      } else if (on === 'carry' && row.cpu.type !== 'pregion' && row.cpu.type !== 'geodesic') {
+      } else if (on === 'carry' && row.cpu.type === 'pregion') {
+        // A parametric region's own mesh, carried onto the surface whole.
+        const names = Object.fromEntries(
+          (gpu?.params ?? []).map(p => [p, { kind: 'var', name: uniformName(p) } as Expr]),
+        );
+        try {
+          const mesh = parametricGLSL(surfaceOver(surface!, row.cpu.comps), e => substVars(e, names));
+          scene.paints.push({
+            ...mesh,
+            xy: ['u', 'v'],
+            paint: { kind: 'region', field: '-1.0', edges: [] },
+            color,
+            params: gpu?.params ?? [],
+            uniforms: gpu?.uniforms,
+            lift: true,
+          });
+        } catch {
+          warn(`not carried onto the surface: ${text}`);
+        }
+      } else if (on === 'carry' && row.cpu.type !== 'geodesic') {
         const mark = markScene();
         draw(row.cpu, row.gpu, color, index, text, point ? row.def?.name : undefined);
         carryOntoSurface(mark, surface!);

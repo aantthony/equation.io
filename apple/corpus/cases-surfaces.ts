@@ -59,4 +59,7 @@ export const SURFACE_CASES: string[] = [
   'on((X, Y, Z) = (x, y, k), x = 0..1, y = 0..1); ---; on((X, Y, Z) = (x, y, t), x = 0..1, y = 0..1); ---; on((X, Y, Z) = (x, y, cos x), x = 0..1, y = 0..1); ---; on((X, Y, Z) = (x, y, x!), x = 0..1, y = 0..1); ---; on((X, Y, Z) = (x, y, 0), z = 0..1, y = 0..1)',
   'on(x) = 2 x; on(3); y = on(x); ---; on((X, Y, Z) = (x, y, 0), x = 0..1, y = 0..1); gaussian(x, y); geodesic((0, 0), (1, 1)); y = x; ds^2 = dx^2 + dy^2',
   'b = 2; on((X, Y, Z) = (b x, y, sum[n=1..2] sin(n x)), x = 0..1, y = 0..1); y = x; ---; on((X, Y, Z) = ((3 + cos(y)) cos(x), (3 + cos(y)) sin(x), sin(y)), x = -pi..pi, y = -pi..pi); p = 2; q = 3; sin((p y - q x)/2) = 0',
+  // Parametric regions: a pair in u and v fills what it traces.
+  '(u, v); a = 2; (a u cos(2pi v), u sin(2pi v) + t); (u^2, v, 1); (u, v, u v, 1); (v, 1); (u + x, v); y = u v',
+  'view(x = 10^X); (u, v); ---; on((X, Y, Z) = (x, y, x y), x = -1..1, y = -1..1); (u/2, v/2); a = 0.5; (a u, v - 1); ---; z = 1; (u, v)',
 ];

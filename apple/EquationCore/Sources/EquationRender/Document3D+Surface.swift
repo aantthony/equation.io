@@ -170,6 +170,19 @@ extension Document3D {
             params: row.gpu?.params ?? [], uniforms: Graph2D.shaderUniforms(row.gpu))
         ]
     case .carry?:
+      // A parametric region's own mesh, carried onto the surface whole.
+      if case .pregion(let comps) = cpu {
+        let params = row.gpu?.params ?? []
+        guard let region = try? surfaceRegionGLSL(mesh.map, comps, params: params) else { break }
+        scene.paints =
+          (scene.paints ?? []) + [
+            SurfacePaint(
+              comps: region.comps, du: region.du, dv: region.dv, xy: ["u", "v"],
+              paint: .init(kind: .region, field: "-1.0", edges: []), color: color, params: params,
+              uniforms: Graph2D.shaderUniforms(row.gpu), lift: true)
+          ]
+        break
+      }
       // A vector field as arrows along the surface's tangents.
       if case .vfield2d(let comps) = cpu {
         var scope = env

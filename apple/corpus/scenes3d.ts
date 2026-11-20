@@ -64,6 +64,8 @@ const DOCUMENTS: Array<[text: string, time?: number]> = [
     0.25,
   ],
   ['on((X, Y, Z) = (2cos(y) cos(x), 2cos(y) sin(x), 2sin(y)), x = -pi..pi, y = -pi/2..pi/2); a = 0.6; (cos(a) - sin(a) tan(y) cos(x), sin(a) sin(x)); (x^2, 1/x); (0, pi/2 - a)'],
+  ['a = 0.5; on((X, Y, Z) = (x, y, x y), x = -1..1, y = -1..1); (u/2, v/2); (a u, v - 1); (x, a)'],
+  ['z = 1; (u, v); a = 2; (a u cos(2 pi v), u sin(2 pi v))'],
   // Positions in coordinates named on the left.
   [
     'rho = sqrt(x^2 + y^2 + z^2); theta = atan2(y, x); phi = acos(z/rho); (rho, theta, phi) = (2, pi/4, pi/3); ' +
