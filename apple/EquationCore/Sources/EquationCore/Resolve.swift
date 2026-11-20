@@ -154,7 +154,8 @@ struct Resolver {
       }
       if comps == nil, try getFn(base) != nil {
         throw LanguageError(
-          "\(name) is not defined — \(base) is a function. Name its value first, like G = \(base)(x, y, z), then use G_x, G_y, G_z."
+          "\(name) is not defined — \(base) is a function. Name its value first, "
+            + "like G = \(base)(x, y, z), then use G_x, G_y, G_z."
         )
       }
     }
@@ -285,9 +286,7 @@ struct Resolver {
         // for the lattice rows that call it.
         if opts.inDefinition { throw Unsupported("a case testing equality in a definition") }
         if !opts.exactConditions {
-          throw LanguageError(
-            "A condition like y = x^2 is a filter for a reduction, like count({y = x^2, 0 < x < 1}); piecewise conditions are inequalities."
-          )
+          throw LanguageError(equalityCaseMessage)
         }
       }
       return .piecewise(
@@ -385,6 +384,12 @@ func writeConditions(_ e: Expr, _ condition: (String) -> Expr?, whole: Bool = tr
     },
     otherwise: otherwise.map { writeConditions($0, condition, whole: false) })
 }
+
+/// What a piecewise case that tests equality says over the plane, where it
+/// would be a curve's sliver.
+let equalityCaseMessage =
+  "A condition like y = x^2 is a filter for a reduction, like count({y = x^2, 0 < x < 1}); "
+  + "piecewise conditions are inequalities."
 
 /// What a condition's name says when it is read as a number.
 func conditionAsNumber(_ name: String) -> String {

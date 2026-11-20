@@ -23,9 +23,10 @@ import { EXAMPLES } from '../../web/examples.ts';
 
 const fixtures = new URL('../EquationCore/Tests/EquationCoreTests/Fixtures/', import.meta.url);
 
-/** JSON has no NaN or ±Infinity: they travel as their names. */
+/** JSON has no NaN or ±Infinity, and Foundation's JSON reader rounds some
+ *  decimals an ulp off: every number but a whole one travels as its text. */
 const replacer = (_key: string, value: unknown): unknown =>
-  typeof value === 'number' && !Number.isFinite(value)
+  typeof value === 'number' && !Number.isSafeInteger(value)
     ? String(value)
     : value instanceof Float64Array || value instanceof Float32Array
       ? { packed: value.length }
@@ -43,7 +44,7 @@ const fmtNum = (v: number) => String(parseFloat(v.toPrecision(6)));
 
 /** The plan kinds the Swift port compiles: their plans are recorded whole.
  *  Of the rest (and of a plan too long to be worth carrying) only the type. */
-const PORTED = new Set(['implicit2d', 'ineq2d', 'scalar2d', 'point', 'vfield2d', 'value', 'note', 'none']);
+const PORTED = new Set(['implicit2d', 'ineq2d', 'scalar2d', 'point', 'pcurve', 'vfield2d', 'value', 'note', 'none']);
 function slim(plan: { type: string } | undefined): unknown {
   if (!plan) return null;
   if (!PORTED.has(plan.type)) return { type: plan.type, omitted: true };
@@ -178,7 +179,119 @@ const CASES: string[] = [
   'y = e_x; e_x; a ∈ [1, 2]; y = a x',
   'graph((1, 2)); mark(3); lightcones; tidal; ds^2 = dx^2 + dy^2',
   'y = x..2; 1..5; y = "text"; y = x == 1',
+  // Point arithmetic and points through functions and cases.
+  'A = (1+1, 2 0.5); A; 2 A + (0, 0); A - A; 0 A; A/1; -A; A 2; (A_x, A_y + 1)',
+  'A = (1, 2); y = {x > 0: (1, 2), (3, 4)}; {t > 0: A, (0, 0)}; {t > 0: A, 1}; {A: 1}; x = A; (1, 2) = A',
+  'A = (1, 2); f(p) = p.x + p.y; f(A); f((3, 4)); y = f(x); f((1, 2, 3)); g(p) = p.z; g(A); A.x + A.y; A.z',
+  'v = (1, 2, 3); u = (1, 2); t = (1, 2); e = (1, 2); A = (1, 2); A = (3, 4)',
+  'y = 2 + 3; (1 + 1, 2 3); y = -(-x); y = x - -1; y = (x); y = ((x + 1))',
+  // Parametric curves in the plane.
+  '(cos(2 pi u), sin(2 pi u)); a = 2; (a u, u^2); (floor(3 u), u); (u, abs(u - 0.5)); (u, t); (u, gamma(u))',
+  'c = (cos(2 pi u), sin(2 pi u)); c; 2 c; c + (1, 0); k = u^2; (u, k); (k, x); (u, sinc(u)); (mod(u, 0.3), u)',
 ];
+
+/** Small documents written at random from the ported core's own words, so
+ *  what no example happens to say is still compared: definitions that reach
+ *  one another (or fail to), then rows of every shape over them. Seeded, so
+ *  the corpus is the same every run. */
+function randomDocs(count: number): string[] {
+  let seed = 0x2f6e2b1;
+  const random = (): number => {
+    seed = (Math.imul(seed, 1664525) + 1013904223) | 0;
+    return (seed >>> 0) / 4294967296;
+  };
+  const pick = <T>(items: readonly T[]): T => items[Math.floor(random() * items.length)];
+  const FNS = ['sin', 'cos', 'tan', 'sqrt', 'abs', 'exp', 'ln', 'floor', 'sign', 'atan', 'sinh', 'erf', 'sinc', 'round'];
+  // (`calls`: the document's functions the expression may call; a body calls
+  // its own only now and then, since a recursive one is not ported.)
+  const expr = (atoms: readonly string[], depth: number, calls = 'fg'): string => {
+    if (depth <= 0 || random() < 0.25) return pick(atoms);
+    const a = () => expr(atoms, depth - 1, calls);
+    switch (Math.floor(random() * 14)) {
+      case 0:
+        return `${a()} + ${a()}`;
+      case 1:
+        return `${a()} - ${a()}`;
+      case 2:
+        return `${a()} ${a()}`;
+      case 3:
+        return `(${a()})/(${a()})`;
+      case 4:
+        return `(${a()})^${pick(['2', '3', '0.5', '(1/3)', '-1', 'a', '9'])}`;
+      case 5:
+        return `-${a()}`;
+      case 6:
+        return `${pick(FNS)}(${a()})`;
+      case 7:
+        return `(${a()})`;
+      case 8:
+        return `${pick(['min', 'max', 'mod', 'atan2'])}(${a()}, ${a()})`;
+      case 9:
+        return `{${a()} ${pick(['<', '>', '<=', '>='])} ${a()}: ${a()}, ${a()}}`;
+      case 10:
+        return calls.includes('f') ? `f(${a()})` : a();
+      case 11:
+        return calls.includes('g') ? `g(${a()}, ${a()})` : a();
+      case 12:
+        return `d/dx (${a()})`;
+      default:
+        return `clamp(${a()}, 0, 1)`;
+    }
+  };
+  const NUMS = ['0', '1', '2', '3', '0.5', '-1', '10', 'pi', 'e'];
+  const out: string[] = [];
+  for (let k = 0; k < count; k++) {
+    const consts = [...NUMS, 'a', 'b', pick(['c', 'q', 't'])];
+    const plane = [...NUMS, 'x', 'y', 'x', 'y', 'a', 'b', 'c', 't', pick(['r', 'A_x', 'A_y', 'q', 'z', 'u'])];
+    const defs = [
+      `a = ${pick(['2', '0.5', '-3', 'clamp(1, 0, 5)', 'round(4)', expr(consts, 1)])}`,
+      `b = ${expr(consts, 2)}`,
+      `c = ${expr(consts, 2)}`,
+      `f(s) = ${expr([...NUMS, 's', 's', 'a', pick(['x', 'b', 't'])], 2, random() < 0.1 ? 'fg' : 'g')}`,
+      `g(m, n) = ${expr([...NUMS, 'm', 'n', 'a'], 2, random() < 0.1 ? 'f' : '')}`,
+      `r = ${expr([...NUMS, 'x', 'y', 'a'], 2)}`,
+      `A = (${expr(consts, 1)}, ${expr(consts, 1)})`,
+    ].filter(() => random() < 0.75);
+    const rows = Array.from({ length: 4 }, () => {
+      const e = () => expr(plane, 2);
+      switch (Math.floor(random() * 9)) {
+        case 0:
+          return `y = ${e()}`;
+        case 1:
+          return `${e()} = ${e()}`;
+        case 2:
+          return `${e()} ${pick(['<', '>', '<=', '>='])} ${e()}`;
+        case 3:
+          return `${e()} < ${e()} < ${e()}`;
+        case 4:
+          return e();
+        case 5:
+          return `(${e()}, ${e()})`;
+        case 6:
+          return expr(consts, 3);
+        case 7:
+          return `${expr(consts, 2)} ${pick(['=', '<', '>'])} ${expr(consts, 2)}`;
+        default:
+          return pick([
+            'A',
+            'A + (1, 1)',
+            'r = 1',
+            'r < a',
+            "y' = " + e(),
+            'r',
+            '2 A',
+            'b',
+            'c + a',
+            `(${expr([...NUMS, 'u', 'u', 'a', 't'], 2)}, ${expr([...NUMS, 'u', 'u', 'b'], 2)})`,
+          ]);
+      }
+    });
+    // Definitions above the rows, below them, or among them.
+    const order = random();
+    out.push((order < 0.5 ? [...defs, ...rows] : order < 0.75 ? [...rows, ...defs] : [...defs].reverse().concat(rows)).join('; '));
+  }
+  return out;
+}
 
 interface Doc {
   name: string;
@@ -189,6 +302,7 @@ const docs: Doc[] = [];
 for (const [category, items] of EXAMPLES)
   for (const [label, text] of items) docs.push({ name: `${category} / ${label}`, rows: splitStatements(text) });
 CASES.forEach((text, k) => docs.push({ name: `case ${k + 1}`, rows: splitStatements(text) }));
+randomDocs(600).forEach((text, k) => docs.push({ name: `case random ${k + 1}`, rows: splitStatements(text) }));
 
 const recorded = docs.map(({ name, rows }) => {
   const analysis = analyzeRows(rows);
@@ -277,7 +391,7 @@ const VALUES = [0, -0, 1, -1, 2, -2, 0.5, -0.5, 3, -8, 1.5, 2.5, -2.5, 10, 1e-7,
 const ENVS: Array<[number, number]> = [];
 for (const x of VALUES) for (const y of [2, -3, 0.5, 0, x]) ENVS.push([x, y]);
 
-const num = (v: number): number | string => (Number.isFinite(v) && !Object.is(v, -0) ? v : Object.is(v, -0) ? '-0' : String(v));
+const num = (v: number): number | string => (Object.is(v, -0) ? '-0' : Number.isSafeInteger(v) ? v : String(v));
 const evals = EXPRS.map(src => {
   let expr;
   try {

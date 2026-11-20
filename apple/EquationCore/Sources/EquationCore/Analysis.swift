@@ -453,9 +453,7 @@ public func analyze(_ sources: [String]) -> DocumentAnalysis {
         // Over numbers a case is the tolerance form the evaluator runs.
         let cases = exactCases(resolved)
         if cases != resolved && plane(resolved) {
-          throw LanguageError(
-            "A condition like y = x^2 is a filter for a reduction, like count({y = x^2, 0 < x < 1}); piecewise conditions are inequalities."
-          )
+          throw LanguageError(equalityCaseMessage)
         }
         resolved = cases
       }

@@ -28,6 +28,9 @@ public enum CpuPlan: Equatable, Sendable {
   case ineq2d(constraints: [Constraint])
   case scalar2d(expr: Expr)
   case point(dim: Int, coords: [Expr])
+  /// A curve in u, with its first three derivatives in u where it has them
+  /// (the renderer takes finite differences otherwise).
+  case pcurve(dim: Int, comps: [Expr], d1: [Expr]?, d2: [Expr]?, d3: [Expr]?)
   case vfield2d(comps: [Expr])
   case value(expr: Expr)
   case note(expr: Expr, variable: Bool, constant: String?, identity: Bool)
@@ -39,6 +42,7 @@ public enum CpuPlan: Equatable, Sendable {
     case .ineq2d: "ineq2d"
     case .scalar2d: "scalar2d"
     case .point: "point"
+    case .pcurve: "pcurve"
     case .vfield2d: "vfield2d"
     case .value: "value"
     case .note: "note"
@@ -106,6 +110,14 @@ public func compileCpu(_ classified: Classified) -> CpuPlan {
     return .vfield2d(comps: components)
   case .point(let coordinates):
     return .point(dim: coordinates.count, coords: coordinates)
+  case .curveParametric(let coordinates):
+    func derivatives(_ exprs: [Expr]?) -> [Expr]? {
+      guard let exprs else { return nil }
+      return try? exprs.map { try Sym.diff($0, "u") }
+    }
+    let d1 = derivatives(coordinates)
+    let d2 = derivatives(d1)
+    return .pcurve(dim: coordinates.count, comps: coordinates, d1: d1, d2: d2, d3: derivatives(d2))
   case .value(let expr):
     return .value(expr: expr)
   case .note(let expr, let variable, let constant, let identity):
@@ -162,7 +174,7 @@ public func compileGpu(_ classified: Classified) throws -> GpuPlan {
     return plan(.scalar2d(field: try glsl(sub(expr))))
   case .vectorField(let components):
     return plan(.vfield2d(fx: try glsl(sub(components[0])), fy: try glsl(sub(components[1]))))
-  case .point, .value, .note:
+  case .point, .curveParametric, .value, .note:
     return plan(.none)
   }
 }

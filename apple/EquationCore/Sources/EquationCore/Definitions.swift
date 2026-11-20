@@ -371,7 +371,9 @@ struct BuiltDefs {
   var fields = OrderedMap<Expr>()
   /// Named conditions.
   var conditions = OrderedMap<Expr>()
-  var fns: [String: FnDef] = [:]
+  /// Functions, in the order they resolved: one first called from a row
+  /// above its own resolves there.
+  var fns = OrderedMap<FnDef>()
   /// Named points and how many components each has.
   var points: [String] = []
   var pointDims: [String: Int] = [:]
@@ -461,7 +463,8 @@ func buildDefs(_ raw: [Definition], skip: Set<String>) -> BuiltDefs {
   // whether the condition's row is above the function's or below.
   for d in raw where !skip.contains(d.key) {
     guard case .constant(let name, let rhs, false) = d else { continue }
-    guard let source = try? parseExpr(rhs, userFns: fnNames, listNames: Set(defs.pointDims.keys), valueNames: valueNames),
+    let above = Set(defs.pointDims.keys)
+    guard let source = try? parseExpr(rhs, userFns: fnNames, listNames: above, valueNames: valueNames),
       case .ineq = source
     else { continue }
     if let resolved = try? Resolver(getFn: getFn, opts: options()).resolve(source) {
@@ -638,7 +641,8 @@ func buildDefs(_ raw: [Definition], skip: Set<String>) -> BuiltDefs {
     let param = vars.first(where: paramVars.contains)
     if let param, vars.contains(where: positionVars.contains) {
       throw LanguageError(
-        "\(shown) mixes position (x, y, z) with the parameter \(param); a definition may use one or the other (found \(param))."
+        "\(shown) mixes position (x, y, z) with the parameter \(param); "
+          + "a definition may use one or the other (found \(param))."
       )
     }
     for fv in vars
@@ -646,7 +650,8 @@ func buildDefs(_ raw: [Definition], skip: Set<String>) -> BuiltDefs {
       throw LanguageError(
         param != nil || paramNames.contains(name)
           ? "\(shown) is a curve or surface (it uses u or v), so it may only use u, v, t, and constants (found \(fv))."
-          : "\(shown) defines a coordinate (it uses x, y, or z), so it may only use x, y, z, t, and constants (found \(fv))."
+          : "\(shown) defines a coordinate (it uses x, y, or z), "
+            + "so it may only use x, y, z, t, and constants (found \(fv))."
       )
     }
     // Trial-evaluate to surface unsupported calls now.
@@ -682,7 +687,8 @@ func buildDefs(_ raw: [Definition], skip: Set<String>) -> BuiltDefs {
       continue
     }
     defs.errors[p] =
-      "\(p) mixes position (x, y, z) with the parameter \(param); a definition may use one or the other (found \(param))."
+      "\(p) mixes position (x, y, z) with the parameter \(param); "
+      + "a definition may use one or the other (found \(param))."
     dropPoint(p)
     for c in names { defs.fields[c] = nil }
   }
@@ -847,10 +853,7 @@ func buildDefs(_ raw: [Definition], skip: Set<String>) -> BuiltDefs {
       candidates += defs.consts.entries.map { ($0.key, $0.value, []) }
       candidates += defs.fields.entries.map { ($0.key, $0.value, []) }
       candidates += defs.conditions.entries.map { ($0.key, $0.value, []) }
-      // (Functions in the order their rows are in, as they resolved.)
-      for d in raw {
-        if let fn = defs.fns[d.name] { candidates.append((d.name, fn.body, fn.params)) }
-      }
+      candidates += defs.fns.entries.map { ($0.key, $0.value.body, $0.value.params) }
       for (name, expr, params) in candidates where present(name) {
         var refs = sourceRefs(name)
         for ref in references(expr) { refs.insert(ref) }

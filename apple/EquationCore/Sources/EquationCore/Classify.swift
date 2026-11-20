@@ -7,11 +7,12 @@
 /// - a pair of numbers → a point; a pair in x and y → a vector field
 /// - ODEs: dy/dx = f and y' = f are the direction field (1, f); a system
 ///   (x', y') = (P, Q) the phase-plane field (P, Q)
+/// - a pair in u → the parametric curve it traces, u ∈ (0, 1)
 /// - with no x or y at all, a number or a claim to read out
 /// - t is always allowed and means "animated": seconds since the start
 ///
 /// The 2D kinds above are the ones ported. Everything else the site draws
-/// (surfaces, parametric curves, systems, lists, …) throws `Unsupported`.
+/// (surfaces, curves in space, systems, lists, …) throws `Unsupported`.
 public indirect enum MathObject: Equatable, Sendable {
   /// `y = f(x)`: a curve that is a graph.
   case curveGraph(rhs: Expr, equation: Expr, levels: LevelSetSpec?)
@@ -20,6 +21,8 @@ public indirect enum MathObject: Equatable, Sendable {
   case scalarField(expr: Expr)
   case vectorField(components: [Expr])
   case point(coordinates: [Expr])
+  /// A pair in u: the curve it traces as u runs from 0 to 1.
+  case curveParametric(coordinates: [Expr])
   case value(expr: Expr)
   /// A claim with no x or y in it (`2 + 2 = 4`), or an equation whose sides
   /// agree everywhere (`identity`). `constant`: the row reads like a slider
@@ -34,6 +37,7 @@ public indirect enum MathObject: Equatable, Sendable {
     case .scalarField: "scalar2d"
     case .vectorField: "vfield2d"
     case .point: "point"
+    case .curveParametric: "pcurve"
     case .value: "value"
     case .note: "note"
     }
@@ -64,7 +68,8 @@ public struct Classified: Equatable, Sendable {
 
 /// The message for a row that tries to define t, which is animation time.
 let tReserved =
-  "t is reserved for time (it animates, counting seconds); use another name for a constant, like k = 3, and write k where you meant t."
+  "t is reserved for time (it animates, counting seconds); use another name for a constant, like k = 3, "
+  + "and write k where you meant t."
 
 private let spaceVarNames: Set<String> = ["x", "y", "z"]
 private let paramVarNames: Set<String> = ["u", "v"]
@@ -325,14 +330,15 @@ func classify(_ lowered: Expr, defined: Set<String>, fields: [String: Expr]) thr
     }
     if vars.contains("v") && !vars.contains("u") { throw LanguageError("Parametric surfaces use u (and v).") }
     if vars.contains("u") && vars.contains("v") { throw Unsupported("parametric regions and surfaces") }
-    if vars.contains("u") { throw Unsupported("parametric curves") }
-    if items.count == 3 { throw Unsupported("points in space") }
+    if items.count == 3 { throw Unsupported(vars.contains("u") ? "parametric curves in space" : "points in space") }
+    if vars.contains("u") { return done(.curveParametric(coordinates: items)) }
     return done(.point(coordinates: items))
   }
 
   if hasParam && !paramSystem {
     throw LanguageError(
-      "u and v trace a curve or surface in a tuple, like (cos(u), sin(u)) or (u, v, u v); to set the range one runs over, define it as an interval: u = interval(0, 2pi)."
+      "u and v trace a curve or surface in a tuple, like (cos(u), sin(u)) or (u, v, u v); "
+        + "to set the range one runs over, define it as an interval: u = interval(0, 2pi)."
     )
   }
 

@@ -53,8 +53,8 @@ func childrenOf(_ e: Expr) -> [Expr] {
   switch e {
   case .num, .var, .str: return []
   case .neg(let a): return [a]
-  case .bin(_, let a, let b, _), .index(let a, let b), .range(let a, let b), .eqtest(_, let a, let b), .eq(let a, let b),
-    .ineq(_, let a, let b, _):
+  case .bin(_, let a, let b, _), .index(let a, let b), .range(let a, let b), .eqtest(_, let a, let b),
+    .eq(let a, let b), .ineq(_, let a, let b, _):
     return [a, b]
   case .call(_, let items), .vec(let items), .list(let items): return items
   case .piecewise(let cases, let otherwise):
@@ -488,7 +488,8 @@ func evaluate(_ e: Expr, _ env: inout [String: Double]) throws -> Double {
     guard let fn = evalFunctions[name] else {
       if name == intervalFnName {
         throw LanguageError(
-          "An interval is a range of numbers, not one value: draw it in a row of its own, in a tuple, or beside x and y."
+          "An interval is a range of numbers, not one value: "
+            + "draw it in a row of its own, in a tuple, or beside x and y."
         )
       }
       throw LanguageError("Unknown function: \(name)")

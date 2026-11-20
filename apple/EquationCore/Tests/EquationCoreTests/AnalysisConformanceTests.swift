@@ -52,7 +52,9 @@ import Testing
           if let mine = analysis.env[key], close(mine, v) { continue }
           failures.append("\(name): env \(key) is \(String(describing: analysis.env[key])), want \(v)")
         }
-        if env.count != analysis.env.count { failures.append("\(name): env has \(analysis.env.count) names, want \(env.count)") }
+        if env.count != analysis.env.count {
+          failures.append("\(name): env has \(analysis.env.count) names, want \(env.count)")
+        }
       }
       if isExample {
         examples += 1
@@ -90,8 +92,8 @@ import Testing
   }
 
   @Test func whatIsNotPortedSaysSo() {
-    for text in ["L = [1, 2, 3]", "z = x^2 + y^2", "X ~ Normal(0, 1)", "a_n = 1/n", "sum(n=1..5, n)", "(cos(u), sin(u))"]
-    {
+    let rows = ["L = [1, 2, 3]", "z = x^2 + y^2", "X ~ Normal(0, 1)", "a_n = 1/n", "sum(n=1..5, n)", "(u, u, u)"]
+    for text in rows {
       let row = analyze([text]).rows[0]
       #expect(row.unsupported != nil, "\(text)")
       #expect(row.cpu == nil && row.gpu == nil && row.error == nil, "\(text)")
@@ -113,12 +115,19 @@ import Testing
 
   // MARK: Comparing a row
 
-  private func compare(_ got: RowAnalysis, _ want: [String: Any], _ analysis: DocumentAnalysis, index: Int, source: String)
-    -> [String]
-  {
+  private func compare(
+    _ got: RowAnalysis, _ want: [String: Any], _ analysis: DocumentAnalysis, index: Int, source: String
+  ) -> [String] {
     var out: [String] = []
     func check<T: Equatable>(_ what: String, _ mine: T, _ theirs: T) {
-      if mine != theirs { out.append("\(what): got \(mine), want \(theirs)") }
+      guard mine != theirs else { return }
+      // A plan prints long: show where the two part.
+      let (a, b) = (Array("\(mine)"), Array("\(theirs)"))
+      let at = zip(a, b).prefix { $0 == $1 }.count
+      let from = max(0, at - 60)
+      func around(_ s: [Character]) -> String { String(s[from..<min(s.count, at + 120)]) }
+      let whole = "\(what): got \(mine), want \(theirs)"
+      out.append(a.count < 300 ? whole : "\(what): got …\(around(a))…, want …\(around(b))…")
     }
     check("text", got.text, want["text"] as! String)
     check("noteStart", got.noteStart ?? -1, (want["noteStart"] as! NSNumber).intValue)
@@ -238,6 +247,12 @@ import Testing
       if o["autoscale"] != nil { throw FixtureError(description: "an autoscaled field") }
       return .scalar2d(expr: try expr("expr"))
     case "point": return .point(dim: (o["dim"] as! NSNumber).intValue, coords: try exprs("coords"))
+    case "pcurve":
+      if o["tube"] != nil { throw FixtureError(description: "a tube") }
+      func optional(_ key: String) throws -> [Expr]? { try (o[key] as? [Any])?.map(exprFromJSON) }
+      return .pcurve(
+        dim: (o["dim"] as! NSNumber).intValue, comps: try exprs("comps"), d1: try optional("d1"),
+        d2: try optional("d2"), d3: try optional("d3"))
     case "vfield2d": return .vfield2d(comps: try exprs("comps"))
     case "value":
       if o["shade"] != nil { throw FixtureError(description: "an integral's shaded area") }
@@ -260,14 +275,16 @@ func fixture(_ name: String) throws -> Any {
   return try JSONSerialization.jsonObject(with: Data(contentsOf: url))
 }
 
-/// A number as the fixtures carry it: NaN, ±Infinity and -0 by name.
+/// A number as the fixtures carry it: whole numbers as JSON numbers, every
+/// other as JavaScript writes it (JSONSerialization reads some decimals an
+/// ulp off; Double's own parser does not).
 func number(_ v: Any) -> Double {
   if let n = v as? NSNumber { return n.doubleValue }
   switch v as? String {
   case "Infinity": return .infinity
   case "-Infinity": return -.infinity
-  case "-0": return -0.0
-  default: return .nan
+  case let text?: return Double(text) ?? .nan
+  case nil: return .nan
   }
 }
 
