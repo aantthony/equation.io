@@ -1,0 +1,15 @@
+{
+  "layers": {
+    "projections": [
+      {
+        "relation": "ineq",
+        "field": "(((x*x) + (y*y)) - (u_b * (3.0 * u)))",
+        "color": [0.176, 0.439, 0.702],
+        "params": ["b"]
+      }
+    ]
+  },
+  "env": {
+    "b": 1
+  }
+}
