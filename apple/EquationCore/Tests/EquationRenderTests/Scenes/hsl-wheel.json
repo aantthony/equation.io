@@ -1,0 +1,1 @@
+{"layers":{"colors":[{"space":"hsl","params":[],"field":"vec4(eqColor2, 1.0, 0.5, 1.0)","locals":"float eqColor0 = atan((vec2(x, y)).y, (vec2(x, y)).x);\nfloat eqColor1 = (t / 3.0);\nfloat eqColor2 = (eqColor0 + eqColor1);","color":[0.176,0.439,0.702]}]},"env":{}}

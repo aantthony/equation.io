@@ -13,6 +13,8 @@ public final class MetalContext {
   /// Shaders compiled since the context was made, so a test can assert that
   /// a slider's drag hits the cache (web/gl.ts `glStats`).
   public private(set) var compiles = 0
+  /// Of those, the ones that didn't compile: a test that draws expects none.
+  public private(set) var failures = 0
   /// Pipelines by fragment source, so editing one equation doesn't recompile
   /// the others; nil for a source that didn't compile.
   private var pipelines: [String: FragmentPipeline?] = [:]
@@ -27,6 +29,8 @@ public final class MetalContext {
     var state: any MTLRenderPipelineState
     var slots: [String: (offset: Int, count: Int)]
     var count: Int
+    /// The textures the shader reads, by index.
+    var textures: [String] = []
   }
 
   /// The pipeline for a GLSL fragment shader over the fullscreen triangle,
@@ -56,8 +60,10 @@ public final class MetalContext {
       color.sourceAlphaBlendFactor = .one
       color.destinationAlphaBlendFactor = .oneMinusSourceAlpha
       let state = try device.makeRenderPipelineState(descriptor: descriptor)
-      return FragmentPipeline(state: state, slots: translated.slots, count: translated.count)
+      return FragmentPipeline(
+        state: state, slots: translated.slots, count: translated.count, textures: translated.textures)
     } catch {
+      failures += 1
       print("Shader compile error: \(error)\n---\n\(glsl)")
       return nil
     }
@@ -87,12 +93,16 @@ struct FrameUniforms {
 
 extension MetalContext {
   /// Draw one fullscreen pass. `value` gives each uniform the shader
-  /// declares beyond the frame's; one it doesn't name is 0.
+  /// declares beyond the frame's; one it doesn't name is 0. `texture` gives
+  /// each sampler its texture; without one the pass is not drawn.
   func draw(
     _ encoder: any MTLRenderCommandEncoder, fragment glsl: String, frame: FrameUniforms,
+    texture: (String) -> (any MTLTexture)? = { _ in nil },
     value: (String) -> [Float]?
   ) {
     guard let pipeline = pipeline(fragment: glsl) else { return }
+    let textures = pipeline.textures.map(texture)
+    guard !textures.contains(where: { $0 == nil }) else { return }
     var frame = frame
     var floats = [Float](repeating: 0, count: pipeline.count)
     for (name, slot) in pipeline.slots {
@@ -100,6 +110,7 @@ extension MetalContext {
       for k in 0..<min(slot.count, given.count) { floats[slot.offset + k] = given[k] }
     }
     encoder.setRenderPipelineState(pipeline.state)
+    for (index, texture) in textures.enumerated() { encoder.setFragmentTexture(texture, index: index) }
     encoder.setFragmentBytes(&frame, length: MemoryLayout<FrameUniforms>.stride, index: 0)
     encoder.setFragmentBytes(&floats, length: floats.count * MemoryLayout<Float>.stride, index: 1)
     encoder.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 3)

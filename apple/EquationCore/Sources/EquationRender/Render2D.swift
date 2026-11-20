@@ -65,22 +65,40 @@ public struct Curve2D: Equatable, Codable, Sendable {
 public struct Layers2D: Equatable, Codable, Sendable {
   /// Contour stacks of f for `f(x,y) = c` rows; drawn under the other layers.
   public var levels: [LevelSpec]?
+  public var cells: [Cells2D]?
+  public var fractals: [Fractal2D]?
+  public var domains: [Curve2D]?
+  public var colors: [ColorField2D]?
+  public var conformals: [Curve2D]?
+  public var vfields: [VField2D]?
+  public var tfields: [TField2D]?
   public var ineqs: [Ineq2D]?
   public var projections: [Projected2D]?
   public var bifs: [Bif2D]?
   /// `gain` multiplies F before it is shaded (0.6 without).
   public var scalars: [Scalar2D]?
+  public var complexes: [Curve2D]?
   public var curves: [Curve2D]?
 
   public init(
-    levels: [LevelSpec]? = nil, ineqs: [Ineq2D]? = nil, projections: [Projected2D]? = nil, bifs: [Bif2D]? = nil,
-    scalars: [Scalar2D]? = nil, curves: [Curve2D]? = nil
+    levels: [LevelSpec]? = nil, cells: [Cells2D]? = nil, fractals: [Fractal2D]? = nil, domains: [Curve2D]? = nil,
+    colors: [ColorField2D]? = nil, conformals: [Curve2D]? = nil, vfields: [VField2D]? = nil,
+    tfields: [TField2D]? = nil, ineqs: [Ineq2D]? = nil, projections: [Projected2D]? = nil, bifs: [Bif2D]? = nil,
+    scalars: [Scalar2D]? = nil, complexes: [Curve2D]? = nil, curves: [Curve2D]? = nil
   ) {
     self.levels = levels
+    self.cells = cells
+    self.fractals = fractals
+    self.domains = domains
+    self.colors = colors
+    self.conformals = conformals
+    self.vfields = vfields
+    self.tfields = tfields
     self.ineqs = ineqs
     self.projections = projections
     self.bifs = bifs
     self.scalars = scalars
+    self.complexes = complexes
     self.curves = curves
   }
 }
@@ -110,6 +128,9 @@ public struct GridSpec: Equatable, Codable, Sendable {
 public struct Frame2D: Equatable, Codable, Sendable {
   public var vp: Box?
   public var grid: Grid?
+  /// The ticks of the axes the panel's view(…) maps, which are gridded at
+  /// them: the site's `maps`, as `mappedTicks` reads them (Frag2D+Ticks.swift).
+  public var ticks: MappedTicks?
 
   public struct Box: Equatable, Codable, Sendable {
     public var x: Double
@@ -129,9 +150,10 @@ public struct Frame2D: Equatable, Codable, Sendable {
     case on, off, axes
   }
 
-  public init(vp: Box? = nil, grid: Grid? = nil) {
+  public init(vp: Box? = nil, grid: Grid? = nil, ticks: MappedTicks? = nil) {
     self.vp = vp
     self.grid = grid
+    self.ticks = ticks
   }
 }
 
@@ -147,9 +169,17 @@ public func niceSpacing(_ upp: Double, _ minPx: Double) -> (major: Double, minor
 
 public final class Renderer2D {
   public let metal: MetalContext
+  /// Cell textures by the shade buffer they were uploaded from (Cells2D.swift).
+  let cellTextures = CellTextures()
 
   public init(_ metal: MetalContext) {
     self.metal = metal
+  }
+
+  /// Drop cell textures no render drew since the last call: once per frame,
+  /// after every panel of a split view has rendered.
+  public func endFrame() {
+    cellTextures.endFrame()
   }
 
   /// Draw a frame into `encoder`, whose target is `target` pixels: the grid,
@@ -192,12 +222,30 @@ public final class Renderer2D {
         GridSpec(glsl: "x", gradGlsl: ["1.0", "0.0"], major: spacing.major, minor: spacing.minor),
         GridSpec(glsl: "y", gradGlsl: ["0.0", "1.0"], major: spacingY.major, minor: spacingY.minor),
       ]
+      // A mapped axis is gridded at its ticks below, not evenly here.
+      specs.removeAll { ($0.glsl == "x" && frame.ticks?.x != nil) || ($0.glsl == "y" && frame.ticks?.y != nil) }
     }
     let named = Dictionary(
       specs.enumerated().flatMap { k, s in [("uMajor\(k)", s.major), ("uMinor\(k)", s.minor)] },
       uniquingKeysWith: { a, _ in a })
     metal.draw(encoder, fragment: gridFrag(specs, axesOnly: grid == .axes, theme: theme), frame: uniforms) { name in
       (named[name] ?? Self.param(name, specs.flatMap(\.params), env)).map { [Float($0)] }
+    }
+
+    let mapped = [("x", frame.ticks?.x), ("y", frame.ticks?.y)].compactMap { a, ticks in ticks.map { (a, $0) } }
+    if grid != .off, !mapped.isEmpty {
+      var named: [String: [Float]] = [:]
+      for (a, ticks) in mapped {
+        let major = grid == .axes ? [] : ticks.major.prefix(MAX_MAJOR_TICKS).map { Float($0.at) }
+        let minor = grid == .axes ? [] : ticks.minor.prefix(MAX_MINOR_TICKS).map { Float($0) }
+        named["uMaj\(a)"] = major
+        named["uMin\(a)"] = minor
+        named["uNMaj\(a)"] = [Float(major.count)]
+        named["uNMin\(a)"] = [Float(minor.count)]
+        named["uZero\(a)"] = [Float(ticks.zero ?? 0)]
+        named["uHasZero\(a)"] = [ticks.zero == nil ? 0 : 1]
+      }
+      metal.draw(encoder, fragment: tickFrag(mapped.map(\.0), theme: theme), frame: uniforms) { named[$0] }
     }
 
     func drawProgram(_ frag: String, _ color: RGB, _ params: [String]?, _ extra: [String: Double]? = nil) {
@@ -207,10 +255,44 @@ public final class Renderer2D {
       }
     }
 
+    func drawField(_ item: Curve2D, _ frag: (String, [String]?) -> String) {
+      drawProgram(frag(item.field, item.params), item.color, item.params, item.uniforms)
+    }
     // Contour stacks sit just above the grid, under everything else, so the
     // solid level and any other layer stay readable on top.
     for lv in layers.levels ?? [] {
       drawProgram(levelsFrag(lv), lv.color, lv.params, ["uMajor": lv.major, "uMinor": lv.minor])
+    }
+
+    for c in layers.cells ?? [] {
+      guard let texture = cellTextures.texture(c, device: metal.device) else { continue }
+      uniforms.color = SIMD4(c.color, 1)
+      let named: [String: [Float]] = [
+        "uSize": [Float(c.width), Float(c.rows)], "uCorner": [Float(c.x0), Float(c.y0)],
+        "uRuns": [c.runs.x ? 1 : 0, c.runs.y ? 1 : 0],
+      ]
+      metal.draw(encoder, fragment: CELLS_FRAG, frame: uniforms, texture: { _ in texture }) { named[$0] }
+    }
+    for f in layers.fractals ?? [] {
+      // The site leaves a fractal's own uniforms unset; they are set here, as every other layer's are.
+      let frag = fractalFrag(f.step, seed: f.seed, maxIter: f.maxIter, params: f.params)
+      drawProgram(frag, f.color, f.params, f.uniforms)
+    }
+    for d in layers.domains ?? [] { drawField(d) { domainFrag($0, params: $1) } }
+    for c in layers.colors ?? [] {
+      drawProgram(
+        colorFrag(c.field, params: c.params, locals: c.locals, space: c.space), c.color, c.params, c.uniforms)
+    }
+    for c in layers.conformals ?? [] { drawField(c) { conformalFrag($0, params: $1) } }
+    for f in layers.vfields ?? [] {
+      drawProgram(vfieldFrag(f.fx, f.fy, params: f.params), f.color, f.params, f.uniforms)
+    }
+    for f in layers.tfields ?? [] where f.entries.count == 4 && (f.jacobian?.count ?? 4) == 4 {
+      let frag =
+        f.streamlines == true
+        ? tlinesFrag(f.entries, params: f.params, jacobian: f.jacobian)
+        : tfieldFrag(f.entries, params: f.params, jacobian: f.jacobian)
+      drawProgram(frag, f.color, f.params, f.uniforms)
     }
     for q in layers.ineqs ?? [] {
       drawProgram(ineqFrag(q.field, edges: q.edges, params: q.params), q.color, q.params, q.uniforms)
@@ -226,6 +308,7 @@ public final class Renderer2D {
       let extra = (s.uniforms ?? [:]).merging(["uGain": s.gain ?? 0.6]) { _, gain in gain }
       drawProgram(scalarFrag(s.field, params: s.params), s.color, s.params, extra)
     }
+    for c in layers.complexes ?? [] { drawField(c) { complexFrag($0, params: $1) } }
     for c in layers.curves ?? [] {
       drawProgram(curveFrag(c.field, params: c.params, graphEval: c.graphEval), c.color, c.params, c.uniforms)
     }
