@@ -211,6 +211,8 @@ let evalFunctions: [String: @Sendable ([Double]) -> Double] = {
   }
   fns[ANGLE_FN] = { xs in angleFn(arg(xs, 0), arg(xs, 1), arg(xs, 2), arg(xs, 3)) }
   fns[ANGLE_RATE_FN] = { xs in angleRateFn(arg(xs, 0), arg(xs, 1), arg(xs, 2), arg(xs, 3)) }
+  // The densities and mass functions of the distributions (SpecialFunctions.swift).
+  fns.merge(distributionEvalFunctions) { _, new in new }
   return fns
 }()
 
