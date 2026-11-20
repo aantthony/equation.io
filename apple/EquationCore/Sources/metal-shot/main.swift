@@ -17,6 +17,7 @@ import UniformTypeIdentifiers
 //   --dark           the dark theme
 //   --view cx,cy,upp the window (upp in math units per device pixel); default the opening window
 //   --time 1.5       seconds since the graph opened (t)
+//   --explain        print what the language made of each row
 //
 // Set a shot beside the site's (apple/tools/web-shot.ts takes the same
 // rows, size and theme) to see whether the two renderers agree; --diff
@@ -63,7 +64,7 @@ var rest: [String] = []
 while !arguments.isEmpty {
   let argument = arguments.removeFirst()
   switch argument {
-  case "--dark", "--help": flags.insert(argument)
+  case "--dark", "--help", "--explain": flags.insert(argument)
   case "--out", "--scene", "--size", "--scale", "--view", "--time":
     guard !arguments.isEmpty else { fail("\(argument) needs a value.") }
     options[argument] = arguments.removeFirst()
@@ -149,18 +150,24 @@ if let path = options["--scene"] {
     fail("Can't read the scene: \(error)")
   }
 } else {
-  // Until the language's own pipeline builds the scene: the rows the first
-  // stage classifies, in palette order.
-  var curves: [Curve2D] = []
-  for row in rest {
-    switch plotRow(row) {
-    case .curve(let field, _)?:
-      curves.append(Curve2D(field: field, color: theme.palette[curves.count % theme.palette.count]))
-    case .nothing?: break
-    case nil: FileHandle.standardError.write(Data("not drawn: \(row)\n".utf8))
+  // The rows as the app draws them: analyzed, colored in palette order, at --time.
+  let analysis = analyze(rest)
+  for (row, text) in zip(analysis.rows, rest) {
+    if let problem = row.error ?? row.unsupported {
+      FileHandle.standardError.write(Data("not drawn: \(text): \(problem)\n".utf8))
     }
   }
-  scene = Scene2D(layers: Layers2D(curves: curves))
+  let colors = Graph2D.colors(analysis, ids: Array(rest.indices), previous: [:], theme: theme).colors
+  if flags.contains("--explain") {
+    // What the language made of each row.
+    for (k, row) in analysis.rows.enumerated() {
+      print(
+        "\(rest[k])\n    kind \(row.kind ?? "-"), cpu \(row.cpu?.type ?? "-"), gpu \(row.gpu?.type ?? "-"), "
+          + "color \(colors[k].map { "\($0)" } ?? "-")\(row.info.map { ", reads \($0)" } ?? "")")
+    }
+  }
+  scene = Graph2D(analysis, colors: colors).scene(
+    at: options["--time"].flatMap(Double.init) ?? 0, width: size[0] * scale, height: size[1] * scale)
 }
 if let text = options["--view"] {
   let parts = text.split(separator: ",").compactMap { Double($0) }
