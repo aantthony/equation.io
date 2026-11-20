@@ -236,8 +236,19 @@ public struct Document3D: Equatable, Sendable {
         }
       }
       if path.count >= 6 { scene.curves.append(Scene3D.Curve(pts: path, color: color)) }
-    case .pcurve(_, let comps, _, _, _):
-      // (A curve in the plane lies in z = 0.)
+    case .pcurve(let dim, let comps, _, _, _):
+      // A curve in the plane lies in z = 0, and is broken at its jumps as in a
+      // 2D panel: a broken path carries extra (NaN) points there.
+      if dim == 2, comps.count == 2 {
+        let flat = samplePath(comps, env)
+        var pts = [Float](repeating: 0, count: flat.count / 2 * 3)
+        for k in 0..<(flat.count / 2) {
+          pts[k * 3] = Float(flat[k * 2])
+          pts[k * 3 + 1] = Float(flat[k * 2 + 1])
+        }
+        scene.curves.append(Scene3D.Curve(pts: pts, color: color))
+        break
+      }
       scene.curves.append(Scene3D.Curve(pts: Self.sample(comps, env), color: color))
     case .tube(let comps, let radius, let d1, _, _):
       // Tubes are opt-in through tube(…). The radius may use sliders and t;

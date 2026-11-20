@@ -154,16 +154,8 @@ extension Graph2D {
       else { return }
       overlay.points.append(.init(x: x, y: y, color: css))
     case .pcurve(2, let comps, _, _, _) where comps.count == 2:
-      var pts: [Double] = []
-      pts.reserveCapacity(Self.curveSamples * 2)
-      var scope = env
-      for k in 0..<Self.curveSamples {
-        scope["u"] = Double(k) / Double(Self.curveSamples - 1)
-        // A sample the curve has no value at is a gap in the line.
-        pts.append((try? evaluate(comps[0], scope)) ?? .nan)
-        pts.append((try? evaluate(comps[1], scope)) ?? .nan)
-      }
-      overlay.polylines.append(.init(pts: pts, color: css))
+      // (Broken at its jumps; a sample the curve has no value at is a gap in the line.)
+      overlay.polylines.append(.init(pts: samplePath(comps, env), color: css))
     case .polygon, .label:
       _ = drawGeometry(plan, env, color: color, into: &overlay)
     default:

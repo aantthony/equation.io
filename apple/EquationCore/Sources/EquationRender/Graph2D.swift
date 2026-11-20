@@ -59,7 +59,7 @@ public struct Graph2D: Equatable, Sendable {
   }
 
   /// Samples along a parametric curve (lib/path.ts `CURVE_SAMPLES`).
-  static let curveSamples = 400
+  static let curveSamples = CURVE_SAMPLES
 
   public init(_ analysis: DocumentAnalysis, colors: [RGB?]) {
     self.analysis = analysis
@@ -193,16 +193,9 @@ public struct Graph2D: Equatable, Sendable {
         else { continue }
         overlay.points.append(.init(x: x, y: y, color: css))
       case .pcurve(2, let comps, _, _, _) where comps.count == 2:
-        var pts: [Double] = []
-        pts.reserveCapacity(Self.curveSamples * 2)
-        var scope = env
-        for k in 0..<Self.curveSamples {
-          scope["u"] = Double(k) / Double(Self.curveSamples - 1)
-          // A sample the curve has no value at is a gap in the line.
-          pts.append((try? evaluate(comps[0], scope)) ?? .nan)
-          pts.append((try? evaluate(comps[1], scope)) ?? .nan)
-        }
-        overlay.polylines.append(.init(pts: pts, color: css))
+        // Sampled along u and broken at its jumps (branch cuts, steps, poles): a
+        // sample the curve has no value at is a gap in the line too.
+        overlay.polylines.append(.init(pts: samplePath(comps, env), color: css))
       case .polygon, .label:
         _ = drawGeometry(cpu, env, color: color, into: &overlay)
       case .vlist, .plist, .dlist, .dscatter, .histogram, .family:

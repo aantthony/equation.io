@@ -29,7 +29,7 @@ import { GLSL_PRELUDE, toGLSL, uniformName, withHelpers } from '../../lib/glsl.t
 import { hullGeometrySampler } from '../../lib/hull-geometry.ts';
 import { traceIntersection } from '../../lib/intersection.ts';
 import { DARK_PALETTE, LIGHT_PALETTE, takesColor } from '../../lib/palette.ts';
-import { CURVE_SAMPLES } from '../../lib/path.ts';
+import { CURVE_SAMPLES, pathSampler } from '../../lib/path.ts';
 import { solveSystem, traceSystem } from '../../lib/solve.ts';
 import { initialState } from '../../lib/state.ts';
 import { noteColor } from '../../lib/statements.ts';
@@ -242,7 +242,13 @@ export function graphJSON(
           return out;
         };
         const radius = cpu.dim === 3 && cpu.tube ? at(cpu.tube) : 0;
-        const pts = sample(cpu.comps)!;
+        // A plane curve is broken at its jumps, as in a 2D panel: extra (NaN) points there.
+        const flat = cpu.dim === 2 ? pathSampler(cpu.comps).sample(env) : null;
+        const pts = flat
+          ? Float32Array.from({ length: (flat.length / 2) * 3 }, (_, k) =>
+              k % 3 < 2 ? flat[((k / 3) | 0) * 2 + (k % 3)] : 0,
+            )
+          : sample(cpu.comps)!;
         if (radius > 0 && isFinite(radius)) {
           const frames = curveFrames(pts, sample(cpu.d1), sample(cpu.d2), sample(cpu.d3));
           scene.tubes.push({ ...buildTube(pts, frames, radius, TUBE_SEGMENTS), color });

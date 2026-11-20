@@ -59,7 +59,7 @@ import { DATA_CASES, generated } from './cases-data.ts';
 import { parseCsv, type Table } from '../../lib/csv.ts';
 import { shortHash } from '../../lib/hash.ts';
 import { MEASURE_CASES } from './cases-measure.ts';
-import { REST_CASES, recordGraph } from './cases-rest.ts';
+import { REST_CASES, recordGraph, recordPath } from './cases-rest.ts';
 
 const fixtures = new URL('../EquationCore/Tests/EquationCoreTests/Fixtures/', import.meta.url);
 
@@ -1234,6 +1234,7 @@ const recorded = docs.map(({ name, rows, files, link }) => {
         drawn: drawnOf(row.cpu, analysis.rvs, analysis.constEnv),
         mark: !!row.mark,
         graph: recordGraph(row.cpu, analysis.constEnv),
+        path: recordPath(row.cpu, analysis.constEnv),
       };
     }),
   };

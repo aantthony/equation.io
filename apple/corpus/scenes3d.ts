@@ -68,6 +68,8 @@ const DOCUMENTS: Array<[text: string, time?: number]> = [
   ],
   ['a = 0.5; on((X, Y, Z) = (x, y, x y), x = -1..1, y = -1..1); (u/2, v/2); (a u, v - 1); (x, a)'],
   ['z = 1; (u, v); a = 2; (a u cos(2 pi v), u sin(2 pi v))'],
+  // A plane curve in a 3D panel is broken at its jumps.
+  ['z = 0; (u, floor(4 u)/4); (4 u - 2, 1/(4 u - 2)); (cos(2 pi u), sin(2 pi u)); sqrt(e^(2 pi i u) - 1)'],
   // Positions in coordinates named on the left.
   [
     'rho = sqrt(x^2 + y^2 + z^2); theta = atan2(y, x); phi = acos(z/rho); (rho, theta, phi) = (2, pi/4, pi/3); ' +

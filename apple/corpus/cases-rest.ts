@@ -6,6 +6,7 @@
  */
 import { collectEdges, edgeEvaluator, edgeText, layoutGraph } from '../../lib/graph.ts';
 import type { Expr } from '../../lib/expr.ts';
+import { pathSampler } from '../../lib/path.ts';
 
 export const REST_CASES: string[] = [
   // Graphs: the tuple of the arguments, one edge per element.
@@ -53,6 +54,11 @@ export const REST_CASES: string[] = [
   'a_{n+1} = 2 a_n; b_n = a_n + 1; b_3; c_{n+1} = c_n + a_n; s_n = sum(k=0..n, a_k); s_3; b_[1..3]; c_4',
   'a_n = [1, 2, 3][n]; b_n = mean([n, 2n]); c_{n+1} = [1, 2][1] c_n; L = [3, 1, 2]; d_n = L[n]; e_n = n count(L)',
   'L = [3, 1, 4, 1, 5]; b_0 = 0; b_{n+1} = b_n + L[n + 1]; b_3; b_5; b_6; b_9; T = sort(L); c_{n+1} = c_n T[n + 1]; c_2',
+  // Plane curves that jump: a step, a pole, a branch cut, a hole; and ones that only turn sharply.
+  '(u, floor(4 u)); (4 u - 2, 1/(4 u - 2)); (u, sign(sin(12 pi u))); (cos(2 pi u), sin(2 pi u)); (u, abs(u - 0.5))',
+  '(4 u - 2, tan(4 u - 2)); (u, sqrt(u - 0.5)); (u, fract(8 u)/4); (u, {u < 0.3: 1, u > 0.6: 2}); (u, 1e-12 floor(3 u))',
+  'e^(2 pi i u); ln(e^(2 pi i u)); sqrt(e^(2 pi i u) - 1); (u + i/4)^(1/3); 1/(u - 0.5 + 0.001 i)',
+  'a = 3; (u, mod(a u, 1)); (u, round(a u) + t); (u, 100000 u); (u, sin(200 u)); (u, 0/0); (0/0, u)',
   // The derivative of a list: a named one is a constant to x, y and z; one written out goes item by item.
   'N = [1..4]; y = d/dx x^N; y = d/dx [x, x^2, sin(x)]; L = [1, 2]; y = d/dx (L x); d/dt L; a = 2; d/da (L a)',
   'N = [1..3]; y = d^2/dx^2 x^N; y = d/dx [1..3]; d/du (N u); x = d/dy (y^N); d/dx (N x y); d/dz (N z); y = d/dx floor(N x)',
@@ -80,4 +86,19 @@ export function recordGraph(plan: { type: string } | undefined, constEnv: Record
     from: data.vertices.map(v => from.get(v)),
     pos: data.vertices.map(v => pos.get(v)),
   };
+}
+
+/** What web/scene.ts samples of a plane curve (lib/path.ts pathSampler, at t = 0): how many points, where
+ *  the pen lifts (a jump's NaN pair, an undefined sample), and the sum of the rest. */
+export function recordPath(plan: { type: string } | undefined, constEnv: Record<string, number>): unknown {
+  const curve = plan as { type: string; dim?: number; comps?: Expr[] } | undefined;
+  if (curve?.type !== 'pcurve' || curve.dim !== 2 || !curve.comps) return null;
+  const pts = pathSampler(curve.comps).sample({ ...constEnv, t: 0 });
+  const gaps: number[] = [];
+  let sum = 0;
+  for (let k = 0; k < pts.length; k += 2) {
+    if (Number.isFinite(pts[k]) && Number.isFinite(pts[k + 1])) sum += Math.abs(pts[k]) + Math.abs(pts[k + 1]);
+    else gaps.push(k / 2);
+  }
+  return { points: pts.length / 2, gaps, sum };
 }
