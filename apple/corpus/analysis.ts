@@ -239,6 +239,19 @@ function randomDocs(count: number): string[] {
     }
   };
   const NUMS = ['0', '1', '2', '3', '0.5', '-1', '10', 'pi', 'e'];
+  const EDGES = [
+    'L = [1, 2, 3]', 'y = L x', 'b = [a, 2]', 'sum(n=1..3, x^n)', 'y = sum(n=1..a, n x)', 'w^2', 'i a', '(1, 2, 3)',
+    'z = x y', 'X ~ Normal(0, 1)', 'a ~ b x + c', 'a_n = n a', 'b_k = 3', "p' = -p", "a' = b", 'a(0) = 1',
+    'view(x = -a..a)', 'view(y = -1..b, ratio = 2)', '---', '--- right', 'grid(off)', 'e_x', 'y = e_y x',
+    'total = 2', 'gamma = 3', 'mean(x)', 'min(a)', 'max(b)', 'count(c)', 'f(A)', 'g(A)', 'g((1, 2))', 'A.x', 'A.y + r',
+    'c[1]', 'A[1]', '{a = 2: 1, 0}', '{b = c: x, y}', 'd/da (a x)', 'y = d/dt sin(t x)', 'y = d^2/dx^2 f(x)',
+    'dy/dx = y a', "x' = y", "(x', y') = (y, -a x)", 'N = 3', 'y = N x', 'c = interval(0, 1)', 'b ∈ [1, 2]',
+    'abs(A)', 'A · A', 'A × (1, 0)', 'dot(A, A)', 'segment(A, (0, 0))', 'P(a > 1)', 'E(a)', 'u', 'u a', 'v + x',
+    'a = x', 'b = y a', 'f(x) = x', 'g = 2', 'r(x) = x', 'A = 3', 'A_x = 1', 'y = A_z', 't = a', 'e = a', 'd = 2',
+    'x = a', 'y = b', 'x = y', '# note', 'y = x # a', 'a = 3 #f00', '', 'y =', 'sin(', 'y = )', 'a = ', '1 +',
+    'c = clamp(a, 0)', 'y = sin(x, y)', 'y = atan(y, x)', 'log2(a)', 'a!', 'x!', '2^3!', 'r_0 = 1', 'q = {a > 0: b}',
+    'within = a > 0', 'within = x > a', '{within: 1, 0}', 'y = {c > 0: x}', 'inf', 'y = inf', 'int[0..1] x dx',
+  ];
   const out: string[] = [];
   for (let k = 0; k < count; k++) {
     const consts = [...NUMS, 'a', 'b', pick(['c', 'q', 't'])];
@@ -286,6 +299,9 @@ function randomDocs(count: number): string[] {
           ]);
       }
     });
+    // Now and then, a row from outside the ported core, or at its edge: the
+    // rows around it must come out the same, or say they are not supported.
+    while (random() < 0.3) rows.splice(Math.floor(random() * rows.length), 0, pick(EDGES));
     // Definitions above the rows, below them, or among them.
     const order = random();
     out.push((order < 0.5 ? [...defs, ...rows] : order < 0.75 ? [...rows, ...defs] : [...defs].reverse().concat(rows)).join('; '));
@@ -302,7 +318,7 @@ const docs: Doc[] = [];
 for (const [category, items] of EXAMPLES)
   for (const [label, text] of items) docs.push({ name: `${category} / ${label}`, rows: splitStatements(text) });
 CASES.forEach((text, k) => docs.push({ name: `case ${k + 1}`, rows: splitStatements(text) }));
-randomDocs(600).forEach((text, k) => docs.push({ name: `case random ${k + 1}`, rows: splitStatements(text) }));
+randomDocs(Number(process.env.RANDOM_DOCS ?? 600)).forEach((text, k) => docs.push({ name: `case random ${k + 1}`, rows: splitStatements(text) }));
 
 const recorded = docs.map(({ name, rows }) => {
   const analysis = analyzeRows(rows);

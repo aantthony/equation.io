@@ -532,17 +532,26 @@ private func lowerPoints(_ e: Expr, _ comps: (String) -> [String]?) throws -> Lo
       }
     }
   case .call(let name, let args):
+    let lowered = try args.map(lo)
     var flat: [Expr] = []
-    for arg in args {
-      // |A|, and the functions of points (dot, distance, …), are not ported.
-      guard case .scalar(let a) = try lo(arg) else { throw Unsupported("\(name)(…) of a point") }
-      flat.append(a)
+    for arg in lowered {
+      if case .scalar(let a) = arg {
+        flat.append(a)
+        continue
+      }
+      // |A| is a point's length, and abs(a, b) the length of the pair:
+      // neither is ported. No other elementary function takes a point.
+      if name == "abs", args.count <= 2 { throw Unsupported("the length of a point") }
+      throw LanguageError("\(name) is not defined for points.")
     }
+    if name == "abs", args.count == 2 { throw Unsupported("the length of a point") }
     return .scalar(.call(name, flat))
   case .eq(let l, let r):
     let taken: String? = if case .var(let name) = l { takenNames[name] } else { nil }
     do {
-      switch (try lo(l), try lo(r)) {
+      let left = try lo(l)
+      let right = try lo(r)
+      switch (left, right) {
       case (.scalar(let a), .scalar(let b)): return .scalar(.eq(a, b))
       case (.vec(let a), .vec(let b)): return .scalar(.eq(.vec(a), .vec(b)))
       default: throw LanguageError("One side is a point and the other is a number.")
@@ -553,7 +562,11 @@ private func lowerPoints(_ e: Expr, _ comps: (String) -> [String]?) throws -> Lo
       throw LanguageError("\(name) is \(taken), so it cannot name a value — pick another name, like q.")
     }
   case .ineq(let op, let l, let r, let grouped):
-    guard case .scalar(let a) = try lo(l), case .scalar(let b) = try lo(r) else {
+    // (Both sides lower before either is refused: the right side's own
+    // error comes first, as it does on the site.)
+    let left = try lo(l)
+    let right = try lo(r)
+    guard case .scalar(let a) = left, case .scalar(let b) = right else {
       throw LanguageError("Points cannot be compared — compare |A - B| instead.")
     }
     return .scalar(.ineq(op, a, b, grouped: grouped))
