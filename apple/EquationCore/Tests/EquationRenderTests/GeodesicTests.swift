@@ -4,6 +4,40 @@ import Testing
 @testable import EquationCore
 @testable import EquationRender
 
+/// What the pointer is over on a panel's surface (lib/surface-pick.ts).
+@Suite struct SurfacePicking {
+  private func surface(_ row: String) throws -> SurfaceMap {
+    guard case .surface(let map)? = analyze([row]).rows[0].view else { throw LanguageError("no surface") }
+    return map
+  }
+
+  @Test func aRayMeetsTheSurfaceItself() throws {
+    let saddle = SurfacePicker(try surface("on((X, Y, Z) = (x, y, x^2 - y^2), x = -1..1, y = -1..1)"))
+    let hit = try #require(saddle.hit([0.3, 0.2, 5], [0, 0, -1]))
+    #expect(abs(hit.x - 0.3) < 1e-9 && abs(hit.y - 0.2) < 1e-9)
+    #expect(abs(hit.t - (5 - 0.05)) < 1e-9 && abs(hit.point[2] - 0.05) < 1e-9)
+    // Past the ranges it is drawn over, nothing is there.
+    #expect(saddle.hit([3, 0.2, 5], [0, 0, -1]) == nil)
+    #expect(withinSurface(saddle.map, 1, -1) && !withinSurface(saddle.map, 1.01, 0))
+  }
+
+  @Test func theNearestSheetWins() throws {
+    let torus = SurfacePicker(
+      try surface("on((X, Y, Z) = ((3 + cos(y)) cos(x), (3 + cos(y)) sin(x), sin(y)), x = -pi..pi, y = -pi..pi)"))
+    // Along the x axis from outside: the outer equator first, at X = 4.
+    let hit = try #require(torus.hit([10, 0, 0], [-1, 0, 0]))
+    #expect(abs(hit.t - 6) < 1e-6 && abs(hit.point[0] - 4) < 1e-6)
+    #expect(abs(hit.x) < 1e-6 && abs(hit.y) < 1e-6)
+  }
+
+  @Test func aPixelIsASpanOfXAndY() throws {
+    let plane = try surface("on((X, Y, Z) = (2 x, y, 0), x = -1..1, y = -1..1)")
+    // Ten pixels a unit of space: a pixel is 1/20 of x and 1/10 of y.
+    let per = surfacePixel(plane, 0, 0) { p in (10 * p[0], 10 * p[1]) }
+    #expect(abs(per.0 - 0.05) < 1e-9 && abs(per.1 - 0.1) < 1e-9)
+  }
+}
+
 /// Geodesic rows as Document3D draws them (web/scene.ts, the 'geodesic' case
 /// of renderPanel, over lib/surface-geometry.ts `geodesicPath`).
 @Suite struct Geodesics {

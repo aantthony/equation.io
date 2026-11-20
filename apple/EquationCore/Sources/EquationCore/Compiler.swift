@@ -88,7 +88,7 @@ public enum CpuPlan: Equatable, Sendable {
   /// A moving point whose past positions are drawn (Trail.swift).
   case trail(dim: Int, coords: [Expr])
   /// A geodesic, traced as it is drawn (Geodesic.swift).
-  case geodesic(GeodesicSpec)
+  indirect case geodesic(GeodesicSpec)
   /// A list of numbers: a dot plot on the number line.
   case vlist(values: [Expr])
   /// A list of points.
