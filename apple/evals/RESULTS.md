@@ -1696,3 +1696,32 @@ Verdict: worse, so reverted. Without a written instance the model doesn't
 use circle() at all, and it can't shift x^2 + y^2 = r^2 to a centre by
 itself; with one, it copies the instance's numbers. The numbered example
 stays (`circle((2, 1), 3)`), the better of the two measured.
+
+### Private Cloud Compute, first run
+
+`ede4b07d`: the same instructions (1,558 tokens), tools and error follow-up,
+asked of Apple's server model (`--model pcc`, the runner signed with the
+com.apple.developer.private-cloud-compute entitlement).
+
+`results/2026-11-20T110303Z-pcc.json`, sampled, 10 runs a task:
+**77% ±3% (369/480)**, against 49% ±5% (233/480) on the device for the same
+setup (`050225Z`). 3.5 s and 2.3 tool calls a run, 10,404 tokens in; no
+context overflows.
+
+- The last 12 runs never ran: "Usage quota reached (userDeviceRateLimit)"
+  from normal-probability #9 on, so intersection-curve is 0/10 unasked.
+  Of the 468 that ran, 369 passed (79%).
+- 34 runs were refused before any tool call, "Response may contain
+  sensitive or unsafe content": all of honest-reply-helix ("Draw a helix"),
+  parametric-circle and lissajous, and 4 of polar-rose. The on-device model
+  answers these.
+- 0/10 for reasons of the model's own: animate-parabola (nothing moves with
+  t), moving-point (no `A = … t …` row), vector-field-slider (the reply
+  names more than was drawn), regression-line (rows left with errors, 6.9
+  calls a run), piecewise (more than 12 tool calls every time);
+  solid-of-revolution 1/10.
+- 33 tasks pass 10/10, the circle tasks among them (circle-at-point,
+  circle-off-origin, circle-and-line), which the device's model could not do.
+
+One run, so the spread is across repetitions only; the quota stopped a
+second.
