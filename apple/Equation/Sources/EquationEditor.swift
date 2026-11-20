@@ -626,7 +626,7 @@ struct RowWidget: View {
         .font(.caption)
         .foregroundStyle(.secondary)
       }
-      if let toggles = status.toggles, status.error == nil {
+      if let toggles = status.toggles {
         HStack(spacing: 6) {
           ForEach(toggles, id: \.id) { toggle in
             Toggle(toggle.label, isOn: Binding(get: { toggle.on }, set: { _ in flip(toggle.id) }))

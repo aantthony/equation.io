@@ -20,7 +20,9 @@ final class MetalCanvas: MTKView, MTKViewDelegate {
 
   var content: GraphContent? {
     didSet {
-      guard content != oldValue else { return }
+      // The same graph made again keeps the one that has drawn: what it
+      // solved and traced is kept with it.
+      guard content != oldValue else { return content = oldValue }
       // A system written as it was keeps its run through the edit; any other starts again.
       if let content {
         if run == nil { run = StateStepper(content.analysis) } else { run?.adopt(content.analysis) }
@@ -42,7 +44,13 @@ final class MetalCanvas: MTKView, MTKViewDelegate {
   /// A pointer or a finger is down on the graph.
   var held = false
   /// The point a drag has hold of, and where the pointer took it.
-  var grab: (row: Int, dx: Double, dy: Double)?
+  var grab: (target: Grabbable.Target, dx: Double, dy: Double)?
+  /// Where the pointer came down, and whether it has moved from there: a
+  /// click that has not drops a seed (the site's `dragMoved`).
+  private var down = CGPoint.zero
+  private var wandered = false
+  /// When the rows' notes were last handed to the model.
+  private var noted = 0.0
   /// A drag that slides a 3D camera's target, not one that orbits it.
   var panning = false
   var coast = Coast()
@@ -212,7 +220,8 @@ final class MetalCanvas: MTKView, MTKViewDelegate {
   private func frames(_ content: GraphContent, at time: Double) -> (frames: [PanelFrame], layout: [PanelLayout]) {
     content.frames(
       at: time, width: viewport.pixels.width, height: viewport.pixels.height, dpr: viewport.scale, theme: theme,
-      views: viewport.states.map(\.view), cameras: viewport.states.map(\.camera), run: run, hot: viewport.hot)
+      views: viewport.states.map(\.view), cameras: viewport.states.map(\.camera), run: run,
+      seeds: viewport.states.map(\.seeds), hot: viewport.hot)
   }
 
   func draw(in view: MTKView) {
@@ -234,6 +243,7 @@ final class MetalCanvas: MTKView, MTKViewDelegate {
     // The overlay (MetalGraphView.swift) draws the rest of this same frame.
     if viewport.frames != frame.frames { viewport.frames = frame.frames }
     if viewport.layout != frame.layout { viewport.layout = frame.layout }
+    note(content, at: time)
 
     // A 3D panel's surfaces are drawn coarsely while they move and refined
     // once they hold still, a pass a frame: draw again when the next is
@@ -244,6 +254,22 @@ final class MetalCanvas: MTKView, MTKViewDelegate {
     refine = Task { @MainActor [weak self] in
       if wait > 0 { try? await Task.sleep(for: .seconds(wait)) }
       if !Task.isCancelled { self?.redraw() }
+    }
+  }
+
+  /// Hand the model what the rows say now that they are drawn (a
+  /// certificate, a geodesic's note, a moving readout). A graph that moves
+  /// says so ten times a second, not sixty: the editor lays its rows out again.
+  private func note(_ content: GraphContent, at time: Double, now immediately: Bool = false) {
+    guard let model else { return }
+    let now = CACurrentMediaTime()
+    if !isPaused, !immediately, now - noted < 0.1 { return }
+    let notes = content.notes(at: time, run: run)
+    guard notes != model.notes else { return }
+    noted = now
+    // Not while the view that owns this one is being updated.
+    Task { @MainActor [weak model] in
+      if let model, model.notes != notes { model.notes = notes }
     }
   }
 
@@ -272,8 +298,11 @@ final class MetalCanvas: MTKView, MTKViewDelegate {
       let time = viewport.time
       // Stepped as the frames up to now would have stepped it, where none were drawn (a hidden window).
       run?.play(to: time)
+      let frame = frames(content, at: time)
+      // (What the rows say once drawn, where no frame on screen has said it.)
+      note(content, at: time, now: true)
       return renderer.image(
-        of: frames(content, at: time).frames, width: Int(viewport.pixels.width), height: Int(viewport.pixels.height),
+        of: frame.frames, width: Int(viewport.pixels.width), height: Int(viewport.pixels.height),
         dpr: viewport.scale, time: time, theme: theme)
     }
   #endif
@@ -565,15 +594,108 @@ final class MetalCanvas: MTKView, MTKViewDelegate {
 
   // MARK: Under the hand
 
-  /// The draggable point of panel `k` under `p`, within `radius` points.
-  private func grabbable(at p: CGPoint, in k: Int, radius: Double) -> (point: GrabPoint, x: Double, y: Double)? {
+  /// The surface of panel `k` (if it draws on one) under `p`: the ray from
+  /// the eye through it met with the surface (the core's SurfacePick.swift).
+  /// With where a point in space lands in the view (in points from its
+  /// top-left corner), how much x and y change across a point at a place on
+  /// the surface, and whether a point there is in sight (web/main.ts `surfaceAt`).
+  private struct OnSurface {
+    var reads: Set<String>
+    var hit: SurfaceHit?
+    var toView: ([Double]) -> (Double, Double)?
+    var units: (Double, Double) -> (Double, Double)
+    var seen: ([Double]) -> Bool
+  }
+
+  /// The last surface picked on: its grid of points is made once.
+  private var picker: SurfacePicker?
+
+  private func surface(at p: CGPoint, in k: Int) -> OnSurface? {
+    guard let content, spatial(k), k < content.framing.count, let surface = content.surface(panel: k) else { return nil }
+    let layout = viewport.layout(content)
+    guard k < layout.count, layout[k].rect.w > 0, layout[k].rect.h > 0 else { return nil }
+    let (box, scale) = (layout[k].rect, scale)
+    let picker = self.picker.flatMap { $0.map == surface.map ? $0 : nil } ?? SurfacePicker(surface.map)
+    self.picker = picker
+    let (vp, invVp, eye) = cameraMatrices(viewport.states[k].camera, box.w / box.h)
+    // The pixel on the far plane, back into space.
+    let nx = ((p.x * scale - box.x) / box.w) * 2 - 1
+    let ny = 1 - ((p.y * scale - box.y) / box.h) * 2
+    let m = invVp.map(Double.init)
+    let w = m[3] * nx + m[7] * ny + m[11] + m[15]
+    let from = [eye.x, eye.y, eye.z]
+    let direction = (0..<3).map { (m[$0] * nx + m[4 + $0] * ny + m[8 + $0] + m[12 + $0]) / w - from[$0] }
+    let toView = { (q: [Double]) -> (Double, Double)? in
+      guard q.count == 3, let at = projectToScreen(vp, SIMD3(q[0], q[1], q[2]), box.w, box.h) else { return nil }
+      return ((at.x + box.x) / scale, (at.y + box.y) / scale)
+    }
+    return OnSurface(
+      reads: surface.reads, hit: picker.hit(from, direction), toView: toView,
+      units: { x, y in surfacePixel(surface.map, x, y, toView) },
+      // Nothing of the surface nearer along the ray to it.
+      seen: { q in
+        let hit = picker.hit(from, (0..<3).map { q[$0] - from[$0] })
+        return hit == nil || hit!.t > 0.999
+      })
+  }
+
+  /// The nearest point a drag can move within `radius` points of `p` on a
+  /// surface panel, and in sight there (web/main.ts `surfaceGrabAt`).
+  private func surfaceGrabbable(at p: CGPoint, in k: Int, radius: Double) -> Grabbable? {
+    guard let content, let on = surface(at: p, in: k) else { return nil }
+    let map = picker?.map
+    var best: Grabbable?
+    var nearest = radius
+    for point in content.surfacePoints(panel: k, reads: on.reads, time: viewport.time, run: run) {
+      guard let map else { break }
+      let q = surfacePoint(map, point.x, point.y)
+      guard q.allSatisfy(\.isFinite), let at = on.toView(q) else { continue }
+      let away = hypot(at.0 - p.x, at.1 - p.y)
+      if away <= nearest, on.seen(q) { (nearest, best) = (away, point) }
+    }
+    return best
+  }
+
+  /// The draggable point of panel `k` under `p`, within `radius` points
+  /// (web/main.ts `pointAt`), and the point of the panel's window under `p`
+  /// (on a surface panel, the point's own place: it is held where the pointer is).
+  private func grabbable(at p: CGPoint, in k: Int, radius: Double) -> (point: Grabbable, x: Double, y: Double)? {
+    if spatial(k) { return surfaceGrabbable(at: p, in: k, radius: radius).map { ($0, $0.x, $0.y) } }
     guard let content, !spatial(k), k < content.framing.count, k < viewport.states.count else { return nil }
-    let view = viewport.states[k].view
-    let points = content.grabPoints(panel: k, time: viewport.time, run: run)
+    let layout = viewport.layout(content)
+    guard k < layout.count else { return nil }
+    let state = viewport.states[k]
+    let view = state.view
+    let points = content.grabPoints(
+      panel: k, time: viewport.time, run: run, view: view, width: layout[k].rect.w, height: layout[k].rect.h,
+      seeds: state.seeds)
     let at = offset(p, in: k)
     let math = view.point(px: at.px, py: at.py)
-    return grabPoint(points, at: math.x, math.y, upp: view.upp * scale, uppY: view.uppY * scale, radius: radius)
-      .map { ($0, math.x, math.y) }
+    let (upp, uppY) = (view.upp * scale, view.uppY * scale)
+    var best: Grabbable?
+    var nearest = radius
+    for point in points {
+      let away = hypot((point.x - math.x) / upp, (point.y - math.y) / uppY)
+      if away <= nearest { (nearest, best) = (away, point) }
+    }
+    return best.map { ($0, math.x, math.y) }
+  }
+
+  /// A motionless click or tap at `p`: in a 2D panel with a vector field it
+  /// drops a seed, which every field there traces its integral curve
+  /// through (web/main.ts, pointerup).
+  func tapped(at p: CGPoint) {
+    let k = panel(at: p)
+    guard let content, !spatial(k), k < viewport.states.count, k < content.panels.panels.count else { return }
+    var graph = content.panels.panels[k].graph
+    guard graph.takesSeeds else { return }
+    let at = offset(p, in: k)
+    let math = viewport.states[k].view.point(px: at.px, py: at.py)
+    // (The graph keeps the newest twelve.)
+    graph.seeds = viewport.states[k].seeds
+    graph.dropSeed(x: math.x, y: math.y)
+    viewport.states[k].seeds = graph.seeds
+    redraw()
   }
 
   /// A pointer or a finger came down at `p` (in points from the top-left
@@ -589,28 +711,57 @@ final class MetalCanvas: MTKView, MTKViewDelegate {
     panning = pan
     active = panel(at: p)
     grab = nil
+    down = p
+    wandered = false
     viewport.hover = nil
+    viewport.hot = nil
     coast.track(x: p.x, y: p.y, at: CACurrentMediaTime())
     guard !pan, let hit = grabbable(at: p, in: active, radius: radius) else { return }
-    grab = (hit.point.row, hit.point.x - hit.x, hit.point.y - hit.y)
-    viewport.hot = hit.point.row
+    grab = (hit.point.target, hit.point.x - hit.x, hit.point.y - hit.y)
+    viewport.hot = HotPoint(panel: active, target: hit.point.target)
     redraw()
   }
 
   /// The pointer moved to `p`, by (dx, dy) points since it last did.
   func dragged(to p: CGPoint, dx: Double, dy: Double) {
     guard held else { return }
+    if hypot(p.x - down.x, p.y - down.y) > 3 { wandered = true }
     if let grab {
       guard let model, let content, active < viewport.states.count, active < content.panels.panels.count
       else { return }
+      if spatial(active) {
+        // Along the surface, to the pixel there; held where the pointer leaves it.
+        guard case .row(let row) = grab.target, let on = surface(at: p, in: active), let hit = on.hit else { return }
+        let lines = model.rows()
+        let moved = analyze(lines).movingPoint(
+          row: row, to: hit.x, hit.y, upp: on.units(hit.x, hit.y), pinned: on.reads, in: lines)
+        if let moved { model.gestureEdit(moved) }
+        return
+      }
       let view = viewport.states[active].view
       let at = offset(p, in: active)
       let math = view.point(px: at.px, py: at.py)
       var to = (x: math.x + grab.dx, y: math.y + grab.dy)
       var upp = (x: view.upp, y: view.uppY)
-      // On a mapped axis the point is held on the screen and written in the
-      // axis's own units, rounded to about a pixel there (web/main.ts `dragTo`).
-      if let maps = content.panels.panels[active].graph.maps {
+      // A seed is the view's: it moves, and no row is rewritten.
+      guard case .row(let row) = grab.target else {
+        if case .seed(let index) = grab.target, index < viewport.states[active].seeds.count {
+          viewport.states[active].seeds[index] = FieldSeed(x: to.x, y: to.y)
+          redraw()
+        }
+        return
+      }
+      let graph = content.panels.panels[active].graph
+      if graph.maps?.plane != nil {
+        // Through a plane map the point is held on the screen and written
+        // in x and y, each rounded to about a pixel there (web/main.ts `dragToPlane`).
+        guard let world = graph.dragToPlane(to.x, to.y, upp: view.upp, uppY: view.uppY), world.x.isFinite,
+          world.y.isFinite
+        else { return }
+        (to, upp) = (world, (0, 0))
+      } else if let maps = graph.maps {
+        // On a mapped axis the point is held on the screen and written in the
+        // axis's own units, rounded to about a pixel there (web/main.ts `dragTo`).
         func carried(_ map: AxisMap?, _ s: Double, _ step: Double) -> Double? {
           guard let map else { return nil }
           let unit = pow(10, (log10(step * 3)).rounded(.down))
@@ -623,7 +774,7 @@ final class MetalCanvas: MTKView, MTKViewDelegate {
       }
       // The rows as they are now: the last move's rewrite may not have come back round yet.
       let lines = model.rows()
-      if let next = analyze(lines).movingPoint(row: grab.row, to: to.x, to.y, upp: upp, in: lines) {
+      if let next = analyze(lines).movingPoint(row: row, to: to.x, to.y, upp: upp, in: lines) {
         model.gestureEdit(next)
       }
       return
@@ -650,6 +801,8 @@ final class MetalCanvas: MTKView, MTKViewDelegate {
       flushWriteback()
       model?.endGesture()
     }
+    // A click that went nowhere, and was not a pan's, drops a seed.
+    if !wandered, !panning { tapped(at: down) }
   }
 
   /// A two-finger scroll or a wheel, by (dx, dy) points, at `p`. The app
@@ -685,6 +838,12 @@ final class MetalCanvas: MTKView, MTKViewDelegate {
   /// A double click or tap at `p`: zoom in about it, or out.
   func doubleTapped(at p: CGPoint, out: Bool) {
     active = panel(at: p)
+    // On a panel with seeds it lets go of them (the site's double click), the one its first tap dropped too.
+    if !out, active < viewport.states.count, !viewport.states[active].seeds.isEmpty {
+      viewport.states[active].seeds = []
+      viewport.hot = nil
+      return redraw()
+    }
     glideZoom(by: out ? 2 : 0.5, at: p, panel: active)
   }
 
@@ -696,10 +855,22 @@ final class MetalCanvas: MTKView, MTKViewDelegate {
   func hovered(at p: CGPoint?) -> Bool {
     guard let p, !held, let content else {
       if viewport.hover != nil { viewport.hover = nil }
+      if !held, viewport.hot != nil {
+        viewport.hot = nil
+        redraw()
+      }
       return false
     }
     let k = panel(at: p)
-    let draggable = grabbable(at: p, in: k, radius: grabRadius) != nil
+    let under = grabbable(at: p, in: k, radius: grabRadius)
+    let draggable = under != nil
+    // A seed under the pointer wears the halo a drag would give it (`hotSeed`).
+    var hot: HotPoint?
+    if let under, case .seed = under.point.target { hot = HotPoint(panel: k, target: under.point.target) }
+    if viewport.hot != hot {
+      viewport.hot = hot
+      redraw()
+    }
     var hover: GraphViewport.Hover?
     if !spatial(k), k < viewport.states.count, k < content.panels.panels.count,
       let frame = viewport.frames.first(where: { $0.layout == viewport.layout(content)[k] }),
@@ -713,8 +884,16 @@ final class MetalCanvas: MTKView, MTKViewDelegate {
       if let near = points.min(by: { away($0) < away($1) }), away(near) <= grabRadius {
         // The overlay holds a mapped panel's points on its screen: read them in the axes' own units.
         let maps = content.panels.panels[k].graph.maps
-        let x = maps?.x.map { toWorld($0, near.x) } ?? snapToPixel(near.x, upp: view.upp / 100)
-        let y = maps?.y.map { toWorld($0, near.y) } ?? snapToPixel(near.y, upp: view.uppY / 100)
+        var x = maps?.x.map { toWorld($0, near.x) } ?? snapToPixel(near.x, upp: view.upp / 100)
+        var y = maps?.y.map { toWorld($0, near.y) } ?? snapToPixel(near.y, upp: view.uppY / 100)
+        if let plane = maps?.plane {
+          // Through a plane map, x and y each to a hundredth of the pixel
+          // there, from the map's Jacobian (web/main.ts `readPlane`).
+          let world = planeToWorld(plane, near.x, near.y)
+          let span = pixelSpan(plane, near.x, near.y, view.upp, view.uppY)
+          x = snapToPixel(world.0, upp: span.0 / 100)
+          y = snapToPixel(world.1, upp: span.1 / 100)
+        }
         let read = { (v: Double) in String(format: "%.6g", v == 0 ? 0 : v) }
         hover = .init(at: p, text: "\(near.label.map { "\($0) = " } ?? "")(\(read(x)), \(read(y)))")
       }

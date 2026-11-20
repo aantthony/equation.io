@@ -70,9 +70,10 @@ struct SpaceGraph: Equatable {
   #endif
 }
 
-/// The display toggles the site keeps on a row outside its text (web/main.ts
-/// `Equation.showLevels`, `partialSum`, `showStreamlines`, `showArrows`), by
-/// row index here; the document's view model keeps them by row id.
+/// The display toggles the site keeps on a row outside its text (web/session.ts
+/// `Equation.showLevels`, `partialSum`, `showStreamlines`, `showArrows`,
+/// `certify`, `combK`, `combT`), by row index here; the document's view model
+/// keeps them by row id.
 struct RowToggles: Equatable {
   /// Level sets `f(x, y) = c` drawing every level of f.
   var levels: Set<Int> = []
@@ -81,6 +82,38 @@ struct RowToggles: Equatable {
   /// Vector fields in space drawn as streamlines, or as arrows.
   var streamlines: Set<Int> = []
   var arrows: Set<Int> = []
+  /// Matrix fields in the plane drawn as streamlines of their major eigenvector.
+  var tensors: Set<Int> = []
+  /// Systems whose search box is certified.
+  var certified: Set<Int> = []
+  /// Curves in space wearing a comb of their curvature, and of their torsion.
+  var combK: Set<Int> = []
+  var combT: Set<Int> = []
+}
+
+/// A point of a panel a drag can move: a row's, which the drag rewrites, or
+/// a seed dropped on the panel's vector fields, which is the view's.
+struct Grabbable: Equatable {
+  enum Target: Equatable {
+    case row(Int)
+    case seed(Int)
+  }
+  var target: Target
+  /// Where the panel draws it: on a panel with mapped axes, on its screen.
+  var x: Double
+  var y: Double
+}
+
+/// What a row says once it has been drawn, in place of what its analysis said.
+struct RowNote: Equatable {
+  var info: String?
+  var error: String?
+}
+
+/// The point of a panel under a drag or the pointer, drawn with a halo.
+struct HotPoint: Equatable {
+  var panel: Int
+  var target: Grabbable.Target
 }
 
 /// What the view keeps of one panel beside its `GraphPanels.Panel`.
@@ -106,6 +139,13 @@ struct GraphContent: Equatable {
   /// One per panel.
   var framing: [PanelFraming]
   var toggles: RowToggles
+  /// In a graph that moves, each row's readout as it opens (`notes`).
+  private var readouts: [Int: OpeningReadout] = [:]
+
+  struct OpeningReadout: Equatable {
+    var readout: String
+    var note: String
+  }
 
   var analysis: DocumentAnalysis { panels.analysis }
   var animated: Bool {
@@ -140,6 +180,8 @@ struct GraphContent: Equatable {
         document.theme = theme
         document.streamlines = toggles.streamlines
         document.arrows = toggles.arrows
+        document.combK = toggles.combK
+        document.combT = toggles.combT
         out.space = SpaceGraph(document: document)
       }
       if out.space != nil {
@@ -158,10 +200,13 @@ struct GraphContent: Equatable {
         out.locked = panels.panels[k].locked
         out.written = out.frameRow.flatMap { analysis.rows[$0].viewAxes }
         panels.panels[k].graph.partialSums = toggles.sums
+        panels.panels[k].graph.tensorStreamlines = toggles.tensors
+        panels.panels[k].graph.certified = toggles.certified
       }
       return out
     }
     self.panels = panels
+    if animated { readouts = Self.openingReadouts(analysis) }
   }
 
   /// The panel a row is in.
@@ -173,11 +218,20 @@ struct GraphContent: Equatable {
   /// writes them down (what metal-shot draws from the same rows), the 3D
   /// ones from their cameras. `views` and `cameras` are the panels' windows
   /// and cameras as the view has moved them; `run` the document's states;
-  /// `hot` the row whose point is under a drag, drawn with a halo.
+  /// `seeds` what a viewer dropped on each panel's vector fields; `hot` the
+  /// point under a drag or the pointer, drawn with a halo.
   func frames(
     at time: Double, width: Double, height: Double, dpr: Double, theme: GraphTheme, views: [View2D],
-    cameras: [Camera3D], run: StateStepper?, hot: Int? = nil
+    cameras: [Camera3D], run: StateStepper?, seeds: [[FieldSeed]] = [], hot: HotPoint? = nil
   ) -> (frames: [PanelFrame], layout: [PanelLayout]) {
+    // The seeds are the view's, kept through every rebuild of the panels
+    // (web/session.ts `Panel.drops`): each frame's graph is given them.
+    var panels = panels
+    for (k, dropped) in seeds.enumerated() where k < panels.panels.count && framing[k].space == nil {
+      guard !dropped.isEmpty, panels.panels[k].graph.takesSeeds else { continue }
+      panels.panels[k].graph.seeds = dropped
+      if let hot, hot.panel == k, case .seed(let index) = hot.target { panels.panels[k].graph.hotSeed = index }
+    }
     let drawn = panels.scene(at: time, width: width, height: height, dpr: dpr, theme: theme, views: views, run: run)
     var out: [PanelFrame] = []
     for (k, entry) in drawn.panels.enumerated() {
@@ -200,9 +254,11 @@ struct GraphContent: Equatable {
         let stacks = panel.graph.levelStacks(rows: levels, at: time, view: view, width: r.w, height: r.h)
         if !stacks.isEmpty { scene.layers.levels = stacks }
       }
-      if let hot, panel.rows.contains(hot), var overlay = scene.overlay {
+      if let hot, hot.panel == k, case .row(let row) = hot.target, var overlay = scene.overlay {
         // The overlay doesn't say which row a dot is: the one where the held point is.
-        for at in grabPoints(panel: k, rows: hot..<(hot + 1), time: time, run: run) {
+        let held = grabPoints(
+          panel: k, rows: row..<(row + 1), time: time, run: run, view: view, width: r.w, height: r.h)
+        for at in held {
           for index in overlay.points.indices where overlay.points[index].x == at.x && overlay.points[index].y == at.y {
             overlay.points[index].hot = true
           }
@@ -214,19 +270,126 @@ struct GraphContent: Equatable {
     return (out, drawn.panels.map(\.layout))
   }
 
-  /// The points of panel `k` a drag can move, where the panel draws them: on
-  /// a panel with mapped axes, in its screen's coordinates (web/scene.ts `carry`).
-  func grabPoints(panel k: Int, rows: Range<Int>? = nil, time: Double, run: StateStepper?) -> [GrabPoint] {
+  /// What rows say that only drawing them finds, once a frame at `time` has
+  /// been drawn, by row: a certified search box's verdict (web/scene.ts,
+  /// the 'certify' trace's `info`, or the error that kept it from running),
+  /// a geodesic cut short by its budget (`geodesicNote`), and, in a graph
+  /// that moves, each row's readout now (`plotReadout` every frame).
+  func notes(at time: Double, run: StateStepper?) -> [Int: RowNote] {
+    var out: [Int: RowNote] = [:]
+    for (k, panel) in panels.panels.enumerated() {
+      if let document = framing[k].space?.document {
+        for row in panel.rows {
+          switch analysis.rows[row].cpu {
+          case .geodesic?, .family?:
+            if let note = document.geodesicNote(row: row) { out[row] = RowNote(info: note) }
+          default: break
+          }
+        }
+      } else if framing[k].space == nil {
+        for row in toggles.certified.intersection(panel.rows) where panel.graph.canCertify(row: row) {
+          let found = panel.graph.certificate(row: row)
+          // (Until its first frame, as the site says while its worker runs.)
+          out[row] = RowNote(
+            info: found.info ?? (found.error == nil ? "Certifying search box…" : nil), error: found.error)
+        }
+      }
+    }
+    guard animated else { return out }
+    for (k, panel) in panels.panels.enumerated() {
+      var env = framing[k].space?.environment(at: time, run: run) ?? panel.graph.environment(at: time, run: run)
+      env["t"] = time
+      for row in panel.rows where out[row] == nil {
+        let read = analysis.rows[row]
+        guard read.error == nil, read.unsupported == nil, let plan = read.readout ?? read.cpu,
+          let opening = readouts[row], let now = try? plotReadout(plan, env), now != opening.readout
+        else { continue }
+        out[row] = RowNote(info: now + opening.note)
+      }
+    }
+    return out
+  }
+
+  /// Each row's readout as the analysis has it, apart from the note that
+  /// follows it (lib/analysis.ts `withNote`: "readout · note"), for the rows
+  /// whose readout can be found again at another time.
+  private static func openingReadouts(_ analysis: DocumentAnalysis) -> [Int: OpeningReadout] {
+    var out: [Int: OpeningReadout] = [:]
+    var env = analysis.environment(at: 0)
+    env["t"] = 0
+    for (index, row) in analysis.rows.enumerated() {
+      guard row.error == nil, row.unsupported == nil, let info = row.info, let plan = row.readout ?? row.cpu,
+        let opening = try? plotReadout(plan, env), info.hasPrefix(opening)
+      else { continue }
+      let note = String(info.dropFirst(opening.count))
+      if note.isEmpty || note.hasPrefix(" · ") { out[index] = OpeningReadout(readout: opening, note: note) }
+    }
+    return out
+  }
+
+  /// The surface panel `k` draws its 2D rows on (its first on(…) row that
+  /// reads), with the names that surface reads, which a drag along it holds
+  /// still (web/main.ts `surfaceReads`): the names in its text and, through
+  /// the constants' rows, what those are made of.
+  ///
+  /// Port: the site follows a state's rate and start too (lib/defs.ts
+  /// `definitionDependencies`); the constants' rows are what is read here.
+  func surface(panel k: Int) -> (map: SurfaceMap, reads: Set<String>)? {
+    guard framing[k].space?.document != nil else { return nil }
+    for row in panels.panels[k].rows where analysis.rows[row].error == nil {
+      guard case .surface(let map)? = analysis.rows[row].view, (try? surfaceGLSL(map)) != nil else { continue }
+      var made: [String: String] = [:]
+      for row in analysis.rows {
+        if case .constant(let name, let rhs, _)? = row.definition { made[name] = rhs }
+      }
+      let names = { (text: String) in
+        (try? parseExpr(text, valueNames: analysis.valueNames)).map { Array(freeVars($0)) } ?? []
+      }
+      var reads: Set<String> = []
+      var next = names(map.text)
+      while let name = next.popLast() {
+        guard reads.insert(name).inserted, let rhs = made[name] else { continue }
+        next += names(rhs)
+      }
+      return (map, reads)
+    }
+    return nil
+  }
+
+  /// The named points of a surface panel a drag can move along the surface,
+  /// in the surface's x and y (web/scene.ts, the named points of a panel
+  /// with a surface).
+  func surfacePoints(panel k: Int, reads: Set<String>, time: Double, run: StateStepper?) -> [Grabbable] {
+    guard let space = framing[k].space else { return [] }
+    var env = space.environment(at: time, run: run)
+    env["t"] = time
+    return analysis.grabPoints(rows: panels.panels[k].rows, env: env, pinned: reads)
+      .filter { analysis.rows[$0.row].definition != nil }
+      .map { Grabbable(target: .row($0.row), x: $0.x, y: $0.y) }
+  }
+
+  /// The points of panel `k` a drag can move, where the panel draws them in
+  /// the window `view` of a box `width` by `height` pixels: on a panel with
+  /// mapped axes, in its screen's coordinates, and not at all where the
+  /// screen does not show the point (web/scene.ts `carry`, of `grabs`). With
+  /// `seeds`, the panel's seeds after them, which are on the screen already.
+  func grabPoints(
+    panel k: Int, rows: Range<Int>? = nil, time: Double, run: StateStepper?, view: View2D, width: Double,
+    height: Double, seeds: [FieldSeed] = []
+  ) -> [Grabbable] {
     let panel = panels.panels[k]
     var env = panel.graph.environment(at: time, run: run)
     env["t"] = time
-    var points = analysis.grabPoints(rows: rows ?? panel.rows, env: env)
-    if let maps = panel.graph.maps {
-      for index in points.indices {
-        if let map = maps.x { points[index].x = toScreen(map, points[index].x) }
-        if let map = maps.y { points[index].y = toScreen(map, points[index].y) }
+    let shown = view.visible(width: width, height: height)
+    let bounds = Graph2D.Bounds(xmin: shown.x[0], xmax: shown.x[1], ymin: shown.y[0], ymax: shown.y[1])
+    var points: [Grabbable] = analysis.grabPoints(rows: rows ?? panel.rows, env: env).compactMap { point in
+      panel.graph.screenPoint(point.x, point.y, bounds: bounds).map {
+        Grabbable(target: .row(point.row), x: $0.x, y: $0.y)
       }
-      points.removeAll { !$0.x.isFinite || !$0.y.isFinite }
+    }
+    // A seed is one grabbable point however many fields trace a curve from it.
+    if panel.graph.takesSeeds {
+      points += seeds.enumerated().map { Grabbable(target: .seed($0.offset), x: $0.element.x, y: $0.element.y) }
     }
     return points
   }

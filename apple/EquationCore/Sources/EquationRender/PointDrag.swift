@@ -91,20 +91,23 @@ private func pairRow(_ row: RowAnalysis) -> PairRow? {
 
 /// How each coordinate of a pair answers a drag: a literal is rewritten in
 /// place, a slider's name moves through its own row (the row's index), and
-/// nil stays pinned. Nil when the text is not a pair or nothing of it moves
-/// (lib/drag.ts `dragAxes`).
+/// nil stays pinned, as does a name in `pinned`. Nil when the text is not a
+/// pair or nothing of it moves (lib/drag.ts `dragAxes`).
 private enum DragAxis: Equatable {
   case literal
   case slider(row: Int)
 }
 
-private func dragAxes(_ pair: String, _ analysis: DocumentAnalysis) -> (parts: [String], axes: [DragAxis?])? {
+private func dragAxes(
+  _ pair: String, _ analysis: DocumentAnalysis, pinned: Set<String> = []
+) -> (parts: [String], axes: [DragAxis?])? {
   guard let (a, b) = splitPair(pair) else { return nil }
   let axes = [a, b].map { part -> DragAxis? in
     if isNumberLiteral(part) { return .literal }
     // Sliders live under canonical names: (r₁, 2) drags r_1's row; a
     // redefined built-in's under its alias (lib/env.ts `boundIn`).
     let name = boundName(canonicalName(part), analysis.valueNames)
+    if pinned.contains(name) { return nil }
     let row = analysis.rows.firstIndex { row in
       if case .constant(name, _, false)? = row.definition { return row.slider != nil && row.error == nil }
       return false
@@ -116,12 +119,14 @@ private func dragAxes(_ pair: String, _ analysis: DocumentAnalysis) -> (parts: [
 
 extension DocumentAnalysis {
   /// The points among `rows` (a panel's) that a drag can move, where they
-  /// are when the constants are `env` (which has t).
-  public func grabPoints(rows: Range<Int>, env: [String: Double]) -> [GrabPoint] {
+  /// are when the constants are `env` (which has t). The names in `pinned`
+  /// are held still: a slider the panel's surface reads, which would move
+  /// the point under the drag (web/main.ts `defPointWriter`).
+  public func grabPoints(rows: Range<Int>, env: [String: Double], pinned: Set<String> = []) -> [GrabPoint] {
     var points: [GrabPoint] = []
     for index in rows where index < self.rows.count {
       let row = self.rows[index]
-      guard let written = pairRow(row), dragAxes(written.pair, self) != nil else { continue }
+      guard let written = pairRow(row), dragAxes(written.pair, self, pinned: pinned) != nil else { continue }
       var at: (Double?, Double?)
       if let name = row.definition?.name {
         guard env["\(name)_z"] == nil else { continue }
@@ -140,10 +145,11 @@ extension DocumentAnalysis {
   /// along x and y). Nil when the row holds no point a drag can move, or
   /// when nothing changes.
   public func movingPoint(
-    row index: Int, to x: Double, _ y: Double, upp: (x: Double, y: Double), in sources: [String]
+    row index: Int, to x: Double, _ y: Double, upp: (x: Double, y: Double), pinned: Set<String> = [],
+    in sources: [String]
   ) -> [String]? {
     guard rows.indices.contains(index), sources.indices.contains(index),
-      let written = pairRow(rows[index]), let drag = dragAxes(written.pair, self)
+      let written = pairRow(rows[index]), let drag = dragAxes(written.pair, self, pinned: pinned)
     else { return nil }
     var out = sources
     var text = drag.parts
