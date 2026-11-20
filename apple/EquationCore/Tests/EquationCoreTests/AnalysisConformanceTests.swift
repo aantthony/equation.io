@@ -240,6 +240,10 @@ import Testing
         check("gpu space", space, gpu["space"] as? String)
         same("field", field, gpu["field"])
         same("locals", locals, gpu["locals"])
+      case .tfield2d(let entries, let streamlines):
+        sameList("entries", entries, gpu["entries"])
+        check("gpu streamlines", streamlines, gpu["streamlines"] as? Bool ?? false)
+        if gpu["jacobian"] != nil { out.append("gpu: a matrix field on mapped axes") }
       }
     }
     return out
@@ -285,6 +289,16 @@ import Testing
       return .polygon(
         dim: (o["dim"] as! NSNumber).intValue, pts: try exprs("pts"), closed: o["closed"] as! Bool,
         arrow: o["arrow"] as? Bool ?? false, hull: o["hull"] as? Bool ?? false, over: nil)
+    case "tfield2d":
+      if o["jacobian"] != nil { throw FixtureError(description: "a matrix field on mapped axes") }
+      return .tfield2d(entries: try exprs("entries"), streamlines: o["streamlines"] as? Bool ?? false)
+    case "tuple":
+      if o["count"] != nil || o["blades"] != nil || o["flat"] != nil {
+        throw FixtureError(description: "a multiset, a multivector or a flat")
+      }
+      return .tuple(
+        values: try exprs("values"), shape: (o["shape"] as? [NSNumber])?.map(\.intValue),
+        length: (o["length"] as? NSNumber)?.intValue)
     case "note":
       return .note(
         expr: try expr("expr"), variable: o["variable"] as! Bool, constant: o["constant"] as? String,

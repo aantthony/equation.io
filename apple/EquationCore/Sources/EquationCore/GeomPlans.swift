@@ -129,3 +129,55 @@ public func fanFillable(_ pts: [Double]) -> Bool {
   }
   return true
 }
+
+// MARK: - Matrices, tensors and tuples (lib/plot.ts)
+
+/// Values a long tuple's readout shows, as a list's shows 8 (lib/plot.ts `TUPLE_SHOWN`).
+let TUPLE_SHOWN = 8
+
+/// A matrix or tensor on a row of its own has no position, so it is drawn
+/// as its values: a readout. A 2×2 matrix over the plane is a tensor field,
+/// drawn as glyphs. Nil for a row that is no `[tensor]` node.
+func classifyTensor(_ expr: Expr, hasSpace: Bool, hasParam: Bool, hasZ: Bool) throws -> MathObject? {
+  guard let tensor = tensorOfNode(expr) else { return nil }
+  if hasSpace && !hasParam && !hasZ && tensor.shape == [2, 2] {
+    return .tensorField(entries: tensor.data, streamlines: false)
+  }
+  if hasSpace || hasParam {
+    throw LanguageError(
+      "Only a 2×2 matrix in x and y draws as a field; a larger one has no picture yet — "
+        + "apply it to a vector, like M (x, y, z).")
+  }
+  return .tuple(values: tensor.data, shape: tensor.shape, length: nil)
+}
+
+/// A tuple longer than a point: values at positions, shown as a readout
+/// (lib/plot.ts `classifyLowered`, the 'vec' case).
+func classifyTuple(_ items: [Expr]) -> MathObject {
+  items.count > TUPLE_SHOWN
+    ? .tuple(values: Array(items[..<TUPLE_SHOWN]), shape: nil, length: items.count)
+    : .tuple(values: items, shape: nil, length: nil)
+}
+
+/// streamlines(M): the matrix field it wraps, drawn along its major
+/// eigenvector. Nothing else has streamlines to draw.
+func streamlined(_ classified: Classified) throws -> Classified {
+  guard case .tensorField(let entries, _) = classified.object else { throw LanguageError(STREAMLINES_USAGE) }
+  var out = classified
+  out.object = .tensorField(entries: entries, streamlines: true)
+  return out
+}
+
+/// The readout of a tuple or tensor row (lib/plot.ts `plotReadout`, the
+/// 'tuple' case): a tensor's values nest as the tuples that write it.
+func tupleReadout(_ values: [Expr], shape: [Int]?, length: Int?, _ env: [String: Double]) throws -> String {
+  let shape = shape ?? [values.count]
+  let each = shape.reduce(1, *)
+  let readouts = try values.prefix(each).map { valueReadout(try evaluate($0, env)) }
+  let prefix = readouts.contains { $0.hasPrefix("≈") } ? "≈" : "="
+  // (`= 4`, `≈ 1.41421`: the value follows the sign and a space; `undefined` has neither.)
+  let bare = readouts.map { $0.hasPrefix("= ") || $0.hasPrefix("≈ ") ? String($0.dropFirst(2)) : $0 }
+  // (A long tuple kept only the values it shows: see TUPLE_SHOWN.)
+  if length != nil { return "\(prefix) (\(bare.joined(separator: ", ")), …)" }
+  return "\(prefix) \(nestedText(shape, bare))"
+}

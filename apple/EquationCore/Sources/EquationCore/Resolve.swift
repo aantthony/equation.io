@@ -493,11 +493,13 @@ private let takenNames: [String: String] = [
 
 /// Expand point arithmetic: a point name A becomes (A_x, A_y), and sums,
 /// scalings and negations of points are taken component by component.
-func lowerGeom(_ e: Expr, comps: (String) -> [String]?) throws -> Expr {
+func lowerGeom(
+  _ e: Expr, comps: @escaping (String) -> [String]?, mats: @escaping GetMat = { _ in nil },
+  tensors: @escaping GetTensor = { _, _ in nil }
+) throws -> Expr {
   try refuseUnportedGeometry(e)
-  // A root-level geometry form (segment, polygon, circle, …) desugars first.
-  if let statement = try lowerGeomStatement(e, { try lowerPoints($0, comps) }) { return statement }
-  return try lowerPoints(e, comps).expr
+  // (A root-level geometry form — segment, polygon, circle, … — desugars first.)
+  return try lowerWithMatrices(e, comps: comps, getMat: mats, getTensor: tensors)
 }
 
 /// A row's (or a definition's) value once points and lists have lowered
@@ -505,8 +507,22 @@ func lowerGeom(_ e: Expr, comps: (String) -> [String]?) throws -> Expr {
 /// left of list lowering is what it does to every expression: it rebuilds
 /// each node, and a product comes out without the glyph it was written with,
 /// a piecewise without its conditions marked bare.
-func lowerObjects(_ e: Expr, comps: (String) -> [String]?) throws -> Expr {
-  plainNodes(try lowerGeom(try lowerFigureObjects(e, comps), comps: comps))
+func lowerObjects(
+  _ e: Expr, comps: @escaping (String) -> [String]?, mats: @escaping GetMat = { _ in nil },
+  tensors: @escaping GetTensor = { _, _ in nil }
+) throws -> Expr {
+  let figures = try lowerFigureObjects(e, comps, mats, tensors)
+  let lowered: Expr
+  do {
+    lowered = try lowerGeom(figures, comps: comps, mats: mats, tensors: tensors)
+  } catch let error as LanguageError {
+    throw failedLowering(error, figures, comps, mats, withMatrices: false)
+  } catch let failed as FailedWithMatrices {
+    throw failedLowering(failed.error, figures, comps, mats, withMatrices: true)
+  }
+  // (A tuple of points is a list of them, in order: it waits for lists.)
+  try refuseTuplesOfPoints(lowered)
+  return plainNodes(lowered)
 }
 
 private func plainNodes(_ e: Expr) -> Expr {
@@ -522,9 +538,10 @@ private func plainNodes(_ e: Expr) -> Expr {
   }
 }
 
-private func lowerPoints(_ e: Expr, _ comps: (String) -> [String]?) throws -> Lowered {
-  func lo(_ n: Expr) throws -> Lowered { try lowerPoints(n, comps) }
-  try refuseMatrices(e)
+func lowerPoints(_ e: Expr, _ comps: (String) -> [String]?, _ context: GeomContext) throws -> Lowered {
+  func lo(_ n: Expr) throws -> Lowered { try lowerPoints(n, comps, context) }
+  // A tensor operation's result is whatever rank it comes to.
+  if let value = try context.tensorValue(e) { return value }
   switch e {
   case .num, .str, .data, .text:
     // (Data and text lists hold no geometry: they pass straight through.)
@@ -541,18 +558,22 @@ private func lowerPoints(_ e: Expr, _ comps: (String) -> [String]?) throws -> Lo
         }
       })
   case .comp(let value, let index, let arity, let functionName):
-    return try lowerComp(value, index, arity, functionName, lo)
+    return try lowerComp(value, index, arity, functionName, context)
   case .loop(let params, let seeds, let loopBody, let limit):
     return .scalar(try lowerLoop(params, seeds, loopBody, limit, lo))
   case .var(let name):
+    try context.refuseMatrixName(name)
     guard let names = comps(name) else { return .scalar(e) }
     return .vec(names.map { .var($0) })
   case .neg(let inner):
+    try context.refuseMatrixValue(e)
     switch try lo(inner) {
     case .vec(let items): return .vec(items.map(neg))
     case .scalar(let a): return .scalar(.neg(a))
     }
   case .bin(let op, let lhs, let rhs, let glyph):
+    // The matvec M v: a matrix as the direct left factor of a product.
+    if let applied = try context.matrixProduct(e, op, lhs, rhs) { return applied }
     if let glyph, glyph != .dot, glyph != .cross { throw Unsupported("the \(glyph.rawValue) product") }
     let a = try lo(lhs)
     let b = try lo(rhs)
@@ -592,7 +613,7 @@ private func lowerPoints(_ e: Expr, _ comps: (String) -> [String]?) throws -> Lo
       }
     }
   case .call(let name, let args):
-    if let geometry = try lowerGeomCall(name, args, lo) { return geometry }
+    if let geometry = try lowerGeomCall(e, name, args, context) { return geometry }
     let lowered = try args.map(lo)
     var flat: [Expr] = []
     for arg in lowered {
@@ -629,15 +650,16 @@ private func lowerPoints(_ e: Expr, _ comps: (String) -> [String]?) throws -> Lo
     return .scalar(.ineq(op, a, b, grouped: grouped))
   case .vec(let items):
     var flat: [Expr] = []
-    var points = 0
+    var rows: [[Expr]] = []
     for item in items {
       switch try lo(item) {
       case .scalar(let a): flat.append(a)
-      case .vec: points += 1
+      case .vec(let row): rows.append(row)
       }
     }
-    if points == items.count { throw Unsupported("matrices") }
-    if points > 0 { throw LanguageError("A point cannot be a component of a vector.") }
+    // A tuple of points is a matrix, or a tuple of points in order.
+    if !rows.isEmpty && rows.count == items.count { return try context.tupleOfPoints(e, rows) }
+    if !rows.isEmpty { throw LanguageError("A point cannot be a component of a vector.") }
     return items.count == 2 || items.count == 3 ? .vec(flat) : .scalar(.vec(flat))
   case .piecewise(let cases, let otherwise):
     func one(_ n: Expr) throws -> Expr {

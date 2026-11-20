@@ -20,7 +20,39 @@ let GEOM_STATEMENTS: Set<String> = ["segment", "polyline", "vector", "line", "po
 /// The calls lowering reads as geometry: the resolver hands them on as written.
 let geometryFunctions: Set<String> = GEOM_STATEMENTS.union([
   "dot", "cross", "midpoint", "perp", "unit", "rotate", "distance", "angle", "label",
+  // Matrices and tensors.
+  "det", "trace", "transpose", "solve", "outer", "wedge", "contract", "streamlines",
 ])
+
+/// Lower a whole statement (lib/geom.ts `lowerStatement`): desugar a
+/// root-level geometry form, expand all point arithmetic, and return an
+/// expression classify already understands.
+func lowerStatement(_ e: Expr, _ context: GeomContext) throws -> Expr {
+  if let statement = try lowerGeomStatement(e, context) { return statement }
+  return try context.lo(e).expr
+}
+
+/// `lowerStatement`, lowered again with matrix algebra on if a matrix shows
+/// (lib/geom.ts `withMatrices`).
+func lowerWithMatrices(
+  _ e: Expr, comps: @escaping (String) -> [String]?, getMat: @escaping GetMat, getTensor: @escaping GetTensor
+) throws -> Expr {
+  do {
+    return try lowerStatement(e, GeomContext(comps: comps, getMat: getMat, getTensor: getTensor, mats: false))
+  } catch is MatrixSeen {
+    do {
+      return try lowerStatement(e, GeomContext(comps: comps, getMat: getMat, getTensor: getTensor, mats: true))
+    } catch let error as LanguageError {
+      throw FailedWithMatrices(error: error)
+    }
+  }
+}
+
+/// A row that failed to lower with matrix algebra on: it holds a matrix or a
+/// tuple of points, which `failedLowering` needs to know.
+struct FailedWithMatrices: Error {
+  var error: LanguageError
+}
 
 /// Functions over points, by how many point arguments they take.
 private let POINT_FNS: [String: Int] = ["dot": 2, "cross": 2, "midpoint": 2, "perp": 1, "unit": 1]
@@ -153,30 +185,6 @@ func refuseUnportedGeometry(_ e: Expr) throws {
   }
 }
 
-/// ⊗, ∧ and their spellings outer(…), wedge(…), contract(…): a tensor operation.
-private func tensorOp(_ e: Expr) -> Bool {
-  switch e {
-  case .bin(_, _, _, let glyph): return glyph == .outer || glyph == .wedge
-  case .call(let name, _): return name == "outer" || name == "wedge" || name == "contract" || name == "[tensor]"
-  default: return false
-  }
-}
-
-/// Whether a tuple literal holds a row that is no point — a longer tuple, or
-/// a tuple of tuples — so it may be a tensor rather than a tuple of points.
-private func deepTupleRow(_ e: Expr) -> Bool {
-  guard case .vec(let items) = e else { return false }
-  return items.count > 3 || items.contains { if case .vec = $0 { true } else { false } }
-}
-
-/// Where the TypeScript switches matrix algebra on for the row (its
-/// `MatrixSeen`): a tensor operation or a tuple deeper than a tuple of
-/// points. Matrices and tensors are not ported.
-func refuseMatrices(_ e: Expr) throws {
-  if tensorOp(e) { throw Unsupported("matrices and tensors") }
-  if case .vec(let items) = e, items.contains(where: deepTupleRow) { throw Unsupported("matrices and tensors") }
-}
-
 // MARK: - f(P)
 
 /// Whether a point of `got` coordinates fills a comp of arity n reading index k.
@@ -192,10 +200,12 @@ func compDims(_ fn: String, _ n: Int, _ value: Expr, _ got: Int) -> String {
 }
 
 /// f(P): component k of the one argument, once it is known to be a point
-/// (lib/geom.ts `lower`, case 'comp'). A matrix read as its rows and a list
-/// of points wait for matrices and lists; `lo` refuses both.
-func lowerComp(_ value: Expr, _ k: Int, _ n: Int, _ fn: String, _ lo: (Expr) throws -> Lowered) throws -> Lowered {
-  guard case .vec(let items) = try lo(value) else { throw LanguageError(compArity(fn, n)) }
+/// (lib/geom.ts `lower`, case 'comp'). A matrix has no meaning of its own to
+/// a function of scalars, so there it is the list of its rows; that and a
+/// list of points wait for lists (`lo` refuses those).
+func lowerComp(_ value: Expr, _ k: Int, _ n: Int, _ fn: String, _ context: GeomContext) throws -> Lowered {
+  if try context.compMatrix(value) { throw Unsupported("a matrix read as a list of its rows") }
+  guard case .vec(let items) = try context.lo(value) else { throw LanguageError(compArity(fn, n)) }
   if !compFits(n, k, items.count) { throw LanguageError(compDims(fn, n, value, items.count)) }
   return .scalar(items[k])
 }
@@ -204,7 +214,8 @@ func lowerComp(_ value: Expr, _ k: Int, _ n: Int, _ fn: String, _ lo: (Expr) thr
 
 /// A call lowering reads as geometry (lib/geom.ts `lower`, case 'call'), or
 /// nil for any other, which takes numbers and gives one.
-func lowerGeomCall(_ name: String, _ rawArgs: [Expr], _ lo: (Expr) throws -> Lowered) throws -> Lowered? {
+func lowerGeomCall(_ e: Expr, _ name: String, _ rawArgs: [Expr], _ context: GeomContext) throws -> Lowered? {
+  let lo = context.lo
   if GEOM_STATEMENTS.contains(name) || name == "action" || name == "streamlines" || name == "qjulia" {
     throw LanguageError("\(name)(…) must be a whole statement.")
   }
@@ -239,12 +250,8 @@ func lowerGeomCall(_ name: String, _ rawArgs: [Expr], _ lo: (Expr) throws -> Low
     }
     return .scalar(.label(coordinates: coords, text: value))
   }
-  // cross(n) is the rotation generator, and transpose, det, trace and solve
-  // take a matrix: none is ported.
-  if name == "cross" && rawArgs.count == 1 { throw Unsupported("matrices and tensors") }
-  if name == "transpose" || name == "det" || name == "trace" || name == "solve" {
-    throw Unsupported("matrices and tensors")
-  }
+  // cross(n), the rotation generator; transpose, det, trace and solve.
+  if let value = try context.matrixCall(e, name, rawArgs) { return value }
   if name == "rotate" {
     // rotate(P, a[, center]) ≡ C + e^(a J) (P − C); rotate(P, a, axis) ≡
     // e^(a cross(axis/|axis|)) P, and a 3D P with no axis turns about z —
@@ -276,6 +283,12 @@ func lowerGeomCall(_ name: String, _ rawArgs: [Expr], _ lo: (Expr) throws -> Low
     // Scalars like dot and cross: they work inside any expression, read out
     // as a bare row, and draw nothing.
     let usage = name == "distance" ? DISTANCE_USAGE : ANGLE_USAGE
+    // (A named matrix is a list of rows here, which lowering would reject first.)
+    if rawArgs.contains(where: { if case .var(let arg) = $0 { context.getMat(arg) != nil } else { false } }) {
+      let form = name == "distance" ? "distance(A, B)" : "angle(A, B, C)"
+      throw LanguageError(
+        "\(name) takes points, and a list cannot stand for a point yet — \(form), one point each.")
+    }
     // (An argument left without a partner that is a list, or an element of
     // one, says so on the site; `lo` has refused lists by here.)
     let args = try rawArgs.map(lo)
@@ -344,9 +357,17 @@ private func polyCall(_ form: FigureForm, _ pts: [[Expr]]) -> Expr {
 
 /// Desugar a root-level geometry form (lib/geom.ts `lowerStatement`), or nil
 /// for a row that is not one.
-func lowerGeomStatement(_ e: Expr, _ lo: (Expr) throws -> Lowered) throws -> Expr? {
+func lowerGeomStatement(_ e: Expr, _ context: GeomContext) throws -> Expr? {
+  // streamlines(M): a matrix field drawn along its major eigenvector rather
+  // than as glyphs. The matrix lowers as a row of its own would, inside a
+  // marker classify unwraps.
+  if case .call("streamlines", let args) = e {
+    if args.count != 1 { throw LanguageError(STREAMLINES_USAGE) }
+    return .call(STREAMLINES_CALL, [try lowerStatement(args[0], context)])
+  }
+  if let tensor = try lowerTensorStatement(e, context) { return tensor }
   guard case .call(let name, let rawArgs) = e, GEOM_STATEMENTS.contains(name) else { return nil }
-  let args = try rawArgs.map(lo)
+  let args = try rawArgs.map(context.lo)
   if name == "circle" {
     // circle(C, r): the trailing argument is the scalar radius.
     guard args.count >= 2, case .scalar(let r)? = args.last else {

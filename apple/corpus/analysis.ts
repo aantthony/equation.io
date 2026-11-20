@@ -66,8 +66,8 @@ const PORTED = new Set([
   'implicit2d', 'ineq2d', 'scalar2d', 'point', 'pcurve', 'vfield2d', 'value', 'note', 'none',
   'complex2d', 'domain2d', 'conformal2d', 'fractal2d', 'rgb2d', 'hsl2d', 'oklch2d',
 ]);
-// Geometry (lib/geom.ts): figures and labels.
-for (const type of ['polygon', 'label']) PORTED.add(type);
+// Geometry (lib/geom.ts): figures and labels; matrices and tensors read out, and matrix fields.
+for (const type of ['polygon', 'label', 'tuple', 'tfield2d']) PORTED.add(type);
 function slim(plan: { type: string } | undefined): unknown {
   if (!plan) return null;
   if (!PORTED.has(plan.type)) return { type: plan.type, omitted: true };
@@ -314,7 +314,28 @@ const CASES: string[] = [
   // Labels.
   'A = (1, 2); label(A, "vertex"); label((1, 2), "peak"); label((cos(t), sin(t)), "moving"); label(A + (1, 0), "a \\"b\\""); label((1, 2, 3), "up")',
   'A = (1, 2); label(A); label("a", A); label(A, "a", "b"); label((x, 1), "x"); label(1, "one"); label((u, 1), "u"); c = label(A, "x"); 1 + label(A, "y")',
-  // What geometry leaves alone: matrices, multivectors, projective geometry.
+  // Matrices (lib/mat.ts): definitions, algebra, det, trace, solve, the matvec.
+  'M = ((1, 2), (3, 4)); M; det(M); trace(M); M (1, 1); M (x, y); y = det(M) x; solve(M, (1, 2)); solve(M, 1, 2); transpose(M); M^-1; M^2; M M',
+  'a = 2; M = ((a, 1), (0, a t)); M; det(M); N = 2 M; N; N (1, 0); M + N; M - N; M N; -M; M/2; a M; M a; M^0; M^3; M^9; M^0.5; M + 1; 1/M; M/M',
+  'J = ((0, -1), (1, 0)); a = 0.5; R = e^(a J); R; R (1, 0); e^(t J) (1, 0); exp(a J) (x, y); (e^(a J)) (1, 2); segment((0, 0), R (2, 0)); 2^J; e^J',
+  'A = ((1, 2), (0, 1)); e^(t A) (1, 1); e^A; exp(A) (1, 0); B = ((2, 0), (0, 3)); e^(t B) (x, y); S = ((0, 1), (1, 0)); e^S (1, 2)',
+  'M = ((1, 2, 3), (0, 1, 4), (5, 6, 0)); M; det(M); trace(M); M (1, 0, 0); solve(M, (1, 2, 3)); M^-1; transpose(M) (1, 1, 1); M (1, 2); M^2 (1, 0, 0)',
+  'n = (0, 0, 1); K = cross(n); K; e^(t K) (1, 0, 0); a = 1; e^(a cross((1, 1, 1))) (1, 0, 0); cross((1, 2)); e^(a cross(n)); cross(n) (0, 1, 0); W = ((1, 2, 3), (4, 5, 6), (7, 8, 9)); e^W',
+  'A = (1, 2); B = (3, 4); M = (A, B); M; det(M); M (1, 1); (A, B); (A, B) (1, 1); det((A, B)); det(((1, 2), (3, 4))); ((1, 2), (3, 4)) (1, 1); (A, 1)',
+  'M = ((1, 2), (3, 4)); M + (1, 1); (1, 1) - M; M + (1, 2, 3); M (1, 2, 3); (1, 2) M; sin(M); M; M < 1; y = M; M = 2; {x > 0: M}; f(v) = M v; f((1, 2))',
+  'M = ((1, 2), (3, 4)); det(M, M); det(); det(2); trace(1); solve(M); solve(M, (1, 2, 3)); solve(M, 1); solve(2, (1, 2)); transpose(M) (1, 0); transpose(2); transpose(M, M)',
+  'N = M + ((1, 0), (0, 1)); M = ((1, 2), (3, 4)); N; d1 = det(M); d1; d1 + 1; v = M (1, 2); v; w = solve(M, v); w; segment(v, w); T = transpose(M); T',
+  'M = ((x, y), (y, -x)); M; M (1, 0); det(M) = 1; streamlines(M); streamlines(((x, 1), (1, y))); a = 2; ((a x, 0), (0, y)); ((1, x), (0, 1)) + ((1, 0), (0, 1))',
+  'streamlines(); streamlines(1); streamlines(((1, 2), (3, 4))); 1 + streamlines(((x, y), (y, x))); ((x, y, 0), (0, 1, 0), (0, 0, 1)); ((u, 0), (0, 1)); ((x, z), (0, 1))',
+  'M = ((1, 2), (3, 4)); polygon(M); a = 0.3; R = e^(a J); J = ((0, -1), (1, 0)); R polygon((0, 0), (1, 0), (0, 1)); M segment((0, 0), (1, 1)); hull(((0, 0, 0), (1, 0, 0), (0, 1, 0)))',
+  'J = ((0, -1), (1, 0)); a = 0.3; R = e^(a J); R polygon((0, 0), (1, 0), (0, 1)); 2 R segment((0, 0), (1, 1)); R (R (1, 0)); R^2 (1, 0); P = R (1, 0); P; f(p, q) = p + q; f(R (1, 0)); f(M)',
+  // Tensors (lib/tensor.ts): ⊗, ∧, contract, shapes that are no matrix.
+  'a = (1, 2); b = (3, 4); a ⊗ b; outer(a, b); a ∧ b; wedge(a, b); contract(a ⊗ b, 1, 2); T = a ⊗ b; T; T (1, 0); det(T); (a ⊗ b) (1, 1); a ⊗ b ⊗ a',
+  'T = ((1, 2, 3), (4, 5, 6)); T; T (1, 0, 0); (1, 2) T; T + T; 2 T; T/2; -T; T T; contract(T, 1, 2); R = ((1, 2, 3, 4), (5, 6, 7, 8)); R; R + T',
+  'u = (1, 0, 0); v = (0, 1, 0); w = (0, 0, 1); u ∧ v; u ∧ v ∧ w; V = u ∧ v ∧ w; V; contract(u ⊗ v, 1, 2); outer(u); contract(u ⊗ v); contract(u ⊗ v, 1, 1); contract(u ⊗ v, 1, 5); contract(u, 1, 2)',
+  'n = (0.6, 0.8); I = ((1, 0), (0, 1)); H = I - 2 n ⊗ n; H; H (1, 0); det(H); n ⊗ n; (n ⊗ n) n; ((1, 2), (3, 4, 5)); (1, 2, 3, 4) ⊗ (1, 2); a = 2; a ∧ n; n ∧ a',
+  '(1, 2, 3, 4); (1, 2, 3, 4, 5, 6, 7, 8, 9, 10); a = 2; (a, a^2, a^3, sqrt(a)); (1, 2, 3, x); (t, 1, 2, 3); ((1, 2, 3, 4), (5, 6, 7, 8)); ((1, 2), (3, 4), (5, 6))',
+  // What geometry leaves alone: multivectors, projective geometry.
   'A = (1, 2); B = (3, 4); (A, B); cross((0, 0, 1)); det(((1, 2), (3, 4))); ((1, 2), (3, 4)) (1, 1); join(A, B); meet(line(A, B), line(A, (0, 0)))',
   'A = (1, 2); rotate(A, quat(1, 0, 0, 0)); gp(A, A); A ⟑ A; distance(A, line(A, (0, 0))); outer(A, A); A ∧ A; transpose(((1, 2), (3, 4)))',
 ];

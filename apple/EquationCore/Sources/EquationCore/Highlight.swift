@@ -411,6 +411,8 @@ func boundNames(_ document: PreparedDocument) -> BoundNames {
   names.values.formUnion(built.conditions.keys)
   // (A vector owns its aliases: its components are among the constants or the fields.)
   names.values.formUnion(built.points)
+  names.values.formUnion(built.mats.keys)
+  names.values.formUnion(built.tensors.keys)
   names.functions.formUnion(built.fns.keys)
   scanBoundNames(document.texts.map { Array($0.utf16) }, rows: Set(document.blocked.keys), into: &names)
   return names
