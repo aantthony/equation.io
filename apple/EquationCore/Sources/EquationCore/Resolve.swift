@@ -325,11 +325,16 @@ struct Resolver {
       var env: [String: Expr] = [:]
       if args.count == 1, n >= 2, !isNum(args[0]) {
         // f(P) ≡ f(P_1, …, P_n): one argument that is an n-component point.
-        guard case .vec(let items) = args[0] else { throw Unsupported("a point passed to a function") }
-        if items.count != n {
-          throw LanguageError("\(name) takes \(n) arguments, and that point has \(items.count) components.")
+        // A tuple in hand gives up its items; anything else is not known to
+        // be a point until it lowers, so each parameter asks for its
+        // component of the same node (lib/geom.ts settles it).
+        let arg = args[0]
+        if case .vec(let items) = arg {
+          if items.count != n { throw LanguageError(compDims(name, n, arg, items.count)) }
+          for (p, item) in zip(fn.params, items) { env[p] = item }
+        } else {
+          for (k, p) in fn.params.enumerated() { env[p] = .comp(value: arg, index: k, arity: n, functionName: name) }
         }
-        for (p, item) in zip(fn.params, items) { env[p] = item }
         return substVars(fn.body, env)
       }
       if args.count != n { throw LanguageError("\(name) takes \(n) argument\(n == 1 ? "" : "s").") }
@@ -342,13 +347,11 @@ struct Resolver {
           if case .var(let argName) = arg, let own = pointCoord("\(argName).\(c)") {
             env["\(p).\(c)"] = own
           } else if case .vec(let items) = arg {
-            if k >= items.count {
-              throw LanguageError(
-                "\(name) reads a coordinate that point does not have: it has \(items.count).")
-            }
+            if k >= items.count { throw LanguageError(compDims(name, 0, arg, items.count)) }
             env["\(p).\(c)"] = items[k]
           } else {
-            throw Unsupported("a coordinate of a computed point")
+            // (Arity 0: any point that has the coordinate, 2D or 3D alike.)
+            env["\(p).\(c)"] = .comp(value: arg, index: k, arity: 0, functionName: name)
           }
         }
       }
@@ -357,16 +360,22 @@ struct Resolver {
       // arguments and cannot capture their variables.
       return opts.params != nil ? inlined : writeConditions(inlined, namedCondition)
     }
-    let args = try legacyCallArgs(name, rawArgs).map(resolve)
+    // (A label's text is not math: it passes through as written.)
+    let args = try legacyCallArgs(name, rawArgs).map { arg in
+      if name == "label", case .str = arg { return arg }
+      return try resolve(arg)
+    }
     if name == "clamp" {
       // clamp(x, lo, hi) ≡ min(max(x, lo), hi): every backend already runs those.
       if args.count != 3 { throw LanguageError("clamp takes three arguments: clamp(x, lo, hi).") }
       return .call("min", [.call("max", [args[0], args[1]]), args[2]])
     }
-    if opts.inDefinition, name == "rgb" || name == "hsl" || name == "oklch" {
+    if opts.inDefinition, name == "rgb" || name == "hsl" || name == "oklch" || name == "label" {
       throw LanguageError("\(name)(…) must be a whole row, not part of a definition.")
     }
-    guard elementaryFunctions.contains(name) || complexFunctions.contains(name) else {
+    guard
+      elementaryFunctions.contains(name) || complexFunctions.contains(name) || geometryFunctions.contains(name)
+    else {
       throw Unsupported("\(name)(…)")
     }
     return .call(name, args)
@@ -460,7 +469,7 @@ func exactCases(_ e: Expr) -> Expr {
 // MARK: - Point lowering (lib/geom.ts lowerGeom, for the parts ported)
 
 /// A value under lowering: a number, or a point's components.
-private enum Lowered {
+enum Lowered {
   case scalar(Expr)
   case vec([Expr])
 
@@ -485,7 +494,10 @@ private let takenNames: [String: String] = [
 /// Expand point arithmetic: a point name A becomes (A_x, A_y), and sums,
 /// scalings and negations of points are taken component by component.
 func lowerGeom(_ e: Expr, comps: (String) -> [String]?) throws -> Expr {
-  try lowerPoints(e, comps).expr
+  try refuseUnportedGeometry(e)
+  // A root-level geometry form (segment, polygon, circle, …) desugars first.
+  if let statement = try lowerGeomStatement(e, { try lowerPoints($0, comps) }) { return statement }
+  return try lowerPoints(e, comps).expr
 }
 
 /// A row's (or a definition's) value once points and lists have lowered
@@ -494,7 +506,7 @@ func lowerGeom(_ e: Expr, comps: (String) -> [String]?) throws -> Expr {
 /// each node, and a product comes out without the glyph it was written with,
 /// a piecewise without its conditions marked bare.
 func lowerObjects(_ e: Expr, comps: (String) -> [String]?) throws -> Expr {
-  plainNodes(try lowerGeom(e, comps: comps))
+  plainNodes(try lowerGeom(try lowerFigureObjects(e, comps), comps: comps))
 }
 
 private func plainNodes(_ e: Expr) -> Expr {
@@ -512,6 +524,7 @@ private func plainNodes(_ e: Expr) -> Expr {
 
 private func lowerPoints(_ e: Expr, _ comps: (String) -> [String]?) throws -> Lowered {
   func lo(_ n: Expr) throws -> Lowered { try lowerPoints(n, comps) }
+  try refuseMatrices(e)
   switch e {
   case .num, .str, .data, .text:
     // (Data and text lists hold no geometry: they pass straight through.)
@@ -527,11 +540,8 @@ private func lowerPoints(_ e: Expr, _ comps: (String) -> [String]?) throws -> Lo
         case .scalar(let a): a
         }
       })
-  case .comp:
-    // Port: lib/geom.ts `lower` (case 'comp') settles f(P) once P is known
-    // to be a point, a matrix's rows or a list of points; the last two need
-    // matrices and lists.
-    throw Unsupported("a point passed to a function")
+  case .comp(let value, let index, let arity, let functionName):
+    return try lowerComp(value, index, arity, functionName, lo)
   case .loop(let params, let seeds, let loopBody, let limit):
     return .scalar(try lowerLoop(params, seeds, loopBody, limit, lo))
   case .var(let name):
@@ -560,7 +570,8 @@ private func lowerPoints(_ e: Expr, _ comps: (String) -> [String]?) throws -> Lo
         }
         return .vec(zip(x, y).map { op == .add ? add($0, $1) : sub($0, $1) })
       case .mul:
-        if glyph != nil { throw Unsupported("dot and cross products") }
+        // A · B and A × B, as written; a plain * between points has no one meaning.
+        if let glyph { return try lo(.call(glyph.rawValue, [lhs, rhs])) }
         throw LanguageError("Use A · B or A × B (or dot(A, B), cross(A, B)) to multiply points.")
       case .div: throw LanguageError("Cannot divide by a point.")
       case .pow: throw LanguageError("Cannot raise a point to a power — |A| is its length.")
@@ -581,6 +592,7 @@ private func lowerPoints(_ e: Expr, _ comps: (String) -> [String]?) throws -> Lo
       }
     }
   case .call(let name, let args):
+    if let geometry = try lowerGeomCall(name, args, lo) { return geometry }
     let lowered = try args.map(lo)
     var flat: [Expr] = []
     for arg in lowered {
@@ -588,12 +600,8 @@ private func lowerPoints(_ e: Expr, _ comps: (String) -> [String]?) throws -> Lo
         flat.append(a)
         continue
       }
-      // |A| is a point's length, and abs(a, b) the length of the pair:
-      // neither is ported. No other elementary function takes a point.
-      if name == "abs", args.count <= 2 { throw Unsupported("the length of a point") }
       throw LanguageError("\(name) is not defined for points.")
     }
-    if name == "abs", args.count == 2 { throw Unsupported("the length of a point") }
     return .scalar(.call(name, flat))
   case .eq(let l, let r):
     let taken: String? = if case .var(let name) = l { takenNames[name] } else { nil }

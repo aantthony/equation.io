@@ -24,6 +24,11 @@ public indirect enum MathObject: Equatable, Sendable {
   /// A pair in u: the curve it traces as u runs from 0 to 1.
   case curveParametric(coordinates: [Expr])
   case value(expr: Expr)
+  /// `label(point, "text")`: text anchored at a point.
+  case label(coordinates: [Expr], text: String)
+  /// A segment, polyline, vector, polygon, square or hull: its vertices,
+  /// flat, `dimension` numbers each.
+  case figure(form: FigureForm, dimension: Int, vertices: [Expr], over: [Column]?)
   /// A claim with no x or y in it (`2 + 2 = 4`), or an equation whose sides
   /// agree everywhere (`identity`). `constant`: the row reads like a slider
   /// named e, pi or i, which the readout explains.
@@ -51,6 +56,8 @@ public indirect enum MathObject: Equatable, Sendable {
     case .point: "point"
     case .curveParametric: "pcurve"
     case .value: "value"
+    case .label: "label"
+    case .figure: "polygon"
     case .note: "note"
     case .complexPoint: "point"
     case .complexPath: "pcurve"
@@ -249,6 +256,7 @@ func classify(_ lowered: Expr, defined: Set<String>, fields: [String: Expr]) thr
   if !fields.isEmpty { expr = substVars(expr, fields) }
   let ode = try matchODE(expr)
   if let ode { expr = .vec(ode) }
+  if let nested = nestedFigure(expr) { throw LanguageError("\(nested)(…) must be the whole expression.") }
 
   let special = specialForm(expr)
   if let nested = nestedSpecial(expr, isRoot: true) {
@@ -318,6 +326,12 @@ func classify(_ lowered: Expr, defined: Set<String>, fields: [String: Expr]) thr
   // claim, and it holds.
   if case .eq(let l, let r) = expr, !isVec(l), !isVec(r), hasSpace, !hasParam, !complexRow, holdsEverywhere(l, r) {
     return done(.note(expr: expr, variable: false, constant: nil, identity: true))
+  }
+
+  if let figure = try classifyFigure(expr, hasSpace: hasSpace, hasParam: hasParam, complex: complexRow) {
+    var classified = done(figure.object)
+    classified.needs3D = figure.needs3D
+    return classified
   }
 
   if let special, case .call(_, let args) = expr {

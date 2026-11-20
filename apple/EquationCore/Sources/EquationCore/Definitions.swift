@@ -565,6 +565,8 @@ func buildDefs(_ raw: [Definition], skip: Set<String>) -> BuiltDefs {
         // Lowering expands point arithmetic; a pair result names a point.
         // Point-ness flows in definition order, so `C = B + D` needs B and D
         // defined above (a stray point name below is reported after the loop).
+        // (`L = line(A, B)` names the line as a value of projective geometry.)
+        if case .call("line", _) = resolved { throw Unsupported("lines and planes of projective geometry") }
         let e = try lowerObjects(resolved, comps: comps)
         // `within = r < R`, or another name for one: a condition.
         var alias: Expr?
