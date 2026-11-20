@@ -21,6 +21,7 @@
 import { analyzeRows } from '../../lib/analysis.ts';
 import { type CpuPlan, type GpuPlan, parametricGLSL } from '../../lib/compiler.ts';
 import { buildTube, curveFrames } from '../../lib/curve3d.ts';
+import { evaluateFrame } from '../../lib/env.ts';
 import { type Expr, evaluate, substVars } from '../../lib/expr.ts';
 import { fanFillable, vertexSampler } from '../../lib/figure-vertices.ts';
 import { traceField } from '../../lib/flow.ts';
@@ -30,6 +31,7 @@ import { traceIntersection } from '../../lib/intersection.ts';
 import { DARK_PALETTE, LIGHT_PALETTE, takesColor } from '../../lib/palette.ts';
 import { CURVE_SAMPLES } from '../../lib/path.ts';
 import { solveSystem, traceSystem } from '../../lib/solve.ts';
+import { initialState } from '../../lib/state.ts';
 import { noteColor } from '../../lib/statements.ts';
 import { defaultGeodesicLength, divergingGain, numericIn } from '../../lib/surface-geometry.ts';
 import {
@@ -51,7 +53,18 @@ export function graphJSON(
   texts: readonly string[],
   { dark = false, time = 0, warn = console.error }: { dark?: boolean; time?: number; warn?: (m: string) => void } = {},
 ): string {
-  const { rows, constEnv, defs } = analyzeRows(texts, { backend: 'both', readouts: false });
+  const analysis = analyzeRows(texts, { backend: 'both', readouts: false });
+  const { rows, defs } = analysis;
+  // The constants as the frame at `time` finds them (web/scene.ts currentConstEnv): a named value that
+  // moves with t is where it has got to, not where it started. The states are at their starts: nothing
+  // here has run them.
+  let constEnv = analysis.constEnv;
+  try {
+    const system = analysis.document.stateSystem;
+    constEnv = evaluateFrame(defs, time, system ? initialState(defs, system) : {});
+  } catch {
+    /* a definition's error is its row's */
+  }
   const env = { ...constEnv, t: time };
 
   // web/session.ts defaultCamera, and the camera row over it.

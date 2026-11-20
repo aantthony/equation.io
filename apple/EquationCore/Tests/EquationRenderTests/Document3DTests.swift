@@ -137,7 +137,10 @@ import Testing
     near("camera radius", cam.radius, want.radius)
     for k in 0..<3 { near("camera target", cam.target[k], want.target[k]) }
     check("env names", (mine.env ?? [:]).keys.sorted(), (theirs.env ?? [:]).keys.sorted())
-    // (The recorded environment is the constants at t = 0.)
+    // The constants where the frame finds them: a named value that moves with t is where it has got to.
+    for (name, value) in theirs.env ?? [:] {
+      if let got = mine.env?[name], !(got.isNaN && value.isNaN) { near("env \(name)", got, value) }
+    }
     near("time", mine.time ?? 0, theirs.time ?? 0)
 
     let (a, b) = (mine.scene, theirs.scene)

@@ -74,8 +74,6 @@ const DOCUMENTS: Array<[text: string, time?: number]> = [
       '(rho, theta, phi) = (2, 12 pi u, pi u)',
   ],
   // Multivectors, quaternions and projective geometry: glyphs, planes, lines of space, motors.
-  // (A named value's coefficients that move with t are constants, which the scene tool reads at t = 0:
-  // what moves here is written on its own row.)
   [
     'camera(-pi/3, 0.6, 5); a = 0.8; R = e^(-(a/2) e_xy); p = (1, 0, 0.8); vector(p); vector(rotate(p, R)); R; e^(-(t/2) e_zx)',
     0.5,
@@ -102,6 +100,17 @@ const DOCUMENTS: Array<[text: string, time?: number]> = [
     'camera(-0.9, 0.7, 11); u = interval(0, 2pi); v = interval(0, 2pi); S = ((3 + cos(v)) cos(u), (3 + cos(v)) sin(u), sin(v)); ' +
       'gaussian(S); (cos(u), sin(u), 2); (u, v, -3)',
   ],
+  // Named values that move with t: a point, a slider's dependent, a rotor, a motor's turn.
+  [
+    'a = 2 t; A = (cos(t), sin(t), a); A; z = a x; B = A/2; vector(A, B); hull(A, (0, 0, 0), (1, 0, 0), (0, 1, a))',
+    0.75,
+  ],
+  ['camera(-pi/3, 0.6, 5); R = e^(-(t/2) e_xy); p = (1, 0, 0.8); vector(rotate(p, R)); R; q = rotate(p, R); q', 1.25],
+  [
+    'A = (2.5, -2, -2); B = (2.5, 2, 2); L = line(A, B); th = 2 pi sin(t/2); S = motor(L, th, th/4); S; rotate((1, 1, 1), S)',
+    1.5,
+  ],
+  ['a = sin(t); P = (a, 0.5); on((X, Y, Z) = (x, y, x y), x = -1..1, y = -1..1); (a, a); segment((0, 0), P)', 0.5],
 ];
 
 const recorded = DOCUMENTS.map(([text, time = 0]) => {
