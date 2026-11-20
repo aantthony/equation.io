@@ -1,3 +1,4 @@
+import EquationAssist
 import FoundationModels
 import SwiftUI
 
@@ -9,9 +10,19 @@ import SwiftUI
   var apply: ([String]) -> Void = { _ in }
   weak var model: GraphModel?
 
-  /// What the renderer no longer answers and the app doesn't yet: the
-  /// lookups and sliders arrive with the language's port.
+  /// What the renderer no longer answers and the app doesn't yet: sliders
+  /// arrive with the language's port.
   private static let notYet = #"{"error":"not available in this build of the app yet"}"#
+
+  /// The lookups (EquationAssist, lib/assistant-tools.ts ported), over the
+  /// data `pnpm app:data` writes and the app bundles; read once.
+  private static let lookups: AssistantLookups? = {
+    guard let assistant = try? Data(contentsOf: AppData.url("assistant")),
+      let language = try? Data(contentsOf: AppData.url("language"))
+    else { return nil }
+    return try? AssistantLookups(assistant: assistant, language: language)
+  }()
+  private static let noLookups = #"{"error":"the app's reference is missing from this build"}"#
 
   /// The voice prototype's get_graph: every row's status, and the window.
   func graph() async -> String {
@@ -48,11 +59,11 @@ import SwiftUI
     return Self.state(rows: rows, status: await model.status(after: rows), window: nil)
   }
 
-  func listKinds() async -> String { Self.notYet }
-  func kindExamples(_ kind: String) async -> String { Self.notYet }
-  func shape(_ name: String) async -> String { Self.notYet }
-  func searchFunctions(_ query: String) async -> String { Self.notYet }
-  func functionDoc(_ name: String) async -> String { Self.notYet }
+  func listKinds() async -> String { Self.lookups?.listKinds() ?? Self.noLookups }
+  func kindExamples(_ kind: String) async -> String { Self.lookups?.kindExamples(kind) ?? Self.noLookups }
+  func shape(_ name: String) async -> String { Self.lookups?.shape(name) ?? Self.noLookups }
+  func searchFunctions(_ query: String) async -> String { Self.lookups?.searchFunctions(query) ?? Self.noLookups }
+  func functionDoc(_ name: String) async -> String { Self.lookups?.functionDoc(name) ?? Self.noLookups }
 
   /// The graph as the tools report it (web/voice.ts `GraphState`).
   private static func state(rows: [String], status: [RowStatus], window: (x: [Double], y: [Double])?) -> String {

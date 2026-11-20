@@ -14,7 +14,7 @@
  *
  * lib/reference.test.ts fails while either is out of date. The site's docs
  * pages and the app's assistant.json are generated at build time instead
- * (vite.config.ts, apple/vite.config.ts).
+ * (vite.config.ts, apple/tools/app-data.ts).
  */
 import { readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { CHARTED_GROUPS, swiftInstructions } from '../lib/assistant-instructions.ts';

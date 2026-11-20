@@ -1,12 +1,14 @@
 /**
  * The Apple app's Ask tools that answer from the language, not the graph
  * (apple/Equation Assistant.swift): check, search_functions, function_doc,
- * list_kinds, kind_examples and shape. The app's renderer answers them through its
- * bridge (web/native-app.ts), and the evals' service (apple/evals) with this
- * same code. Every answer is short: the on-device model has 8K tokens.
+ * list_kinds, kind_examples and shape. The evals' service (apple/evals)
+ * answers them with this code; the app answers the lookups (all but check)
+ * with a Swift port held to this code's answers (apple/EquationCore
+ * EquationAssist, apple/corpus/lookups.ts), so a change here is a change
+ * there. Every answer is short: the on-device model has 8K tokens.
  * The kinds, forms, examples and notes they answer from are the reference's
  * (docs/reference, lib/reference.ts assistantData), which the app bundles as
- * assistant.json.
+ * assistant.json (apple/tools/app-data.ts).
  *
  * Also here: a row's status and meaning from the analyzer alone, as voice
  * mode's get_graph reports it (web/main.ts rowStatus), which check answers

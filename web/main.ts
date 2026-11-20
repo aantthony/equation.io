@@ -27,7 +27,6 @@ import { runtimeSliderNames } from '../lib/runtime-sliders.ts';
 import { complexRootLabel } from '../lib/complex-label.ts';
 
 import { initHighlight } from './highlight.ts';
-import { highlightSpans } from '../lib/highlight.ts';
 import { initSyntaxHelp } from './syntax-help.ts';
 import { attachCapture } from './capture.ts';
 import { nextFeatured } from '../lib/featured.ts';
@@ -222,8 +221,7 @@ import {
 } from '../lib/tidal.ts';
 import { initPanelResize } from './panel-resize.ts';
 import { initPanelSwipe } from './panel-swipe.ts';
-import { initTheme, onThemeChange, setHostTheme, theme, toggleTheme } from './theme.ts';
-import type { NativeRowStatus } from './native-app.ts';
+import { initTheme, onThemeChange, theme, toggleTheme } from './theme.ts';
 
 interface Equation {
   familyParent?: Equation;
@@ -1457,14 +1455,10 @@ function systemKey(cpu: CpuPlan): string {
 }
 const mcpApp = document.documentElement.hasAttribute('data-mcp-app');
 const framed = document.documentElement.hasAttribute('data-embed');
-/** The renderer inside the Apple app, whose rows a native editor owns (web/native-app.ts). */
-const nativeApp = document.documentElement.hasAttribute('data-native-app');
-/** MCP widget, a framed graph or the Apple app: no address-bar writes, no featured default. */
-const embedded = mcpApp || framed || nativeApp;
+/** MCP widget or a framed graph: no address-bar writes, no featured default. */
+const embedded = mcpApp || framed;
 let graphChanged: ((rows: string[]) => void) | undefined;
 let graphEdited: (() => void) | undefined;
-/** Called once the rows' readouts are current (end of reconcile). */
-let rowsReconciled: (() => void) | undefined;
 let traceWorker: Worker | undefined;
 const traceQueue = new TraceQueue((message: TraceMessage) => {
   if (rendererDisposed) return;
@@ -1477,10 +1471,9 @@ const traceQueue = new TraceQueue((message: TraceMessage) => {
     // The chat iframe is cross-origin and the Apple app serves a custom
     // scheme; their worker must be created locally. Framed /g/ pages load
     // their worker from their own origin.
-    traceWorker ??=
-      mcpApp || nativeApp
-        ? new EmbeddedTraceWorker()
-        : new Worker(new URL('./trace-worker.ts', import.meta.url), { type: 'module' });
+    traceWorker ??= mcpApp
+      ? new EmbeddedTraceWorker()
+      : new Worker(new URL('./trace-worker.ts', import.meta.url), { type: 'module' });
     traceWorker.onmessage = (event: MessageEvent<{ token: number; result: TraceResult }>) => {
       traceQueue.complete(event.data.token, event.data.result);
     };
@@ -4176,11 +4169,6 @@ let urlLastWrite = 0;
 
 function saveUrl() {
   graphEdited?.();
-  // The native editor follows a drag as it happens; no address bar to rate-limit.
-  if (nativeApp) {
-    writeUrl();
-    return;
-  }
   urlPending = true;
   const wait = URL_INTERVAL - (performance.now() - urlLastWrite);
   if (wait <= 0) {
@@ -4912,7 +4900,6 @@ function reconcile() {
     el.classList.toggle('eq-hidden', hide);
   }
   badge();
-  rowsReconciled?.();
 }
 
 /** A slider row's range, step and value, as its slider shows them. */
@@ -4941,41 +4928,6 @@ function sliderRange(eq: Equation): { lo: number; hi: number; step: number; valu
   // (1, 2 or 5 × 10^k), so round values sit on it.
   const step = sliderWhole(eq) ? 1 : niceSpacing((hi - lo) / 400, 1).major;
   return { lo, hi, step, value };
-}
-
-/** A row's syntax colors, as the web editor paints them (web/highlight.ts). */
-function rowSpans(text: string): NativeRowStatus['spans'] {
-  try {
-    return highlightSpans(text, defs).map(({ start, end, cls }) => ({ start, end, cls }));
-  } catch {
-    return []; // colour is never worth an exception in the editor
-  }
-}
-
-/** What the native editor shows under each row: its color, readout and slider. */
-function nativeRowStatus(): NativeRowStatus[] {
-  return equations.map(eq => {
-    const drawn = eq.error ? undefined : eq.cpu;
-    const plain =
-      !!eq.def ||
-      eq.viewSpec?.kind === 'split' ||
-      eq.viewSpec?.kind === 'grid' ||
-      (drawn?.type === 'value' && !drawn.shade) ||
-      drawn?.type === 'note';
-    const colored = !plain && (eq.colorIndex >= 0 || !!noteColor(eq.text));
-    const slider = sliderRange(eq);
-    return {
-      color: colored ? baseColor(eq) : null,
-      error: eq.error ?? null,
-      info: eq.info ?? null,
-      comment: !!eq.comment,
-      view: !!eq.viewSpec && eq.viewSpec.kind !== 'split',
-      divider: eq.viewSpec?.kind === 'split',
-      note: noteStart(eq.text) < 0 ? null : noteStart(eq.text),
-      spans: rowSpans(eq.text),
-      slider: slider && { min: slider.lo, max: slider.hi, step: slider.step, value: slider.value },
-    };
-  });
 }
 
 /** Full rebuild of the editable DOM from state (loses caret; callers restore). */
@@ -6378,8 +6330,6 @@ let dragging = false;
 let lastX = 0;
 let lastY = 0;
 let panning = false;
-/** A Shift-drag in the app: the vertical motion zooms. */
-let zooming = false;
 let scaling = false;
 const pointers = new Map<number, { x: number; y: number }>();
 let pinchDist = 0;
@@ -6427,31 +6377,7 @@ function panBy(dx: number, dy: number) {
   camera.target[2] += cp * dy * s;
 }
 
-/** Glide the zoom by `factor` about a point, as a double-click does. */
-function zoomGlide(clientX: number, clientY: number, factor: number) {
-  const panel = panelAtClient(clientX, clientY);
-  if (withPanel(panel, () => cur.locked)) return;
-  const total = Math.log(factor);
-  let applied = 0;
-  tween(
-    'view',
-    0.25,
-    easeInOut,
-    k => {
-      const step = total * k - applied;
-      applied = total * k;
-      withPanel(panel, () => zoomAt(clientX, clientY, Math.exp(step)));
-    },
-    () => flushViewportWriteback(),
-  );
-}
-
-/** When the last click dropped an integral-curve seed, so a double-click can take it back. */
-let lastDropAt = -Infinity;
-
 canvas.addEventListener('pointerdown', e => {
-  // In the app a right-drag does nothing (for now): scrolling pans there.
-  if (nativeApp && e.button === 2) return;
   cancelTween('view'); // the user's hand beats a voice-mode camera move
   setHover(null); // a tooltip must not survive the gesture that moves the plot
   lastHoverAt = null; // nor may a deferred recompute re-pick mid-gesture
@@ -6473,9 +6399,7 @@ canvas.addEventListener('pointerdown', e => {
       canvas.style.cursor = 'grabbing';
     }
     dragging = !hit;
-    // In the app Shift-drag zooms, and two-finger scrolling pans.
-    zooming = nativeApp && e.button === 0 && e.shiftKey && !scaling;
-    panning = !zooming && (e.button === 2 || e.shiftKey);
+    panning = e.button === 2 || e.shiftKey;
     lastX = e.clientX;
     lastY = e.clientY;
     downX = e.clientX;
@@ -6483,7 +6407,6 @@ canvas.addEventListener('pointerdown', e => {
     dragMoved = false;
   } else if (pointers.size === 2) {
     scaling = false;
-    zooming = false;
     // Second finger: switch from drag to pinch, anchored at the midpoint.
     dragging = false;
     grab = null;
@@ -6558,11 +6481,6 @@ canvas.addEventListener('pointermove', e => {
   const dpr = window.devicePixelRatio || 1;
   // A locked panel's view(…, locked) or camera(…, locked) row holds it still.
   if (cur.locked) return;
-  if (zooming) {
-    // Up zooms in, down out, about where the drag began.
-    zoomAt(downX, downY, Math.exp(dy * 0.01));
-    return;
-  }
   if (mode === '2d' && scaling) {
     if (!dragMoved) return;
     ensureViewRow();
@@ -6588,7 +6506,6 @@ const endPointer = (e: PointerEvent) => {
     const [p] = pointers.values();
     dragging = true;
     panning = false;
-    zooming = false;
     lastX = p.x;
     lastY = p.y;
   } else if (pointers.size === 0) {
@@ -6611,13 +6528,10 @@ canvas.addEventListener('pointerup', e => {
   // vector fields; right/shift clicks are pan gestures, not seeds.
   if (scaling || e.altKey || dragMoved || pointers.size || mode !== '2d' || e.button !== 0 || e.shiftKey) return;
   if (!equations.some(q => !q.error && q.cpu?.type === 'vfield2d')) return;
-  // In the app a double-click zooms: its second click drops nothing.
-  if (nativeApp && e.detail >= 2) return;
   // Each seed costs an RK4 integration per field per frame; keep the newest.
   if (drops.length >= MAX_DROPS) drops.shift();
   const [mx, my] = toMath(e.clientX, e.clientY);
   drops.push({ x: mx, y: my });
-  lastDropAt = performance.now();
   requestRender();
 });
 canvas.addEventListener('pointercancel', e => {
@@ -6632,15 +6546,7 @@ canvas.addEventListener('pointerleave', () => {
   setHot(null);
   canvas.style.cursor = '';
 });
-canvas.addEventListener('dblclick', e => {
-  // The app follows Maps: a double-click zooms in about the pointer, with
-  // Option out. Its first click may have dropped a seed; take that back.
-  if (nativeApp) {
-    if (performance.now() - lastDropAt < 600 && drops.pop()) requestRender();
-    lastDropAt = -Infinity;
-    zoomGlide(e.clientX, e.clientY, e.altKey ? 2 : 0.5);
-    return;
-  }
+canvas.addEventListener('dblclick', () => {
   if (!drops.length) return;
   drops.length = 0;
   requestRender();
@@ -6653,20 +6559,7 @@ canvas.addEventListener(
     cancelTween('view');
     setHover(null);
     if (!pointers.size) activate(panelAtClient(e.clientX, e.clientY));
-    // The app scrolls like Maps: two fingers (or a wheel) pan. With Shift
-    // (as Shift-drag does), or as a pinch arriving as ctrl+wheel, it zooms.
-    if (nativeApp && !e.ctrlKey && !e.shiftKey) {
-      if (cur.locked) return;
-      const lines = e.deltaMode === WheelEvent.DOM_DELTA_LINE ? 16 : 1;
-      panBy(-e.deltaX * lines, -e.deltaY * lines);
-      requestRender();
-      scheduleViewportWriteback();
-      return;
-    }
-    // macOS turns a Shift+wheel turn into horizontal scrolling: its motion
-    // arrives as deltaX, so a mouse wheel zooms with Shift held too.
-    const delta = nativeApp && e.shiftKey && !e.deltaY ? e.deltaX : e.deltaY;
-    const factor = Math.exp(Math.max(-60, Math.min(60, delta)) * 0.002);
+    const factor = Math.exp(Math.max(-60, Math.min(60, e.deltaY)) * 0.002);
     zoomAt(e.clientX, e.clientY, factor);
   },
   { passive: false },
@@ -6898,8 +6791,8 @@ function rowStatus(eq: Equation, index: number, animated: ReadonlySet<string>): 
     const unknown = /^Unknown variable: (\w+)\./.exec(eq.error)?.[1];
     const call = unknown && new RegExp(`(?<![\\w])${unknown}\\s*\\(`);
     if (call && [eq, ...equations.filter(o => o.def?.kind === 'fn')].some(o => call.test(stripNote(o.text)))) {
-      // Each assistant's own lookup (lib/assistant-instructions.ts): the app's chat, or voice.
-      row.hint = `${unknown}(…) is not a built-in function; ${LOOKUP_HINT[nativeApp ? 'text' : 'voice']}`;
+      // Voice mode's own lookup (lib/assistant-instructions.ts).
+      row.hint = `${unknown}(…) is not a built-in function; ${LOOKUP_HINT.voice}`;
     }
     return row;
   }
@@ -7346,58 +7239,6 @@ function loadHostDocument(rows: string[]) {
   resetState();
   renderAll();
   requestRender();
-}
-
-if (nativeApp) {
-  /** The native editor's row ids, so an edit keeps each row's color, slider range and caches. */
-  const byNativeId = new Map<number, Equation>();
-  void import('./native-app.ts').then(({ connectNativeApp }) =>
-    connectNativeApp({
-      loadRows(rows) {
-        byNativeId.clear();
-        loadHostDocument(rows.map(r => r.text));
-        rows.forEach((r, i) => byNativeId.set(r.id, equations[i]));
-      },
-      editRows(rows) {
-        stopVoiceTweens();
-        const next = rows.map(r => {
-          const eq = byNativeId.get(r.id) ?? { id: nextId++, text: '', colorIndex: -1 };
-          eq.text = r.text;
-          return eq;
-        });
-        byNativeId.clear();
-        rows.forEach((r, i) => byNativeId.set(r.id, next[i]));
-        equations.length = 0;
-        equations.push(...next);
-        recompileAll();
-        renderAll();
-        requestRender();
-      },
-      // The voice prototype's graph tools, for the app's chat (apple/Equation Chat.swift).
-      graph: voiceGraph,
-      moveView,
-      animateSlider,
-      zoom(factor) {
-        const rect = canvas.getBoundingClientRect();
-        zoomGlide(rect.left + rect.width / 2, rect.top + rect.height / 2, factor);
-      },
-      setSlider(index, value) {
-        const eq = equations[index];
-        if (eq) setSlider(eq, value);
-      },
-      onChange: cb => {
-        graphChanged = cb;
-      },
-      onStatus: cb => {
-        rowsReconciled = () => cb(nativeRowStatus());
-      },
-      setTheme(mode) {
-        setHostTheme(mode);
-        // The palette changed with it.
-        rowsReconciled?.();
-      },
-    }),
-  );
 }
 
 if (mcpApp) {
