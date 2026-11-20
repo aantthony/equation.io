@@ -266,7 +266,7 @@ private func rowLocals(_ u: [UInt16], _ end: Int) -> Set<String> {
 public func highlightSpans(_ text: String, _ names: BoundNames) -> [HighlightSpan] {
   let u = Array(text.utf16)
   if isCommentRow(u) || isViewportText(u, trimmedRange(u)) { return [] }
-  let note = noteStart(u)
+  let note = noteOffset(u)
   let end = note < 0 ? u.count : note
   var spans: [HighlightSpan] = []
   var locals = rowLocals(u, end)
@@ -410,17 +410,6 @@ private struct ScannedDefinition {
   var name: String
   /// The right side, in the units `scanDefinition` was given.
   var rhs: [UInt16]
-}
-
-/// The names a definition may not claim (lib/defs.ts `RESERVED`).
-private let reservedNames: Set<String> = ["x", "y", "z", "u", "v", "t", "w", "i", "d", "e", "pi"]
-
-/// A name a definition may claim: not a builtin (except the late-addition
-/// ones old graphs may define themselves), not reserved, not a uniform
-/// (lib/defs.ts `nameable`).
-private func nameable(_ n: String) -> Bool {
-  let builtin = functions.contains(n) && !shadowableFunctions.contains(n)
-  return !builtin && !reservedNames.contains(n) && !n.hasPrefix("u_")
 }
 
 /// A data file's hash, as a row pins it, is at least this many hex digits (lib/hash.ts `HASH_TOKEN_LEN`).
@@ -726,7 +715,7 @@ func collectBoundNames(_ rows: [String]) -> BoundNames {
   // lib/analysis.ts prepareDocument: a row is its math, without the note.
   let texts: [[UInt16]] = rows.map {
     let u = Array($0.utf16)
-    let note = noteStart(u)
+    let note = noteOffset(u)
     return Array(u[trimmedRange(u, 0..<(note < 0 ? u.count : note))])
   }
   let live = texts.map { !$0.isEmpty && $0[0] != 0x23 && !isViewportText($0, 0..<$0.count) }

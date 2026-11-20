@@ -28,7 +28,7 @@ import Testing
       let o = c["opts"] as! [String: Any]
       let opts = SolveOptions(
         env: (o["env"] as? [String: Any] ?? [:]).mapValues(number),
-        margin: o["margin"].map(number) ?? 0.05,
+        margin: o["margin"].map(solveNumber) ?? 0.05,
         seeds: (o["seeds"] as? [[Any]] ?? []).map(numbers),
         lattice: o["lattice"] as? Bool ?? true,
         angular: o["angular"] as? [Bool] ?? [])
@@ -59,7 +59,7 @@ import Testing
     for c in cases {
       let got = traceSystem(
         try exprs(c["residuals"]!), c["vars"] as! [String], numbers(c["lo"]!), numbers(c["hi"]!),
-        (c["env"] as! [String: Any]).mapValues(number), Int(number(c["samples"]!)), c["angular"] as! [Bool],
+        (c["env"] as! [String: Any]).mapValues(number), Int(solveNumber(c["samples"]!)), c["angular"] as! [Bool],
         evaluate: evaluateForTests)
       let want = (c["result"] as! [[[Any]]]).map { $0.map(numbers) }
       if !same(got, want, exact: c["exact"] as! Bool) {
@@ -75,12 +75,12 @@ import Testing
     let cases = fixture["roots"] as! [[String: Any]]
     for c in cases {
       let f = try decode(exactNumbers(c["f"]!))
-      let got = findRoots(f, c["v"] as! String, number(c["lo"]!), number(c["hi"]!), evaluate: evaluateForTests)
+      let got = findRoots(f, c["v"] as! String, solveNumber(c["lo"]!), solveNumber(c["hi"]!), evaluate: evaluateForTests)
       let want: FoundRoots =
         if let list = c["result"] as? [[String: Any]] {
           .roots(
             list.map {
-              FoundRoot(x: number($0["x"]!), mult: Int(number($0["mult"]!)), exact: $0["exact"] as! Bool)
+              FoundRoot(x: solveNumber($0["x"]!), mult: Int(solveNumber($0["mult"]!)), exact: $0["exact"] as! Bool)
             })
         } else {
           .zero
@@ -98,7 +98,7 @@ import Testing
 }
 
 /// The fixture's numbers are text (see exactNumbers).
-private func number(_ json: Any) -> Double {
+private func solveNumber(_ json: Any) -> Double {
   switch json as! String {
   case "Infinity": .infinity
   case "-Infinity": -.infinity
@@ -106,7 +106,7 @@ private func number(_ json: Any) -> Double {
   case let text: Double(text)!
   }
 }
-private func numbers(_ json: Any) -> [Double] { (json as! [Any]).map(number) }
+private func numbers(_ json: Any) -> [Double] { (json as! [Any]).map(solveNumber) }
 private func exprs(_ json: Any) throws -> [Expr] { try (json as! [Any]).map { try decode(exactNumbers($0)) } }
 
 /// Paths of points: the same doubles, or (not `exact`) the same shape with

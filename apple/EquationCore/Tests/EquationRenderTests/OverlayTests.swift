@@ -158,8 +158,10 @@ private func close(_ a: [Double], _ b: [Double]) -> Bool {
     let clock = ContinuousClock()
     let took = clock.measure { _ = draw(scene) }
     print("100k cloud points: \(took)")
-    // Generous: an unoptimized build on a busy machine. It takes a few milliseconds.
-    #expect(took < .milliseconds(250))
+    // Generous: an unoptimized build while the other suites run beside it (it
+    // took over 250 ms once that way). Optimized, it takes a few milliseconds;
+    // one fill per point took seconds.
+    #expect(took < .seconds(2))
   }
 
   @Test func colors() {

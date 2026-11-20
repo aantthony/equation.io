@@ -163,7 +163,7 @@ private func describe(_ spans: [HighlightSpan], _ row: String) -> String {
     for document in fixture.documents {
       for (k, row) in document.rows.enumerated() {
         #expect(noteStart(row) == (document.notes[k] < 0 ? nil : document.notes[k]), "\(row)")
-        let got = noteColor(row)
+        let got = noteColorRGB(row)
         if let want = document.noteColors[k] {
           #expect(got.map { simd_close($0, want) } == true, "\(row)")
         } else {

@@ -71,7 +71,7 @@ func structuralDiagnostic(_ e: Expr) -> String {
   case .range: "'..' ranges only appear in sum(n=1..N, …), prod(…), int[a..b], or a list like [1..10]."
   case .index: "List indexing must resolve before scalar evaluation."
   case .eqtest(let op, _, _): "'\(op.rawValue)' tests a list inside a filter."
-  default: preconditionFailure("structuralDiagnostic: not a structural node")
+  default: "(…) must be the whole expression."
   }
 }
 
