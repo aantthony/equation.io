@@ -35,13 +35,19 @@ func lowerStatement(_ e: Expr, _ context: GeomContext) throws -> Expr {
 /// `lowerStatement`, lowered again with matrix algebra on if a matrix shows
 /// (lib/geom.ts `withMatrices`).
 func lowerWithMatrices(
-  _ e: Expr, comps: @escaping (String) -> [String]?, getMat: @escaping GetMat, getTensor: @escaping GetTensor
+  _ e: Expr, comps: @escaping (String) -> [String]?, getMat: @escaping GetMat, getTensor: @escaping GetTensor,
+  isList: @escaping (String) -> Bool = { _ in false }
 ) throws -> Expr {
+  func context(mats: Bool) -> GeomContext {
+    let context = GeomContext(comps: comps, getMat: getMat, getTensor: getTensor, mats: mats)
+    context.isList = isList
+    return context
+  }
   do {
-    return try lowerStatement(e, GeomContext(comps: comps, getMat: getMat, getTensor: getTensor, mats: false))
+    return try lowerStatement(e, context(mats: false))
   } catch is MatrixSeen {
     do {
-      return try lowerStatement(e, GeomContext(comps: comps, getMat: getMat, getTensor: getTensor, mats: true))
+      return try lowerStatement(e, context(mats: true))
     } catch let error as LanguageError {
       throw FailedWithMatrices(error: error)
     }
@@ -49,7 +55,7 @@ func lowerWithMatrices(
 }
 
 /// A row that failed to lower with matrix algebra on: it holds a matrix or a
-/// tuple of points, which `failedLowering` needs to know.
+/// tuple of points; its error is the row's (`lowerGeomObjects`).
 struct FailedWithMatrices: Error {
   var error: LanguageError
 }

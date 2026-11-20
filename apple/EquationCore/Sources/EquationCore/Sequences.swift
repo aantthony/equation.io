@@ -438,7 +438,9 @@ final class SequenceResolver {
       }
       // (A step that reads a tuple by position resolves its source per term,
       // through list lowering: not ported.)
-      if !indexedNames(open!).isEmpty { throw Unsupported("a recurrence that reads a list") }
+      if !indexedNames(open!).isEmpty || readsLists(open!, opts) {
+        throw Unsupported("a recurrence that reads a list")
+      }
       for v in freeVars(open!)
       where v != recVar && v != scan.index && !isConstant(v) && !v.hasPrefix("\(prefix)_") {
         throw LanguageError("Sequence \(name) terms need constant parameters (found \(v)).")
@@ -593,6 +595,9 @@ func classifySeqRec(
   // Terms are at whole n, so a case may test equality: {mod(n, 2) = 0: …}.
   opts.exactConditions = true
   let parsed = exactCases(try Resolver(getFn: getFn, opts: opts).resolve(source))
+  // (A term that reads a list or a tuple by position, or reduces one, goes
+  // through list lowering on the site: not ported for sequences.)
+  if readsLists(parsed, opts) { throw Unsupported("a sequence that reads a list") }
   var vars = freeVars(parsed)
   // (lib/complex.ts `usesComplex`; complex numbers are not ported.)
   if vars.contains("i") || vars.contains("w") { throw Unsupported("complex numbers") }

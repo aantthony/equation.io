@@ -26,6 +26,8 @@ func objectNeeds3D(_ object: MathObject) -> Bool {
   case .point(let coordinates), .curveParametric(let coordinates): coordinates.count == 3
   case .vectorField(let components): components.count == 3
   case .system(let residuals, _, _): residuals.count == 3
+  // (A list of points in space; ListPlans.swift.)
+  case .list(.points(3, _)), .list(.scatter(3, _)): true
   default: false
   }
 }

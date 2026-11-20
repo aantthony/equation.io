@@ -82,6 +82,9 @@ public struct Graph2D: Equatable, Sendable {
       switch gpu.shader {
       case .none:
         break
+      case .family(let members):
+        // One layer per member (Graph2D+Lists.swift).
+        Self.addFamily(members, color: color, curves: &curves, ineqs: &ineqs, vfields: &vfields)
       case .implicit2d(let field, _):
         let graphEval = gpu.graphEval.map { Curve2D.GraphEval(glsl: $0.glsl, slopeScale: $0.slopeScale) }
         curves.append(Curve2D(field: field, graphEval: graphEval, color: color, params: gpu.params))
@@ -180,6 +183,8 @@ public struct Graph2D: Equatable, Sendable {
         overlay.polylines.append(.init(pts: pts, color: css))
       case .polygon, .label:
         _ = drawGeometry(cpu, env, color: color, into: &overlay)
+      case .vlist, .plist, .dlist, .dscatter, .histogram, .family:
+        _ = drawList(cpu, env, color: color, pointsPerUnit: pointsPerUnit, into: &overlay)
       case .sequence(let term, let n):
         overlay.points += Self.sequenceDots(
           term: term, index: n, env: env, bounds: bounds, color: css, partialSum: partialSums.contains(index))

@@ -80,6 +80,18 @@ public enum CpuPlan: Equatable, Sendable {
   case orbit(dim: Int, paths: [[Expr]], series: Bool, from: Expr, to: Expr)
   /// A moving point whose past positions are drawn (Trail.swift).
   case trail(dim: Int, coords: [Expr])
+  /// A list of numbers: a dot plot on the number line.
+  case vlist(values: [Expr])
+  /// A list of points.
+  case plist(dim: Int, pts: [[Expr]])
+  /// A packed list of numbers, and a scatter of packed columns.
+  case dlist(values: [Double])
+  case dscatter(dim: Int, coords: [[Double]])
+  case histogram(centers: [Double], counts: [Double], width: Double)
+  /// A multiset of `count` tuples or tensors of one `shape`, read out.
+  case tuples(values: [Expr], shape: [Int], count: Int)
+  /// One plan per list element.
+  indirect case family(members: [FamilyMember])
 
   /// The plan's `type`, as the TypeScript spells it.
   public var type: String {
@@ -117,6 +129,13 @@ public enum CpuPlan: Equatable, Sendable {
     case .prob: "prob"
     case .orbit: "orbit"
     case .trail: "trail"
+    case .vlist: "vlist"
+    case .plist: "plist"
+    case .dlist: "dlist"
+    case .dscatter: "dscatter"
+    case .histogram: "histogram"
+    case .tuples: "tuple"
+    case .family: "family"
     }
   }
 }
@@ -133,6 +152,9 @@ public struct GpuPlan: Equatable, Sendable {
     public var glsl: String
     public var slopeScale: Double
   }
+  /// Values the plan sets itself, by constant name: a family member's index
+  /// into the program its family shares.
+  public var uniforms: [String: Double] = [:]
 
   public enum Shader: Equatable, Sendable {
     /// Nothing for the GPU: the row is drawn (or only read out) on the CPU.
@@ -164,6 +186,8 @@ public struct GpuPlan: Equatable, Sendable {
     /// P(u, v), with its tangents when they are cheaper than finite
     /// differences, and the scalar in u and v it is coloured by.
     case psurface(comps: [String], du: [String]?, dv: [String]?, paint: String?)
+    /// One plan per list element.
+    indirect case family(members: [GpuPlan])
   }
 
   public var type: String {
@@ -183,6 +207,7 @@ public struct GpuPlan: Equatable, Sendable {
     case .scalar3d: "scalar3d"
     case .vfield3d: "vfield3d"
     case .psurface: "psurface"
+    case .family: "family"
     }
   }
 }
@@ -284,6 +309,8 @@ public func compileCpu(_ classified: Classified) throws -> CpuPlan {
     return .orbit(dim: series ? 2 : paths.first?.count ?? 2, paths: paths, series: series, from: from, to: to)
   case .trail(let coordinates):
     return .trail(dim: coordinates.count, coords: try coordinates.map(real))
+  case .list, .histogram, .tuples, .family:
+    return try compileListCpu(classified.object)
   }
 }
 
@@ -368,8 +395,11 @@ public func compileGpu(_ classified: Classified) throws -> GpuPlan {
   case .bifurcation(let expr, let variable, _):
     return plan(.bifurcation(field: try glsl(sub(substVars(expr, [variable: .var("a")])))))
   case .point, .complexPoint, .curveParametric, .complexPath, .value, .note, .label, .figure, .tuple, .sequence,
-    .automaton, .lattice, .curveTube, .intersection, .system, .distribution, .probability, .orbit, .trail:
+    .automaton, .lattice, .curveTube, .intersection, .system, .distribution, .probability, .orbit, .trail,
+    .list, .histogram, .tuples:
     return plan(.none)
+  case .family(let members, let shared):
+    return try compileFamilyGpu(members, shared, params: params)
   }
 }
 
@@ -443,6 +473,8 @@ public func plotReadout(_ plan: CpuPlan, _ env: [String: Double]) throws -> Stri
     return try comparisonReadout(expr, variable: variable, constant: constant, identity: identity, env)
   case .tuple(let values, let shape, let length):
     return try tupleReadout(values, shape: shape, length: length, env)
+  case .vlist, .tuples, .family:
+    return try listReadout(plan, env)
   default:
     return nil
   }

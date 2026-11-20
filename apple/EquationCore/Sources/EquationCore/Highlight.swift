@@ -290,7 +290,7 @@ private func numberEnd(_ u: [UInt16], _ i: Int, _ end: Int) -> Int? {
 /// that fails binds nothing, so its name stays unbound wherever it is written.
 ///
 /// The definitions port does not read every row yet. A row it leaves alone
-/// (a sequence, a `~` row, a state, a list, a data file, and whatever names
+/// (a sequence, a `~` row, a state, a data file, and whatever names
 /// one) binds what `scanBoundNames` reads off its shape instead.
 func boundNames(_ document: PreparedDocument) -> BoundNames {
   let built = document.built
@@ -305,6 +305,7 @@ func boundNames(_ document: PreparedDocument) -> BoundNames {
   // (So does a vector state: r_1, r_2 are among the states.)
   names.values.formUnion(built.states.keys)
   names.values.formUnion(built.vecStates.keys)
+  names.values.formUnion(built.lists.keys)
   names.functions.formUnion(built.fns.keys)
   // The sequences of the rows the port reads (lib/defs.ts `defs.sequences`).
   for (k, scan) in document.seqScans.enumerated() where document.blocked[k] == nil {

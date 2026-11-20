@@ -11,8 +11,9 @@
 /// - with no x or y at all, a number or a claim to read out
 /// - t is always allowed and means "animated": seconds since the start
 ///
-/// The 2D kinds above are the ones ported. Everything else the site draws
-/// (surfaces, curves in space, systems, lists, …) throws `Unsupported`.
+/// The 2D kinds above are the ones ported, with lists, tuples and families
+/// (ListPlans.swift). Everything else the site draws (surfaces, curves in
+/// space, systems, …) throws `Unsupported`.
 public indirect enum MathObject: Equatable, Sendable {
   /// `y = f(x)`: a curve that is a graph.
   case curveGraph(rhs: Expr, equation: Expr, levels: LevelSetSpec?)
@@ -89,6 +90,17 @@ public indirect enum MathObject: Equatable, Sendable {
   case orbit(paths: [[Expr]], series: Bool, from: Expr, to: Expr)
   /// `trail(A)`: where a moving point has been (Trail.swift).
   case trail(coordinates: [Expr])
+  /// A list of numbers or of points, as expressions (`values`: one per
+  /// number, or one row of coordinates per point) or packed (ListPlans.swift).
+  case list(ListObject)
+  /// `hist(L)`: bars at `centers`, `counts` high and `width` wide.
+  case histogram(centers: [Double], counts: [Double], width: Double)
+  /// A multiset of `count` tuples, matrices or tensors of one `shape`, their
+  /// values back to back: read out, as one is.
+  case tuples(values: [Expr], shape: [Int], count: Int)
+  /// One copy of the row per list element. `shared`: the one program its
+  /// members are drawn with, each choosing itself by the uniform `index`.
+  case family(members: [Classified], shared: FamilyShared?)
 
   /// The kind as the site's tools name it (`publicKind`).
   public var publicKind: String {
@@ -124,6 +136,10 @@ public indirect enum MathObject: Equatable, Sendable {
     case .probability: "prob"
     case .orbit: "orbit"
     case .trail: "trail"
+    case .list(let list): list.publicKind
+    case .histogram: "histogram"
+    case .tuples: "tuple"
+    case .family: "family"
     }
   }
 }
@@ -293,6 +309,7 @@ func classify(_ lowered: Expr, defined: Set<String>, fields: [String: Expr]) thr
   }
   // gaussian(S) alone on a row: the surface S, coloured by its curvature.
   if case .call(PAINT_CALL, let args) = expr { return try paintedSurface(args, defined: defined, fields: fields) }
+  if case .family(let members) = expr { return try classifyFamily(members, defined: defined, fields: fields) }
   if fields.values.contains(where: { if case .ineq = $0 { true } else { false } }),
     let misread = conditionAsValue(expr, fields)
   {
@@ -384,7 +401,8 @@ func classify(_ lowered: Expr, defined: Set<String>, fields: [String: Expr]) thr
     return Classified(object: object, animated: moving, needs3D: objectNeeds3D(object), params: params)
   }
 
-  // A matrix or tensor on a row of its own.
+  // A matrix or tensor on a row of its own, or a multiset of them.
+  if let tensors = try classifyTensors(expr, hasSpace: hasSpace, hasParam: hasParam) { return done(tensors) }
   if let tensor = try classifyTensor(expr, hasSpace: hasSpace, hasParam: hasParam, hasZ: vars.contains("z")) {
     return done(tensor)
   }
@@ -418,6 +436,9 @@ func classify(_ lowered: Expr, defined: Set<String>, fields: [String: Expr]) thr
     return classified
   }
 
+  // Lists, histograms and scatters of columns (ListPlans.swift).
+  if let object = try classifyList(expr, vars) { return done(object) }
+
   if let special, case .call(_, let args) = expr {
     return done(try classifySpecial(special, args, vars))
   }
@@ -431,10 +452,9 @@ func classify(_ lowered: Expr, defined: Set<String>, fields: [String: Expr]) thr
     if complexRow { throw LanguageError("Complex values are not supported in vectors.") }
     // Longer than a point: values at positions, shown as a readout.
     if items.count > 3 {
-      // (Over x, y, u or v the site reads a long tuple as a list of its
-      // values, a family; lists are not ported.)
       if hasSpace || hasParam || items.contains(where: isVec) {
-        throw Unsupported("tuples of more than 3 values")
+        throw LanguageError(
+          "A tuple of more than 3 values is a value to read, not a picture: (1, 2, 3, 5, 8).")
       }
       return done(classifyTuple(items))
     }

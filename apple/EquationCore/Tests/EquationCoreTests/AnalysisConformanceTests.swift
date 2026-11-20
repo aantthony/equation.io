@@ -40,6 +40,10 @@ import Testing
             print("  \(name), row \(i + 1) \(rows[i].debugDescription): \(why)")
           }
           reasons[why, default: 0] += 1
+          // ANALYSIS_WHY=lists swift test …: the rows a reason holds back.
+          if let asked = ProcessInfo.processInfo.environment["ANALYSIS_WHY"], why.contains(asked) {
+            print("  \(name), row \(i + 1): \(rows[i])")
+          }
           continue
         }
         rowsSupported += 1
@@ -102,14 +106,14 @@ import Testing
   }
 
   @Test func whatIsNotPortedSaysSo() {
-    let rows = ["L = [1, 2, 3]", "(x, y) = (1, 2)", "s_{n+1} = push(s_n, n)", "int[0..1] x dx", "(u, v)"]
+    let rows = ["p = open(\"a.csv\")", "(x, y) = (1, 2)", "s_{n+1} = push(s_n, n)", "int[0..1] x dx", "(u, v)"]
     for text in rows {
       let row = analyze([text]).rows[0]
       #expect(row.unsupported != nil, "\(text)")
       #expect(row.cpu == nil && row.gpu == nil && row.error == nil, "\(text)")
     }
     // A name the port cannot read takes the rows that use it with it.
-    let analysis = analyze(["L = [1, 2, 3]", "b = L[1]", "y = b x", "y = x"])
+    let analysis = analyze(["p = open(\"a.csv\")", "b = p + 1", "y = b x", "y = x"])
     #expect(analysis.rows.map { $0.unsupported != nil } == [true, true, true, false])
   }
 
@@ -209,7 +213,9 @@ import Testing
     check("cpu type", got.cpu?.type, cpu?["type"] as? String)
     if let cpu, let mine = got.cpu, cpu["omitted"] == nil {
       do {
-        check("cpu", "\(mine)", "\(try cpuPlan(cpu))")
+        // (A list's numbers come through each side's libm: equal to the last few places.)
+        let wanted = "\(try cpuPlan(cpu, like: mine))"
+        if !sameButForRounding("\(mine)", wanted) { check("cpu", "\(mine)", wanted) }
       } catch {
         out.append("cpu: \(error)")
       }
@@ -218,19 +224,30 @@ import Testing
     out += drawnDifferences(got.cpu, want["drawn"], analysis)
     let gpu = want["gpu"] as? [String: Any]
     check("gpu type", got.gpu?.type, gpu?["type"] as? String)
-    if let gpu, let mine = got.gpu, gpu["omitted"] == nil {
-      check("gpu params", mine.params, gpu["params"] as! [String])
+    func compareGpu(_ mine: GpuPlan, _ gpu: [String: Any], _ at: String) {
+      check("gpu\(at) params", mine.params, gpu["params"] as! [String])
+      // What a plan sets itself: a family member's index into its program.
+      var uniforms: [String: Double] = [:]
+      for (key, value) in gpu["uniforms"] as? [String: Any] ?? [:] { uniforms[key] = number(value) }
+      check("gpu\(at) uniforms", mine.uniforms, uniforms)
       func same(_ what: String, _ a: String?, _ b: Any?) {
-        check("gpu \(what)", a.map(normalizeGLSL), (b as? String).map(normalizeGLSL))
+        check("gpu\(at) \(what)", a.map(normalizeGLSL), (b as? String).map(normalizeGLSL))
       }
       func sameList(_ what: String, _ a: [String]?, _ b: Any?) {
-        check("gpu \(what)", a?.map(normalizeGLSL), (b as? [String])?.map(normalizeGLSL))
+        check("gpu\(at) \(what)", a?.map(normalizeGLSL), (b as? [String])?.map(normalizeGLSL))
       }
       let graph = gpu["graphEval"] as? [String: Any]
       same("graphEval", mine.graphEval?.glsl, graph?["glsl"])
       check("gpu slopeScale", mine.graphEval?.slopeScale, graph?["slopeScale"].map(number))
       switch mine.shader {
       case .none: break
+      case .family(let members):
+        let wanted = gpu["members"] as? [[String: Any]] ?? []
+        check("gpu\(at) members", members.count, wanted.count)
+        for (k, (member, want)) in zip(members, wanted).enumerated() {
+          check("gpu\(at) member \(k + 1) type", member.type, want["type"] as? String)
+          compareGpu(member, want, "\(at) member \(k + 1)")
+        }
       case .implicit2d(let field, let levels):
         same("field", field, gpu["field"])
         let wanted = gpu["levels"] as? [String: Any]
@@ -278,13 +295,21 @@ import Testing
         same("paint", paint, gpu["paint"])
       }
     }
+    if let gpu, let mine = got.gpu, gpu["omitted"] == nil { compareGpu(mine, gpu, "") }
     return out
   }
 
-  /// The TypeScript's CPU plan, for the kinds ported.
-  private func cpuPlan(_ o: [String: Any]) throws -> CpuPlan {
+  /// The TypeScript's CPU plan, for the kinds ported. `mine`: the port's
+  /// plan, for what a family's members are (the fixture's plans are compared,
+  /// not its classifications).
+  private func cpuPlan(_ o: [String: Any], like mine: CpuPlan? = nil) throws -> CpuPlan {
     func expr(_ key: String) throws -> Expr { try decode(o[key]!) }
     func exprs(_ key: String) throws -> [Expr] { try (o[key] as! [Any]).map(decode) }
+    func packed(_ v: Any?) throws -> [Double] {
+      guard let list = v as? [Any] else { throw FixtureError(description: "a packed column not recorded") }
+      return list.map(number)
+    }
+    func whole(_ key: String) -> Int? { (o[key] as? NSNumber)?.intValue }
     switch o["type"] as! String {
     case "implicit2d":
       var levels: CpuGrid?
@@ -321,16 +346,24 @@ import Testing
     case "label":
       return .label(dim: (o["dim"] as! NSNumber).intValue, coords: try exprs("coords"), text: o["text"] as! String)
     case "polygon":
-      if o["over"] != nil { throw FixtureError(description: "a packed figure") }
+      // A figure through a template of points: its columns travel as their numbers.
+      let over = try (o["over"] as? [[String: Any]])?.map {
+        Column(name: $0["name"] as! String, values: try packed($0["values"]))
+      }
       return .polygon(
         dim: (o["dim"] as! NSNumber).intValue, pts: try exprs("pts"), closed: o["closed"] as! Bool,
-        arrow: o["arrow"] as? Bool ?? false, hull: o["hull"] as? Bool ?? false, over: nil)
+        arrow: o["arrow"] as? Bool ?? false, hull: o["hull"] as? Bool ?? false, over: over)
     case "tfield2d":
       if o["jacobian"] != nil { throw FixtureError(description: "a matrix field on mapped axes") }
       return .tfield2d(entries: try exprs("entries"), streamlines: o["streamlines"] as? Bool ?? false)
     case "tuple":
-      if o["count"] != nil || o["blades"] != nil || o["flat"] != nil {
-        throw FixtureError(description: "a multiset, a multivector or a flat")
+      if o["blades"] != nil || o["flat"] != nil { throw FixtureError(description: "a multivector or a flat") }
+      // A multiset of tuples, their values back to back.
+      if let count = whole("count") {
+        guard let shape = (o["shape"] as? [NSNumber])?.map(\.intValue) else {
+          throw FixtureError(description: "a multiset of no shape")
+        }
+        return .tuples(values: try exprs("values"), shape: shape, count: count)
       }
       return .tuple(
         values: try exprs("values"), shape: (o["shape"] as? [NSNumber])?.map(\.intValue),
@@ -392,6 +425,26 @@ import Testing
       return .orbit(
         dim: (o["dim"] as! NSNumber).intValue, paths: try (o["paths"] as! [[Any]]).map { try $0.map(decode) },
         series: o["series"] as! Bool, from: try expr("from"), to: try expr("to"))
+    case "vlist": return .vlist(values: try exprs("values"))
+    case "plist":
+      return .plist(dim: whole("dim")!, pts: try (o["pts"] as! [[Any]]).map { try $0.map(decode) })
+    case "dlist": return .dlist(values: try packed(o["values"]))
+    case "dscatter": return .dscatter(dim: whole("dim")!, coords: try (o["coords"] as! [Any]).map(packed))
+    case "histogram":
+      return .histogram(
+        centers: try packed(o["centers"]), counts: try packed(o["counts"]), width: number(o["width"]!))
+    case "family":
+      if o["readout"] != nil { throw FixtureError(description: "a family with a readout") }
+      var own: [FamilyMember] = []
+      if case .family(let members)? = mine { own = members }
+      let wanted = o["members"] as! [[String: Any]]
+      return .family(
+        members: try wanted.enumerated().map { k, member in
+          let like = k < own.count ? own[k] : nil
+          guard let classified = like?.classified else { throw FixtureError(description: "a longer family") }
+          return FamilyMember(
+            classified: classified, cpu: try cpuPlan(member["cpu"] as! [String: Any], like: like?.cpu))
+        })
     default: throw FixtureError(description: "a \(o["type"]!) plan")
     }
   }
@@ -424,6 +477,32 @@ func close(_ a: Double, _ b: Double) -> Bool {
   if a.isNaN || b.isNaN { return a.isNaN && b.isNaN }
   if a == b { return true }
   return abs(a - b) <= 1e-13 * max(abs(a), abs(b))
+}
+
+/// Whether two descriptions agree but for the last few places of the numbers
+/// written in them.
+func sameButForRounding(_ a: String, _ b: String) -> Bool {
+  if a == b { return true }
+  let (x, y) = (Array(a.utf8), Array(b.utf8))
+  func isNumeric(_ c: UInt8) -> Bool { (c >= 0x30 && c <= 0x39) || c == 0x2E || c == 0x2D || c == 0x65 || c == 0x2B }
+  var (i, j) = (0, 0)
+  while i < x.count, j < y.count {
+    if isNumeric(x[i]) && isNumeric(y[j]) {
+      var (p, q) = (i, j)
+      while p < x.count, isNumeric(x[p]) { p += 1 }
+      while q < y.count, isNumeric(y[q]) { q += 1 }
+      let (u, v) = (String(decoding: x[i..<p], as: UTF8.self), String(decoding: y[j..<q], as: UTF8.self))
+      if u != v {
+        guard let m = Double(u), let n = Double(v), abs(m - n) <= 1e-12 * max(abs(m), abs(n)) else { return false }
+      }
+      (i, j) = (p, q)
+    } else {
+      if x[i] != y[j] { return false }
+      i += 1
+      j += 1
+    }
+  }
+  return i == x.count && j == y.count
 }
 
 /// GLSL with every number literal respelled from its float32 value, so the

@@ -2,8 +2,9 @@
 /// inlined, d/dx expanded, named conditions and points written in
 /// (lib/defs.ts `resolveExpr`/`rx`, lib/geom.ts `lowerGeom`).
 ///
-/// The port covers the scalar core. Everything it has not reached — sums and
-/// integrals, lists, multivectors, … —
+/// The port covers the scalar core and lists (ObjectLists.swift has the
+/// resolver's part of those). Everything it has not reached — sums and
+/// integrals, multivectors, … —
 /// throws `Unsupported`, and the row says it is not supported yet rather
 /// than drawing something the site would not.
 
@@ -58,6 +59,11 @@ struct ResolveOpts {
   var openVars: Set<String> = []
   /// A sequence term by name (a_3, a_k) or index (a_[…]) (Sequences.swift).
   var sequenceTerm: ((String, Expr?, Set<String>) throws -> Expr?)?
+  /// What list lowering reads beside the constants (Lists.swift): which
+  /// names are lists, and what is wrong with an index by its shape alone.
+  var isList: (String) -> Bool = { _ in false }
+  var getList: GetList?
+  var indexIssue: ((_ index: Expr, _ target: Expr) -> String?)?
 }
 
 /// The elementary functions the port evaluates and compiles: a call to any
@@ -146,6 +152,7 @@ struct Resolver {
   private static let fdH = 1e-4
 
   func applyDiff(_ operand: Expr, _ v: String, _ order: Int) throws -> Expr {
+    try refuseListDerivative(operand)
     var e = throughFields(operand)
     // A component that does not exist — F_1 of a function F, G_1 of a point
     // whose components are G_x, G_y — would differentiate to 0.
@@ -203,13 +210,13 @@ struct Resolver {
   // MARK: Names
 
   /// `P.x` of one named point is its coordinate P_x (`pointCoord`).
-  private func pointCoord(_ name: String) -> Expr? {
+  func pointCoord(_ name: String) -> Expr? {
     let u = Array(name.utf16)
     guard let dot = u.lastIndex(of: unit(".")), dot > 0,
       let k = coordNames.firstIndex(of: String(u[(dot + 1)...]))
     else { return nil }
     let base = String(u[..<dot])
-    if opts.params?.contains(base) == true { return nil }
+    if opts.isList(base) || opts.params?.contains(base) == true { return nil }
     guard let comps = opts.comps(base), k < comps.count else { return nil }
     return .var(comps[k])
   }
@@ -238,6 +245,10 @@ struct Resolver {
     // In a definition it may be named below: written in once every
     // definition has resolved, or reported there.
     if opts.inDefinition { return resolved }
+    // `big = L > 1` is the members it keeps, a list.
+    if case .var(let name) = raw, opts.isList(name) {
+      throw LanguageError("\(name) is a list, not a condition; write the comparison itself in the braces.")
+    }
     throw notACondition(raw)
   }
 
@@ -280,11 +291,11 @@ struct Resolver {
       return .bin(op, a, b)
     case .index(let target, let at):
       if case .var(let name) = target, let term = try opts.sequenceTerm?(name, at, opts.openVars) { return term }
-      throw Unsupported("indexing")
+      return try mapChildren(e, resolve)
+    case .eqtest:
+      return try mapChildren(e, resolve)
     case .range:
       throw LanguageError(structuralDiagnostic(e))
-    case .eqtest:
-      throw Unsupported("== and != filters")
     case .call(let name, let rawArgs):
       return try resolveCall(name, rawArgs)
     case .eq(let l, let r):
@@ -293,10 +304,10 @@ struct Resolver {
       return .ineq(op, try resolve(l), try resolve(r), grouped: grouped)
     case .vec(let items):
       return .vec(try items.map(resolve))
-    case .list:
-      throw Unsupported("lists")
+    case .list(let items):
+      return try resolveList(items)
     case .str:
-      throw Unsupported("text")
+      return e
     case .data, .text:
       // Packed columns hold nothing to resolve.
       return e
@@ -331,6 +342,8 @@ struct Resolver {
   }
 
   private func resolveCall(_ name: String, _ rawArgs: [Expr]) throws -> Expr {
+    // (A list literal a Σ marked before its terms were written out.)
+    if let marked = try resolveMarkedList(name, rawArgs) { return marked }
     if name == "sum" || name == "prod" {
       if rawArgs.count != 4 {
         throw LanguageError(
@@ -345,7 +358,7 @@ struct Resolver {
     }
     // A reduction of one argument is over a list, or an integral against a measure.
     if rawArgs.count == 1, ["count", "total", "mean", "min", "max", "stdev", "median", "hist"].contains(name) {
-      throw Unsupported("\(name)(…) over a list or a set")
+      return try resolveReduction(name, rawArgs[0])
     }
     if let fn = try getFn(name) {
       let n = fn.params.count
@@ -355,38 +368,18 @@ struct Resolver {
       if fn.recursive { return try resolveRecur(name, n, args) }
       var env: [String: Expr] = [:]
       if args.count == 1, n >= 2, !isNum(args[0]) {
-        // f(P) ≡ f(P_1, …, P_n): one argument that is an n-component point.
-        // A tuple in hand gives up its items; anything else is not known to
-        // be a point until it lowers, so each parameter asks for its
-        // component of the same node (lib/geom.ts settles it).
-        let arg = args[0]
-        if case .vec(let items) = arg {
-          if items.count != n { throw LanguageError(compDims(name, n, arg, items.count)) }
-          for (p, item) in zip(fn.params, items) { env[p] = item }
-        } else {
-          for (k, p) in fn.params.enumerated() { env[p] = .comp(value: arg, index: k, arity: n, functionName: name) }
-        }
-        return substVars(fn.body, env)
+        // f(P) ≡ f(P_1, …, P_n): one argument that is an n-component point,
+        // or a list of them.
+        return try resolvePointCall(name, fn, args[0])
       }
       if args.count != n { throw LanguageError("\(name) takes \(n) argument\(n == 1 ? "" : "s").") }
+      // A body that reduces takes a list argument one member at a time.
+      if let map = try resolveMap(name, fn, args) { return map }
       for (p, arg) in zip(fn.params, args) { env[p] = arg }
       // The coordinates of point parameters the body reads, `p.x`, as the
       // argument's own (`coordParams`).
-      let used = freeVars(fn.body)
-      for (p, arg) in zip(fn.params, args) {
-        for (k, c) in coordNames.enumerated() where used.contains("\(p).\(c)") {
-          if case .var(let argName) = arg, let own = pointCoord("\(argName).\(c)") {
-            env["\(p).\(c)"] = own
-          } else if case .vec(let items) = arg {
-            if k >= items.count { throw LanguageError(compDims(name, 0, arg, items.count)) }
-            env["\(p).\(c)"] = items[k]
-          } else {
-            // (Arity 0: any point that has the coordinate, 2D or 3D alike.)
-            env["\(p).\(c)"] = .comp(value: arg, index: k, arity: 0, functionName: name)
-          }
-        }
-      }
-      let inlined = substVars(fn.body, env)
+      for (key, value) in try coordParams(name, fn.body, Array(zip(fn.params, args))) { env[key] = value }
+      let inlined = substVars(freshLists(fn.body, replacing: Set(env.keys)), env)
       // The body's named conditions, now that its parameters are its
       // arguments and cannot capture their variables.
       return opts.params != nil ? inlined : writeConditions(inlined, namedCondition)
@@ -411,6 +404,7 @@ struct Resolver {
     if name == PAINT_CALL { return .call(name, args) }
     guard
       elementaryFunctions.contains(name) || complexFunctions.contains(name) || geometryFunctions.contains(name)
+        || listFunctions.contains(name)
     else {
       throw Unsupported("\(name)(…)")
     }
@@ -531,7 +525,7 @@ private let takenNames: [String: String] = [
 /// scalings and negations of points are taken component by component.
 func lowerGeom(
   _ e: Expr, comps: @escaping (String) -> [String]?, mats: @escaping GetMat = { _ in nil },
-  tensors: @escaping GetTensor = { _, _ in nil }
+  tensors: @escaping GetTensor = { _, _ in nil }, isList: @escaping (String) -> Bool = { _ in false }
 ) throws -> Expr {
   // `[paint](S, f)`: the surface and the scalar it is coloured by, each lowered.
   if case .call(PAINT_CALL, let args) = e {
@@ -539,42 +533,24 @@ func lowerGeom(
   }
   try refuseUnportedGeometry(e)
   // (A root-level geometry form — segment, polygon, circle, … — desugars first.)
-  return try lowerWithMatrices(e, comps: comps, getMat: mats, getTensor: tensors)
+  return try lowerWithMatrices(e, comps: comps, getMat: mats, getTensor: tensors, isList: isList)
 }
 
-/// A row's (or a definition's) value once points and lists have lowered
-/// (lib/object-lists.ts `lowerObjects`). The port has no lists, so what is
-/// left of list lowering is what it does to every expression: it rebuilds
-/// each node, and a product comes out without the glyph it was written with,
-/// a piecewise without its conditions marked bare.
-func lowerObjects(
+/// A row's figures and points lowered, before its lists are (the geometry
+/// half of lib/object-lists.ts `lowerObjects`, `ordinary`): ObjectLists.swift
+/// lowers the lists, and expands the row over them where this fails.
+func lowerGeomObjects(
   _ e: Expr, comps: @escaping (String) -> [String]?, mats: @escaping GetMat = { _ in nil },
-  tensors: @escaping GetTensor = { _, _ in nil }
+  tensors: @escaping GetTensor = { _, _ in nil }, isList: @escaping (String) -> Bool = { _ in false },
+  notMatrix: @escaping (Expr) -> Bool = { _ in false }
 ) throws -> Expr {
-  let figures = try lowerFigureObjects(e, comps, mats, tensors)
-  let lowered: Expr
+  let figures = try lowerFigureObjects(e, comps, mats, tensors, notMatrix: notMatrix)
   do {
-    lowered = try lowerGeom(figures, comps: comps, mats: mats, tensors: tensors)
-  } catch let error as LanguageError {
-    throw failedLowering(error, figures, comps, mats, withMatrices: false)
+    return try lowerGeom(figures, comps: comps, mats: mats, tensors: tensors, isList: isList)
   } catch let failed as FailedWithMatrices {
-    throw failedLowering(failed.error, figures, comps, mats, withMatrices: true)
-  }
-  // (A tuple of points is a list of them, in order: it waits for lists.)
-  try refuseTuplesOfPoints(lowered)
-  return plainNodes(lowered)
-}
-
-private func plainNodes(_ e: Expr) -> Expr {
-  switch e {
-  case .bin(let op, let a, let b, _):
-    return .bin(op, plainNodes(a), plainNodes(b))
-  case .piecewise(let cases, let otherwise):
-    return .piecewise(
-      cases.map { Expr.Case(cond: plainNodes($0.cond), value: plainNodes($0.value)) },
-      otherwise: otherwise.map(plainNodes))
-  default:
-    return mapChildren(e, plainNodes)
+    // (What the row says; where it reads a matrix as the list of its rows,
+    // the expansion says that is not supported.)
+    throw failed.error
   }
 }
 
@@ -586,9 +562,11 @@ func lowerPoints(_ e: Expr, _ comps: (String) -> [String]?, _ context: GeomConte
   case .num, .str, .data, .text:
     // (Data and text lists hold no geometry: they pass straight through.)
     return .scalar(e)
-  case .index, .range, .eqtest, .list:
-    throw Unsupported("lists")
-  case .figure, .lazy, .trail, .label, .hist, .family:
+  case .list(let items):
+    // Items lower independently; a named point becomes its (A_x, A_y) tuple,
+    // so [A, B] scatters named points like [(1, 2), (3, 4)] does literals.
+    return .scalar(.list(try items.map { try lo($0).expr }))
+  case .index, .range, .eqtest, .figure, .lazy, .trail, .label, .hist, .family:
     // A point among a structural node's children is written out as a tuple.
     return .scalar(
       try mapChildren(e) { n in
@@ -598,6 +576,10 @@ func lowerPoints(_ e: Expr, _ comps: (String) -> [String]?, _ context: GeomConte
         }
       })
   case .comp(let value, let index, let arity, let functionName):
+    // (A list of points waits for list lowering, which reads the coordinate
+    // of every point in it.)
+    if try context.compMatrix(value) { throw Unsupported("a matrix read as a list of its rows") }
+    if let waiting = try waitingComp(e, isList: context.isList, lo) { return .scalar(waiting) }
     return try lowerComp(value, index, arity, functionName, context)
   case .loop(let params, let seeds, let loopBody, let limit):
     return .scalar(try lowerLoop(params, seeds, loopBody, limit, lo))
@@ -653,8 +635,20 @@ func lowerPoints(_ e: Expr, _ comps: (String) -> [String]?, _ context: GeomConte
       }
     }
   case .call(let name, let args):
+    // A list lowered already holds no geometry; a function applied per
+    // member of lists is list lowering's to run.
+    if name == LIST_SEQ { return .scalar(e) }
+    if name == MAP { return .scalar(try lowerMapPoints(args) { try lo($0).expr }) }
     if let geometry = try lowerGeomCall(e, name, args, context) { return geometry }
     let lowered = try args.map(lo)
+    // sort(P, P.x) orders points by a key, and count, total and mean take
+    // any multiset, points included: list lowering does the work, and a
+    // point stays one value there.
+    var pointArg = false
+    if args.count == 1, case .vec = lowered[0] { pointArg = true }
+    if name == "sort" || (pointArg && ["count", "total", "mean"].contains(name)) {
+      return .scalar(.call(name, lowered.map(\.expr)))
+    }
     var flat: [Expr] = []
     for arg in lowered {
       if case .scalar(let a) = arg {

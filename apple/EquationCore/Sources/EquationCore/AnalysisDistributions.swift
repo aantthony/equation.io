@@ -95,6 +95,8 @@ struct DistributionRows {
   let parse: (String) throws -> Expr
   /// Expand point arithmetic (`lowerObjects`).
   let lower: (Expr) throws -> Expr
+  /// Lower a P(…)/E(…) body: its points, then its lists (ObjectLists.swift `lowerBody`).
+  let lowerBody: (Expr) throws -> Expr
   /// The user has defined the name as something `P(…)` could apply.
   let userDefined: (String) -> Bool
 
@@ -155,16 +157,17 @@ struct DistributionRows {
 
   // MARK: P(…) and E(…)
 
-  /// The body of a P(…)/E(…) row, read exactly as a plot row is read, and lowered.
-  private func parseRowBody(_ body: String) throws -> Expr {
+  /// The body of a P(…)/E(…) row, read exactly as a plot row is read, and
+  /// lowered, so `P(X < mean(L))` sees the list two rows above. `==` and
+  /// `!=` are the filter comparisons, which list lowering refuses outside a
+  /// filter — but at the top of a P(…) they are a point event, so there the
+  /// two sides lower on their own (lib/dist.ts `lowerProbBody`).
+  private func parseRowBody(_ body: String, probability: Bool = false) throws -> Expr {
     let resolved = try parse(body)
-    do {
-      return try lower(resolved)
-    } catch is LanguageError {
-      // Port: what geometry refuses stays as written on the site, for list
-      // lowering to read; there is none here to say what it makes of it.
-      throw Unsupported("points in a probability")
+    if probability, case .eqtest(let op, let l, let r) = resolved {
+      return .eqtest(op, try lowerBody(l), try lowerBody(r))
     }
+    return try lowerBody(resolved)
   }
 
   private func checkDeclared(_ names: [String]) throws {
@@ -177,7 +180,7 @@ struct DistributionRows {
   mutating func probabilityRow(_ row: inout RowAnalysis, _ text: String, index: Int) throws -> Bool {
     guard !userDefined("P"), let body = matchProbability(text) else { return false }
     if rvNames.isEmpty { throw LanguageError("Define a random variable first, e.g. X ~ Normal(0, 1).") }
-    let p = try toProbability(try parseRowBody(body), rvNames)
+    let p = try toProbability(try parseRowBody(body, probability: true), rvNames)
     try checkDeclared(p.rvs)
     // Point events only of discrete variables.
     try rvs.checkProbability(p)
