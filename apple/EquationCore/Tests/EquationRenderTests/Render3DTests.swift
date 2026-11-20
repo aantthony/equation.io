@@ -124,6 +124,31 @@ private func difference(_ a: CGImage, _ b: CGImage) -> Double {
     for i in 0..<16 { #expect(abs(product[i] - (i % 5 == 0 ? 1 : 0)) < 1e-3) }
   }
 
+  /// A pan carries the plot with the drag; an orbit stops short of the poles.
+  @Test func theCameraMoves() throws {
+    var cam = Camera3D(target: [1, 2, 3], radius: 9, theta: 0.4, phi: 0.3)
+    let was = cam.target
+    cam.pan(dx: 10, dy: 5)
+    let at = try #require(projectToScreen(cameraMatrices(cam, 4.0 / 3).vp, was, 800, 600))
+    #expect(at.x > 405 && at.y > 302)
+    cam.orbit(dx: 0, dy: 1000)
+    #expect(cam.phi == .pi / 2 - 0.01)
+    cam.zoom(by: 0.5)
+    #expect(cam.radius == 4.5)
+  }
+
+  /// A surface that reads t is drawn again as t moves; one that doesn't, isn't.
+  @Test func timeMovesAnAnimatedSurface() throws {
+    let metal = try #require(MetalContext())
+    let draw = { (field: String, time: Double) in
+      let scene = Scene3D(implicits: [Surface3D(field: field, color: [0.2, 0.4, 0.7])])
+      return metal.image(of: Graph3D(scene: scene, time: time), width: 160, height: 120, dpr: 1, theme: .light)
+    }
+    let wave = "(z - sin(x + t))"
+    #expect(difference(try #require(draw(wave, 0)), try #require(draw(wave, 1.5))) > 0.05)
+    #expect(difference(try #require(draw("(z - sin(x))", 0)), try #require(draw("(z - sin(x))", 1.5))) == 0)
+  }
+
   @Test func programsTranslate() {
     let program = translateProgram(
       vertex: """

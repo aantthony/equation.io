@@ -34,6 +34,36 @@ public struct Camera3D: Equatable, Codable, Sendable {
   }
 }
 
+/// Phi kept short of the poles so "up" never flips (lib/view.ts).
+public func clampPhi(_ phi: Double) -> Double {
+  min(.pi / 2 - 0.01, max(-.pi / 2 + 0.01, phi))
+}
+
+/// How a drag, a pinch and a scroll move the camera (web/main.ts, its
+/// pointer and wheel handlers). Distances are in points, y down.
+extension Camera3D {
+  /// A drag of (dx, dy) turns the camera about its target.
+  public mutating func orbit(dx: Double, dy: Double) {
+    theta -= dx * 0.008
+    phi = clampPhi(phi + dy * 0.008)
+  }
+
+  /// Zoom by `factor`: under 1 moves in.
+  public mutating func zoom(by factor: Double) {
+    radius = min(1e6, max(1e-4, radius * factor))
+  }
+
+  /// Move the view as if the plot were dragged by (dx, dy): the camera's
+  /// target slides in its screen plane.
+  public mutating func pan(dx: Double, dy: Double) {
+    let s = radius * 0.0022
+    let (ct, st) = (cos(theta), sin(theta))
+    let (sp, cp) = (sin(phi), cos(phi))
+    // right = (-sinθ, cosθ, 0); up = (-cosθ·sinφ, -sinθ·sinφ, cosφ)
+    target += SIMD3(st * dx + ct * sp * dy, -ct * dx + st * sp * dy, cp * dy) * s
+  }
+}
+
 public struct Surface3D: Equatable, Codable, Sendable {
   public var uniforms: [String: Double]?
   /// GLSL expression for F(x,y,z) in terms of floats x, y, z.
