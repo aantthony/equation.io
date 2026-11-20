@@ -76,6 +76,22 @@ private func kinds(_ layers: Layers2D) throws -> [(name: String, layers: Layers2
     #expect(try bytes(metal, lines) == lines0)
   }
 
+  /// A mapped axis is gridded at its ticks, in place of the even grid.
+  @Test func mappedAxesAreGriddedAtTheirTicks() throws {
+    let metal = try #require(MetalContext())
+    var mapped = try scene("log-axis-jacobian")
+    mapped.layers = Layers2D()
+    #expect(mapped.frame?.ticks?.x != nil)
+    var even = mapped
+    even.frame?.ticks = nil
+    var none = mapped
+    none.frame?.ticks?.x = AxisTicks()
+    let lines = try bytes(metal, mapped)
+    #expect(lines != (try bytes(metal, even)))
+    #expect(lines != (try bytes(metal, none)))
+    #expect(metal.failures == 0)
+  }
+
   /// A cell texture is uploaded once per shade buffer, and dropped at the
   /// end of the first frame that doesn't draw it.
   @Test func cellTexturesFollowTheirBuffers() throws {

@@ -115,6 +115,9 @@ public struct GridSpec: Equatable, Codable, Sendable {
 public struct Frame2D: Equatable, Codable, Sendable {
   public var vp: Box?
   public var grid: Grid?
+  /// The ticks of the axes the panel's view(…) maps, which are gridded at
+  /// them: the site's `maps`, as `mappedTicks` reads them (Frag2D+Ticks.swift).
+  public var ticks: MappedTicks?
 
   public struct Box: Equatable, Codable, Sendable {
     public var x: Double
@@ -134,9 +137,10 @@ public struct Frame2D: Equatable, Codable, Sendable {
     case on, off, axes
   }
 
-  public init(vp: Box? = nil, grid: Grid? = nil) {
+  public init(vp: Box? = nil, grid: Grid? = nil, ticks: MappedTicks? = nil) {
     self.vp = vp
     self.grid = grid
+    self.ticks = ticks
   }
 }
 
@@ -205,12 +209,30 @@ public final class Renderer2D {
         GridSpec(glsl: "x", gradGlsl: ["1.0", "0.0"], major: spacing.major, minor: spacing.minor),
         GridSpec(glsl: "y", gradGlsl: ["0.0", "1.0"], major: spacingY.major, minor: spacingY.minor),
       ]
+      // A mapped axis is gridded at its ticks below, not evenly here.
+      specs.removeAll { ($0.glsl == "x" && frame.ticks?.x != nil) || ($0.glsl == "y" && frame.ticks?.y != nil) }
     }
     let named = Dictionary(
       specs.enumerated().flatMap { k, s in [("uMajor\(k)", s.major), ("uMinor\(k)", s.minor)] },
       uniquingKeysWith: { a, _ in a })
     metal.draw(encoder, fragment: gridFrag(specs, axesOnly: grid == .axes, theme: theme), frame: uniforms) { name in
       (named[name] ?? Self.param(name, specs.flatMap(\.params), env)).map { [Float($0)] }
+    }
+
+    let mapped = [("x", frame.ticks?.x), ("y", frame.ticks?.y)].compactMap { a, ticks in ticks.map { (a, $0) } }
+    if grid != .off, !mapped.isEmpty {
+      var named: [String: [Float]] = [:]
+      for (a, ticks) in mapped {
+        let major = grid == .axes ? [] : ticks.major.prefix(MAX_MAJOR_TICKS).map { Float($0.at) }
+        let minor = grid == .axes ? [] : ticks.minor.prefix(MAX_MINOR_TICKS).map { Float($0) }
+        named["uMaj\(a)"] = major
+        named["uMin\(a)"] = minor
+        named["uNMaj\(a)"] = [Float(major.count)]
+        named["uNMin\(a)"] = [Float(minor.count)]
+        named["uZero\(a)"] = [Float(ticks.zero ?? 0)]
+        named["uHasZero\(a)"] = [ticks.zero == nil ? 0 : 1]
+      }
+      metal.draw(encoder, fragment: tickFrag(mapped.map(\.0), theme: theme), frame: uniforms) { named[$0] }
     }
 
     func drawProgram(_ frag: String, _ color: RGB, _ params: [String]?, _ extra: [String: Double]? = nil) {
