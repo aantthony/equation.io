@@ -144,7 +144,7 @@ private final class StackBox<T>: @unchecked Sendable {
       #expect(row.cpu == nil && row.gpu == nil && row.error == nil, "\(text)")
     }
     // A name the port cannot read takes the rows that use it with it.
-    let analysis = analyze(["q = count(x^2 + y^2 < 1)", "b = q + 1", "c = 2 b", "y = x"])
+    let analysis = analyze(["s_{n+1} = push(s_n, n)", "b = s_3 + 1", "c = 2 b", "y = x"])
     #expect(analysis.rows.map { $0.unsupported != nil } == [true, true, true, false])
   }
 
