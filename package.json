@@ -26,6 +26,7 @@
     "traffic": "node scripts/traffic.ts",
     "swift:corpus": "vitest run -c apple/corpus/vitest.config.ts --silent && node apple/corpus/build.ts",
     "swift:prelude": "node apple/corpus/prelude.ts",
+    "swift:highlight": "node --experimental-transform-types --no-warnings apple/corpus/highlight.ts",
     "swift:test": "pnpm swift:corpus && swift test --package-path apple/EquationCore",
     "app:web": "vite build -c apple/vite.config.ts",
     "reference": "node --experimental-transform-types --no-warnings scripts/reference.ts",
