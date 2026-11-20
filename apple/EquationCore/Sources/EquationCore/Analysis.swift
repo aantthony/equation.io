@@ -91,6 +91,9 @@ public struct DocumentAnalysis: Equatable, Sendable {
   /// and where each starts (States.swift). `env` has them at their starts.
   public var stateSystem: StateSystem?
   public var initialState: [String: Double] = [:]
+  /// What each name the document defines is bound to (Bindings.swift): a
+  /// scalar constant, a field, a state, a point, a list, a multivector, ….
+  public var bindings: [String: NameBinding] = [:]
   /// The document's own functions (a slider's `clamp` is not one of these).
   var userFns: Set<String>
   /// The document's shadowed names (`shadowedNames`), for a caller's own
@@ -953,8 +956,8 @@ public func analyze(_ sources: [String], files: DataFiles? = nil) -> DocumentAna
   return DocumentAnalysis(
     rows: rows, env: env, animated: animatedConstNames(built), names: boundNames(document),
     random: distributions.rvs, gridFields: inPanels(gridFields, owner: owner, rows: rows),
-    stateSystem: stateSystem, initialState: initial, userFns: userFns, valueNames: valueNames,
-    constNames: built.consts.keys,
+    stateSystem: stateSystem, initialState: initial, bindings: nameBindings(built), userFns: userFns,
+    valueNames: valueNames, constNames: built.consts.keys,
     constExprs: built.consts.entries.map(\.value))
 }
 

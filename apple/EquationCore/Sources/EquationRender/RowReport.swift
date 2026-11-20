@@ -7,10 +7,9 @@ import Foundation
 // evals depend on it, so each sentence is the TypeScript's to the letter; a
 // fixture (apple/corpus/reports.ts) holds this port to it.
 //
-// The analysis says less of a definition than the site's does (what a name
-// is bound to is not public): a definition whose meaning cannot be told from
-// its kind, its slider and its value is reported with its kind and no
-// meaning, never with a guess.
+// A definition is worded by what its name is bound to (the analysis's
+// `bindings`); a name the port holds no binding for (a data table's) is
+// reported with its kind and no meaning, never with a guess.
 
 /// What get_graph says about one row, less what needs the renderer (its
 /// color and intercepts) (`RowReport`).
@@ -110,27 +109,39 @@ extension DocumentAnalysis {
   /// tokenizer splits a run of letters into names (`2ab`), by the names the
   /// highlighter finds in it.
   ///
-  /// Nil when a row the port cannot read is among them: what it reads, or
-  /// whether the site counts it (a framing row is not counted), is not known.
+  /// A row the port cannot read is read by its text alone, which is all the
+  /// second test needs. Nil only when such a row is a framing one (a
+  /// `view(…)` the port leaves alone) that names `name`: the site does not
+  /// count a framing row, and whether it is one there is not known here.
   func usedElsewhere(_ texts: [String], _ index: Int, _ name: String) -> Bool? {
     let others = rows.indices.filter { $0 != index && !rows[$0].comment && rows[$0].view == nil }
     if others.contains(where: { rows[$0].classified?.params.contains(name) == true }) { return true }
-    for k in others where k < texts.count && rows[k].unsupported == nil {
-      let bare = withoutStrings(stripNote(texts[k]))
-      // (Rows write a redefined built-in by its own name, not its alias.)
-      if namesWord(canonicalName(bare), writtenName(name)) { return true }
-      let units = Array(texts[k].utf16)
-      for span in highlightRows([texts[k]], names: names)[0] where span.cls == .name || span.cls == .fn {
-        guard span.start >= 0, span.end <= units.count, span.start < span.end else { continue }
-        let written = canonicalName(String(decoding: units[span.start..<span.end], as: UTF16.self))
-        if written == writtenName(name) { return true }
+    var unknown = false
+    for k in others where k < texts.count {
+      func named() -> Bool {
+        let bare = withoutStrings(stripNote(texts[k]))
+        // (Rows write a redefined built-in by its own name, not its alias.)
+        if namesWord(canonicalName(bare), writtenName(name)) { return true }
+        let units = Array(texts[k].utf16)
+        for span in highlightRows([texts[k]], names: names)[0] where span.cls == .name || span.cls == .fn {
+          guard span.start >= 0, span.end <= units.count, span.start < span.end else { continue }
+          let written = canonicalName(String(decoding: units[span.start..<span.end], as: UTF16.self))
+          if written == writtenName(name) { return true }
+        }
+        return false
+      }
+      guard named() else { continue }
+      if rows[k].unsupported != nil, isFramingRow(texts[k]) {
+        unknown = true
+      } else {
+        return true
       }
     }
-    return others.contains { rows[$0].unsupported != nil } ? nil : false
+    return unknown ? nil : false
   }
 
-  /// What a definition row makes (`definitionMeaning`), where the row's
-  /// kind, slider and value say; nil where they do not.
+  /// What a definition row makes (`definitionMeaning`), by what its name is
+  /// bound to; nil for a name with no binding here.
   func definitionMeaning(_ def: Definition, _ row: RowAnalysis) -> String? {
     let name = def.name
     let quiet = "; draws nothing by itself"
@@ -145,44 +156,48 @@ extension DocumentAnalysis {
       return "fits the model \(lhs) ~ \(rhs) to data, defining its parameters"
     case .table(_, let file, _):
       return "opens the data file \(file) as the table \(name)"
-    case .state:
-      let states = stateSystem?.names ?? []
-      if states.contains(name) {
-        return "defines \(name): a scalar state, integrated forward in time from its derivative\(quiet)"
-      }
-      // A vector state is integrated as its components, name_1, name_2, ….
-      let dim = (1...4).prefix { states.contains("\(name)_\($0)") }.count
-      guard dim >= 2 else { return nil }
+    case .state, .constant:
+      break
+    }
+    // A name whose file is elsewhere, and a cut of a table (a table all the same).
+    if row.kind == "definition (filtered data)" { return "defines \(name): a data table\(quiet)" }
+    if row.dataLocal != nil { return "defines \(name) from a data file that is not on this device" }
+    // (A name the port holds no binding for is reported by its kind alone.)
+    guard let binding = bindings[name] else { return nil }
+    switch binding {
+    case .scalar(.state):
+      return "defines \(name): a scalar state, integrated forward in time from its derivative\(quiet)"
+    case .scalar(.complex):
+      return "defines \(name): a complex number\(quiet)"
+    case .scalar(.condition):
+      return "defines \(name): a condition, read in braces like {\(name): 1}\(quiet)"
+    case .scalar(.field):
+      return "defines \(name): a scalar field (a value at every point, e.g. a coordinate like r or theta)\(quiet)"
+    case .scalar(.constant):
+      if row.slider != nil { return "defines \(name): a scalar constant with a slider\(quiet)" }
+      let moves = animated.contains(name) ? " that changes with time (t)" : ""
+      return "defines \(name): a scalar constant\(moves)\(quiet)"
+    case .vector(.state, let dim, _):
       return "defines \(name): a \(dim)D vector state, integrated forward in time from its derivative\(quiet); "
         + "a row \"\(name)\" draws it as a moving point"
-    case .constant:
-      // (A name whose file is elsewhere; a cut of one is a table all the same.)
-      if row.dataLocal != nil, row.kind != "definition (filtered data)" {
-        return "defines \(name) from a data file that is not on this device"
-      }
-      switch row.kind {
-      case "definition (matrix)": return "defines \(name): a matrix\(quiet)"
-      case "definition (list)": return "defines \(name): a list\(quiet)"
-      case "definition (filtered data)": return "defines \(name): a data table\(quiet)"
-      case "definition (interval)":
-        return "defines \(name): a continuous interval, one hidden parameter shared by every row that uses "
-          + "\(name)\(quiet)"
-      case "definition (point)":
-        // (A field `F = (-y, x)` has this kind too, and no place of its own.)
-        guard env["\(name)_x"] != nil, env["\(name)_y"] != nil else { return nil }
-        return "defines \(name): a named \(env["\(name)_z"] == nil ? 2 : 3)D point, drawn on the graph"
-      case "definition (const)":
-        if gridFields.contains(where: { $0.name == name }) {
-          return "defines \(name): a scalar field (a value at every point, e.g. a coordinate like r or theta)\(quiet)"
-        }
-        if row.slider != nil { return "defines \(name): a scalar constant with a slider\(quiet)" }
-        // A name with a value of its own is a number; a field, a complex
-        // number or a condition has none here.
-        guard env[name] != nil, stateSystem?.names.contains(name) != true else { return nil }
-        let moves = animated.contains(name) ? " that changes with time (t)" : ""
-        return "defines \(name): a scalar constant\(moves)\(quiet)"
-      default: return nil
-      }
+    case .vector(.field, let dim, _):
+      return "defines \(name): a \(dim)D vector field\(quiet)"
+    case .vector(_, let dim, let point):
+      return point
+        ? "defines \(name): a named \(dim)D point, drawn on the graph" : "defines \(name): a \(dim)D vector\(quiet)"
+    case .function:
+      return "defines the function \(name)\(quiet)"
+    case .matrix:
+      return "defines \(name): a matrix\(quiet)"
+    case .tensor(let shape):
+      return "defines \(name): a \(shape.map(String.init).joined(separator: "×")) tensor\(quiet)"
+    case .list:
+      return "defines \(name): a list\(quiet)"
+    case .multivector(let quaternion):
+      return "defines \(name): a \(quaternion ? "quaternion" : "multivector")\(quiet)"
+    case .interval:
+      return "defines \(name): a continuous interval, one hidden parameter shared by every row that uses "
+        + "\(name)\(quiet)"
     }
   }
 

@@ -53,6 +53,8 @@ private final class StackBox<T>: @unchecked Sendable {
       // A document with data files: read on the device that has them, or as a link elsewhere.
       let files = try (doc["files"] as? [[String: Any]]).map(dataFiles)
       let link = doc["link"] as? Bool == true
+      // ANALYSIS_TRACE=1 names each document before it is read: the last is the one that crashed.
+      if ProcessInfo.processInfo.environment["ANALYSIS_TRACE"] != nil { print("reading \(name)") }
       let analysis = onMainStack { analyze(rows, files: link ? nil : files) }
       #expect(analysis.rows.count == rows.count)
       var whole = true

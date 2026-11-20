@@ -80,6 +80,7 @@ private final class StackBox<T>: @unchecked Sendable {
           analysis.usedElsewhere(texts, k, row.definition?.name ?? "") == nil
         {
           unwarned += 1
+          skipped.append("\(document["name"]!): \(texts[k]): \(theirs["warning"]!)")
           theirs["warning"] = nil
         }
         if mine != theirs {
