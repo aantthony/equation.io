@@ -143,8 +143,8 @@ extension DocumentAnalysis {
         + "draws nothing until another row uses it\(example)"
     case .regression(_, let lhs, let rhs):
       return "fits the model \(lhs) ~ \(rhs) to data, defining its parameters"
-    case .table:
-      return nil
+    case .table(_, let file, _):
+      return "opens the data file \(file) as the table \(name)"
     case .state:
       let states = stateSystem?.names ?? []
       if states.contains(name) {
@@ -156,6 +156,10 @@ extension DocumentAnalysis {
       return "defines \(name): a \(dim)D vector state, integrated forward in time from its derivative\(quiet); "
         + "a row \"\(name)\" draws it as a moving point"
     case .constant:
+      // (A name whose file is elsewhere; a cut of one is a table all the same.)
+      if row.dataLocal != nil, row.kind != "definition (filtered data)" {
+        return "defines \(name) from a data file that is not on this device"
+      }
       switch row.kind {
       case "definition (matrix)": return "defines \(name): a matrix\(quiet)"
       case "definition (list)": return "defines \(name): a list\(quiet)"

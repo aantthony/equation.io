@@ -68,6 +68,9 @@ const CASES: string[] = [
   'e := 0.6; pi := 3; i := 2 + e; t := 1; w := x - y',
   'f(e) := e^2; f(3); g(t) := t + 1',
   'e := (1, 2); e; x := 3; e(x) := x',
+  // Data files, as a link read off the device has them: named, and not here.
+  'person = open("people.csv", 0123456789ab); (person.age, person.height); ages = person.age / 2; ages',
+  'p = open("people.csv"); adults = p[p.age > 2]; mean(adults.age); avg = mean(p.age); y = avg x; p; q = open("a.csv", 12)',
 ];
 
 const docs = [
