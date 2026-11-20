@@ -55,14 +55,18 @@ func compareStates(_ analysis: DocumentAnalysis, _ wanted: [String: Any]?) -> [S
       }
       let count = (want["count"] as! NSNumber).intValue
       let step = (want["step"] as! NSNumber).intValue
-      if pts.count != count * 2 {
-        out.append("row \(index + 1): orbit of \(pts.count / 2) points, want \(count)")
+      // (Two numbers a point, or three for an orbit in space.)
+      let points = want["points"] as! [[Any]]
+      let dim = points.first?.count ?? 2
+      if pts.count != count * dim {
+        out.append("row \(index + 1): orbit of \(pts.count / dim) points, want \(count)")
         continue
       }
-      for (k, point) in (want["points"] as! [[Any]]).enumerated() {
+      for (k, point) in points.enumerated() {
         let at = k * step
-        if !near(pts[2 * at], number(point[0])) || !near(pts[2 * at + 1], number(point[1])) {
-          out.append("row \(index + 1): orbit point \(at) is (\(pts[2 * at]), \(pts[2 * at + 1])), want \(point)")
+        let mine = Array(pts[(dim * at)..<(dim * at + dim)])
+        if !zip(mine, point.map(number)).allSatisfy({ near($0, $1) }) {
+          out.append("row \(index + 1): orbit point \(at) is \(mine), want \(point)")
           break
         }
       }

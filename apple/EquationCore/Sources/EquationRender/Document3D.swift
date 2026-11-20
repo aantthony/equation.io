@@ -75,6 +75,9 @@ public struct Document3D: Equatable, Sendable {
 
   /// What was traced on the CPU, kept between frames.
   private let traces = TraceCache()
+  /// Each orbit row's path in space (`p(0..50)`), integrated when the graph
+  /// is made: x, y, z flat, each run ended by a NaN point.
+  public var orbits: [Int: [Double]] = [:]
 
   /// Samples along a parametric curve (lib/path.ts `CURVE_SAMPLES`).
   static let curveSamples = 400
@@ -100,6 +103,9 @@ public struct Document3D: Equatable, Sendable {
     }
     if let spin, spin != 0 { animated = true }
     surface = SurfaceMesh(analysis)
+    // A state system is never at rest.
+    if analysis.stateSystem != nil { animated = true }
+    orbits = Graph2D.orbits(analysis).paths
   }
 
   /// The constants' values `time` seconds after the graph opened: what the uniforms read.
@@ -109,12 +115,13 @@ public struct Document3D: Equatable, Sendable {
 
   /// The frame written down, for a picture of it (`MetalContext.image`):
   /// from `camera`, or else the opening camera turned by its spin.
-  public func graph(at time: Double, camera: Camera3D? = nil) -> Graph3D {
+  /// `run` has the states where the frame finds them (`StateStepper`).
+  public func graph(at time: Double, camera: Camera3D? = nil, run: StateStepper? = nil) -> Graph3D {
     var cam = camera ?? self.camera
     if camera == nil, let spin { cam.theta += spin * time }
     return Graph3D(
-      scene: scene(at: time, camera: cam), camera: cam, env: environment(at: time), frame: Frame2D(grid: grid),
-      time: time)
+      scene: scene(at: time, camera: cam, run: run), camera: cam,
+      env: run?.environment(at: time) ?? environment(at: time), frame: Frame2D(grid: grid), time: time)
   }
 
   /// Everything the rows draw at a time, seen from `camera`. `run` has the
@@ -208,6 +215,21 @@ public struct Document3D: Equatable, Sendable {
       guard case .psurface(let glsl, let du, let dv, _)? = row.gpu?.shader else { break }
       scene.psurfaces.append(
         Scene3D.PSurface(uniforms: uniforms, comps: glsl, du: du, dv: dv, color: color, params: params))
+    case .orbit(let dim, _, _, _, _):
+      // Where states go, integrated ahead of time: each finite run a curve
+      // (one in the plane, or a series against t, lies in z = 0).
+      var path: [Float] = []
+      for p in stride(from: 0, to: (orbits[index]?.count ?? 0) - dim + 1, by: dim) {
+        let point = orbits[index]![p..<(p + dim)]
+        if point.allSatisfy(\.isFinite) {
+          path += point.map { Float($0) }
+          if dim == 2 { path.append(0) }
+        } else {
+          if path.count >= 6 { scene.curves.append(Scene3D.Curve(pts: path, color: color)) }
+          path = []
+        }
+      }
+      if path.count >= 6 { scene.curves.append(Scene3D.Curve(pts: path, color: color)) }
     case .pcurve(_, let comps, _, _, _):
       // (A curve in the plane lies in z = 0.)
       scene.curves.append(Scene3D.Curve(pts: Self.sample(comps, env), color: color))

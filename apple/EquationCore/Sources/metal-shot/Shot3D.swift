@@ -50,5 +50,8 @@ func spaceGraph(_ rows: [String], theme: GraphTheme, time: Double, explain: Bool
     }
     print("in space, \(document.animated ? "moves with t" : "still"), camera \(document.camera)")
   }
-  return document.graph(at: time)
+  // The states where a viewer watching since t = 0 would find them.
+  var run = StateStepper(analysis)
+  run.play(to: time)
+  return document.graph(at: time, run: analysis.stateSystem == nil ? nil : run)
 }
