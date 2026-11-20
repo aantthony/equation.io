@@ -357,7 +357,8 @@ func classifyMapped(
 /// - `substitute`: drawn per pixel from x and y (graphs, implicit curves,
 ///   regions, fields), so the row is rewritten by `mapRowExpr` and the shader
 ///   sees screen coordinates;
-/// - `place`: it puts things at positions (points, parametric curves), so it
+/// - `place`: it puts things at positions (points, parametric curves,
+///   figures, labels, trails), so it
 ///   is computed in x and y as anywhere else and each position it produces
 ///   is carried to the screen by the inverse (EquationRender `mapOverlay`);
 /// - `none`: nothing drawn, or drawn by its own rule (a value, a note);
@@ -371,9 +372,10 @@ public enum AxisMapping: Sendable {
 /// (nil), rather than drawn in the wrong place.
 public func axisMapping(_ object: MathObject) -> AxisMapping? {
   switch object {
-  case .value, .note: return AxisMapping.none
+  case .value, .note, .tuple: return AxisMapping.none
   case .curveGraph, .curveImplicit, .region, .scalarField: return .substitute
-  case .curveParametric, .point, .trail: return .place
+  case .curveParametric, .point, .trail, .label: return .place
+  case .figure(_, let dimension, _, _): return dimension == 2 ? .place : .refused
   // Rewritten with the map's slope (`mapRowExpr`): a 2D flow only.
   case .vectorField(let components): return components.count == 2 ? .substitute : .refused
   default: return nil

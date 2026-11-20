@@ -152,9 +152,7 @@ private func describe(_ spans: [HighlightSpan], _ row: String) -> String {
   /// row `scanBoundNames` lists. The examples that differ are named here,
   /// so one that starts or stops differing is noticed.
   @Test func namesFromTheDefinitionsColorTheDocuments() {
-    // om' = solve(M, f) is a vector state by what solve returns, and states are not ported: om_1 and om_2
-    // need the definitions.
-    let known: Set<String> = ["simulations (↻ to restart): double pendulum"]
+    let known: Set<String> = []
     let examples = fixture.documents.filter { $0.colors != nil && !$0.name.hasPrefix("edge") }
     let result = differing(examples) { highlightRows($0.rows) }
     #expect(result.rows > 1000)

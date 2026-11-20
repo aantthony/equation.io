@@ -97,6 +97,8 @@ export const PANEL_CASES: string[] = [
   'view(x = 10^X); k = 2; x^2 + y^2 = k; k = x y; y = d/dx x^3; y = {x > 10: 1, 0}; f(x) = x^2; y = f(x); f(y) = x',
   'y = x^2; ---; view(x = 1..100, x = 10^X); y = x^2; ---; y = x^2',
   'view(x = 10^X); z = x y; (1, 2, 3); x^2 + y^2 + z^2 = 1',
+  'view(x = 1..100, x = 10^X); segment((1, 1), (10, 2)); label((10, 1), "ten"); polygon((1, 0), (10, 0), (10, 1))',
+  'view(y = 10^Y); A = (1, 10); B = (3, 100); segment(A, B); vector(A, B); (1, 2, 3, 4); circle(A, 2); A + B',
   // Coordinate grids: the fields that grid a panel, and grid(…) naming them.
   'r = sqrt(x^2 + y^2); theta = atan2(y, x); r = 2; theta = pi/4',
   'a = 2; r = sqrt(x^2 + y^2)/a; th = atan(y, x) + t; s = x + z; q = u^2; k = floor(x); A = (x, y); y = r',
