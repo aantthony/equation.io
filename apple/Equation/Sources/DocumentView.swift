@@ -28,7 +28,7 @@ struct DocumentView: View {
     #if os(iOS)
       if sizeClass == .compact {
         StackedLayout {
-          GraphView(document: $document, model: model)
+          GraphSurface(document: $document, model: model)
         } header: {
           Text(title).font(.headline).lineLimit(1)
           Spacer()
@@ -115,7 +115,7 @@ struct DocumentView: View {
       // zoom use the graph you can see; the system mirrors and blurs its edge
       // under the sidebar's glass. Top and bottom still run to the edges.
       ZStack(alignment: .bottom) {
-        GraphView(document: $document, model: model)
+        GraphSurface(document: $document, model: model)
           .backgroundExtensionEffect()
           .ignoresSafeArea(edges: .vertical)
         ChatOverlay(chat: chat, focusRequest: askFocus)

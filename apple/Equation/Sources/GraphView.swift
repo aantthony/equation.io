@@ -10,6 +10,8 @@ final class GraphModel {
   /// Counts the renderer's reports, so a change can wait for its verdict.
   @ObservationIgnored private(set) var statusReports = 0
   fileprivate weak var bridge: GraphBridge?
+  /// The Metal view, while it is the one drawing the graph (MetalGraphView.swift).
+  @ObservationIgnored weak var metal: MetalCanvas?
 
   func setSlider(row index: Int, to value: Double) {
     bridge?.call("window.equationApp.setSlider(index, value)", ["index": index, "value": value])
@@ -17,6 +19,10 @@ final class GraphModel {
 
   /// Glide the zoom about the graph's center: below 1 zooms in, above 1 out.
   func zoom(by factor: Double) {
+    if let metal {
+      metal.glideZoom(by: factor)
+      return
+    }
     bridge?.call("window.equationApp.zoom(factor)", ["factor": factor])
   }
 

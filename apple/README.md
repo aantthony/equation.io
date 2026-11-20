@@ -33,6 +33,21 @@ Swift calls `window.equationApp` (`loadRows`, `editRows`, `setSlider`,
 a dragged point) and `status` (each row's color, error, readout and slider) to
 the `equation` message handler. See `web/native-app.ts`.
 
+## The Metal renderer
+
+The renderer is being rewritten in Metal, a kind of graph at a time
+(`Equation/Sources/MetalRenderer.swift`, from `web/render2d.ts`; the fields
+it draws are compiled by `EquationCore/Sources/EquationCore/Shader.swift`,
+from `lib/glsl.ts`). It is off unless View ▸ Draw with Metal is ticked, or
+the app is launched with `EQUATION_RENDERER=metal`.
+
+So far it draws the grid, the axis numbers and implicit curves: `l = r` in x
+and y (and t), over arithmetic, the elementary functions and piecewise. A
+document with any other row (a slider's constant, a definition, a surface, a
+point, an inequality, …) is drawn by the web renderer as before. The web view
+stays loaded under the Metal view either way: it still reports each row's
+color, errors and highlighting, and answers Ask's tools.
+
 ## Core conformance
 
 ```sh
