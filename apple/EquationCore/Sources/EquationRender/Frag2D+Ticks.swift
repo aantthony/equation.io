@@ -1,3 +1,4 @@
+import EquationCore
 import Foundation
 
 // The grid lines of mapped axes: web/render2d.ts's tickFrag. The site's GLSL text, copied.

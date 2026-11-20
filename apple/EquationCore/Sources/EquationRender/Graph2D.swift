@@ -16,8 +16,17 @@ public struct Graph2D: Equatable, Sendable {
   public var layers = Layers2D()
   /// How much of the grid is drawn (a `grid(…)` row).
   public var grid: Frame2D.Grid = .on
+  /// The coordinates a `grid(r, theta)` row names (Graph2D+Grid.swift).
+  public var gridCoords: [String]?
   /// The window a `view(…)` row asks for.
   public var window: Window?
+  /// The axis maps of the panel's view(…) row (`view(x = 10^X)`): the window
+  /// is then the screen's, and what a row places is carried there (Graph2D+Maps.swift).
+  public var maps: AxisMaps?
+  /// Each orbit row's polyline (`p(0..50)`), integrated when the graph is
+  /// made, and the error of one that cannot be (Graph2D+States.swift).
+  public var orbits: [Int: [Double]] = [:]
+  public var orbitErrors: [Int: String] = [:]
   /// Something moves with t, so the graph redraws every frame.
   public var animated = false
   /// The sequence rows that plot their partial sums S_N = Σ a_n instead of
@@ -57,9 +66,13 @@ public struct Graph2D: Equatable, Sendable {
     for (index, row) in analysis.rows.enumerated() {
       switch row.view {
       case .grid(let mode)?: grid = Frame2D.Grid(rawValue: mode) ?? .on
+      case .gridCoords(let names)?: gridCoords = names
       case .view(let x, let y, let ratio, _)?:
         window = Window(x: x, y: y, ratio: ratio)
         if error(row) == nil, written == nil { written = row.viewAxes }
+      case .mappedView(let x, let y, let ratio, _, let mapped)?:
+        window = Window(x: x, y: y, ratio: ratio)
+        maps = mapped
       default: break
       }
       if row.classified?.animated == true { animated = true }
@@ -95,7 +108,9 @@ public struct Graph2D: Equatable, Sendable {
       }
     }
     // A vector field's streamlines flow whether or not it reads t.
-    if !vfields.isEmpty { animated = true }
+    // A state system is never at rest.
+    if !vfields.isEmpty || gridAnimated || analysis.stateSystem != nil { animated = true }
+    (orbits, orbitErrors) = Self.orbits(analysis)
     layers = Layers2D(vfields: vfields, ineqs: ineqs, scalars: scalars, curves: curves)
     complexLayers.write(to: &layers)
     if !tfields.isEmpty { layers.tfields = tfields }
@@ -120,19 +135,24 @@ public struct Graph2D: Equatable, Sendable {
   /// most: a sequence's first 4000 terms, one dot each as the site draws them
   /// in any window narrower; and a law whole. `pointsPerUnit` is how far
   /// apart whole numbers stand on screen, which says whether stems have room
-  /// for their dots.
+  /// for their dots. `run` has the states where the frame finds them
+  /// (Graph2D+States.swift).
   public func overlay(
-    at time: Double, bounds: Bounds? = nil, theme: GraphTheme = .light, pointsPerUnit: Double? = nil
+    at time: Double, bounds: Bounds? = nil, theme: GraphTheme = .light, pointsPerUnit: Double? = nil,
+    run: StateStepper? = nil
   ) -> Overlay2D {
     let window = bounds
     let bounds = bounds ?? Bounds(xmin: -4000, xmax: 3999, ymin: -4000, ymax: 4000)
-    var env = environment(at: time)
+    var env = environment(at: time, run: run)
     env["t"] = time
     var overlay = Overlay2D()
     for (index, row) in analysis.rows.enumerated() {
       guard row.error == nil, row.unsupported == nil, index < colors.count, let color = colors[index]
       else { continue }
       let css = CSSColor(color)
+      // A mapped panel carries what the row places to its screen.
+      let mark = markOverlay(overlay)
+      defer { carry(&overlay, row, since: mark) }
       // A named point (`A = (1, 2)`) has no plan of its own: its components
       // are the constants A_x and A_y, and it is drawn with its name.
       if row.cpu == nil, let name = row.definition?.name, let x = env["\(name)_x"], let y = env["\(name)_y"],
@@ -170,6 +190,16 @@ public struct Graph2D: Equatable, Sendable {
       case .density, .pmf, .prob, .expect:
         drawDistribution(
           cpu, row: index, color: color, env: env, window: window, pointsPerUnit: pointsPerUnit, into: &overlay)
+      case .orbit:
+        if let pts = orbits[index] { overlay.polylines.append(.init(pts: pts, color: css)) }
+      case .trail(2, let coords):
+        // Where the point has been, as the run saw it, and where it is now.
+        if let trail = run?.trails[index] {
+          overlay.polylines.append(.init(pts: trail.coordinates, color: css))
+          if let p = trail.head { overlay.points.append(.init(x: p[0], y: p[1], color: css)) }
+        } else if let x = try? evaluate(coords[0], env), let y = try? evaluate(coords[1], env), x.isFinite, y.isFinite {
+          overlay.points.append(.init(x: x, y: y, color: css))
+        }
       default:
         break
       }
@@ -210,18 +240,23 @@ public struct Graph2D: Equatable, Sendable {
   public var frame: Frame2D { Frame2D(grid: grid, lattice: lattice == nil ? nil : true) }
 
   /// The frame written down, for a picture of it (`MetalContext.image`).
+  /// `view` is the window to draw (the opening one without): a panel's, as
+  /// its drawer has moved it. `run` has the states where the frame finds them.
   public func scene(
-    at time: Double, width: Double, height: Double, dpr: Double = 1, theme: GraphTheme = .light
+    at time: Double, width: Double, height: Double, dpr: Double = 1, theme: GraphTheme = .light,
+    view: View2D? = nil, run: StateStepper? = nil
   ) -> Scene2D {
-    var scene = Scene2D(layers: layers, env: environment(at: time), frame: frame, time: time)
-    let view = opening(width: width, height: height, dpr: dpr)
+    var scene = Scene2D(layers: layers, env: environment(at: time, run: run), frame: frame, time: time)
+    let view = view ?? opening(width: width, height: height, dpr: dpr)
     scene.view = view
     let drawn = cells(at: time, view: view, width: width, height: height, dpr: dpr)
     if !drawn.cells.isEmpty { scene.layers.cells = drawn.cells }
     scene.lattice = drawn.labels
     scene.overlay = overlay(
       at: time, bounds: Bounds(view: view, width: width, height: height), theme: theme,
-      pointsPerUnit: 1 / (view.upp * dpr))
+      pointsPerUnit: 1 / (view.upp * dpr), run: run)
+    scene.gridSpecs = gridSpecs(at: time, view: view, width: width, height: height)
+    scene.maps = maps
     return scene
   }
 }

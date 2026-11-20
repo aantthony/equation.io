@@ -7,8 +7,8 @@
 /// grammar; the pieces between top-level commas are ordinary scalar
 /// expressions, so `pi` and defined constants work.
 ///
-/// Not ported: a view that maps its axes (`x = 10^X`, `(x, y) = …`), a
-/// lattice view's index axes, `on(…)` surfaces, and `grid(r, theta)`.
+/// Not ported: a view that maps both axes at once (`(x, y) = …`), a
+/// lattice view's index axes, and `on(…)` surfaces.
 public enum ViewSpec: Equatable, Sendable {
   /// [lo, hi] of each axis given (at least one is); `ratio` is pixels per y
   /// unit over pixels per x unit; `locked` pins the window.
@@ -18,6 +18,10 @@ public enum ViewSpec: Equatable, Sendable {
   /// range across and y the range down negated, since row n + 1 sits below
   /// row n.
   case view(x: [Double]?, y: [Double]?, ratio: Double?, locked: Bool)
+  /// A view that maps an axis, `view(x = 1..1000, x = 10^X)`: x is 10^X, X
+  /// the panel's linear screen coordinate (AxisMap.swift). Here x and y hold
+  /// the window in screen units — the row writes it in x units.
+  case mappedView(x: [Double]?, y: [Double]?, ratio: Double?, locked: Bool, maps: AxisMaps)
   /// Orbit angles in radians; `spin` in radians per second.
   case camera(theta: Double, phi: Double, radius: Double?, target: [Double]?, spin: Double?, locked: Bool)
   /// A `---` divider: where the new panel goes (`place` nil splits along the
@@ -25,13 +29,16 @@ public enum ViewSpec: Equatable, Sendable {
   case split(place: String?, corner: String?, size: Double?, sharedX: Bool, sharedY: Bool)
   /// `grid(off)`, `grid(axes)`, `grid(on)`.
   case grid(mode: String)
+  /// `grid(r, theta)`: exactly those coordinates' level sets (Grid.swift);
+  /// `grid(x, y)` the Cartesian grid even where coordinate fields are defined.
+  case gridCoords([String])
 
   public var kind: String {
     switch self {
-    case .view: "view"
+    case .view, .mappedView: "view"
     case .camera: "camera"
     case .split: "split"
-    case .grid: "grid"
+    case .grid, .gridCoords: "grid"
     }
   }
 }
@@ -280,15 +287,21 @@ private func mentionsWord(_ text: String, _ word: String) -> Bool {
 /// Parse a viewport row. Returns nil when the text is not one (so ordinary
 /// rows fall through to the expression parser); throws a row-friendly error
 /// when it is one but malformed. `env` supplies constant values at t = 0.
-func parseViewRow(_ text: String, _ env: [String: Double]) throws -> ViewSpec? {
+func parseViewRow(
+  _ text: String, _ env: [String: Double], documentNames: Set<String> = []
+) throws -> ViewSpec? {
   var axes: [String]?
-  return try parseViewRow(text, env, latticeAxes: &axes)
+  return try parseViewRow(text, env, documentNames: documentNames, latticeAxes: &axes)
 }
 
 /// `latticeAxes` comes back as the index axes a lattice view names, [across,
 /// down] as written (the second empty when it names only one): the site's
 /// `View2DSpec.axes`.
-func parseViewRow(_ text: String, _ env: [String: Double], latticeAxes: inout [String]?) throws -> ViewSpec? {
+/// `documentNames` are the names the document defines, which a map's bare
+/// function name may be one of.
+func parseViewRow(
+  _ text: String, _ env: [String: Double], documentNames: Set<String> = [], latticeAxes: inout [String]?
+) throws -> ViewSpec? {
   if let split = try parseDividerRow(text) { return split }
   if let body = wholeCallBody(text, "grid") {
     let args = body.split(separator: ",", omittingEmptySubsequences: false).map { jsTrimmed(String($0)) }
@@ -300,7 +313,7 @@ func parseViewRow(_ text: String, _ env: [String: Double], latticeAxes: inout [S
     if args.count == 1, ["off", "none", "axes", "on"].contains(word) {
       return .grid(mode: word == "none" ? "off" : word)
     }
-    throw Unsupported("a grid of named coordinates")
+    return .gridCoords(try parseGridCoords(args))
   }
   let head: String
   let inner: String
@@ -325,6 +338,7 @@ func parseViewRow(_ text: String, _ env: [String: Double], latticeAxes: inout [S
     var y: [Double]?
     var ratio: Double?
     var lattice: [(axis: String, range: [Double])] = []
+    var maps = AxisMaps()
     for arg in args {
       // `(x, y) = (Y cos X, Y sin X)`: both coordinates from the screen at once.
       var plane = RowScanner(arg)
@@ -338,7 +352,7 @@ func parseViewRow(_ text: String, _ env: [String: Double], latticeAxes: inout [S
               plane.space()
               if plane.eat(")") {
                 plane.space()
-                if plane.eat("=") { throw Unsupported("a view that maps its axes") }
+                if plane.eat("=") { throw Unsupported("a view that maps (x, y) together") }
               }
             }
           }
@@ -355,8 +369,11 @@ func parseViewRow(_ text: String, _ env: [String: Double], latticeAxes: inout [S
       }
       let range = splitRange(named.value)
       // `x = 10^X`: no range, and the screen's X, so a map from the screen to x.
-      if range == nil, axis == "x" || axis == "y", mentionsWord(named.value, axis.uppercased()) {
-        throw Unsupported("a view that maps its axes")
+      if range == nil, let mapped = AxisMap.Axis(rawValue: axis), mentionsWord(named.value, mapped.screen) {
+        if maps[mapped] != nil { throw LanguageError("view(...) maps \(axis) twice.") }
+        let map = try parseAxisMap(mapped, named.value, env: env, documentNames: documentNames)
+        if mapped == .x { maps.x = map } else { maps.y = map }
+        continue
       }
       if (axis == "x" ? x : axis == "y" ? y : nil) != nil || lattice.contains(where: { $0.axis == axis }) {
         throw LanguageError("view(...) sets \(axis) twice.")
@@ -386,6 +403,20 @@ func parseViewRow(_ text: String, _ env: [String: Double], latticeAxes: inout [S
         x = lattice[0].range
         y = [-lattice[1].range[1], -lattice[1].range[0]]
       }
+    }
+    if maps.x != nil || maps.y != nil {
+      if !lattice.isEmpty { throw LanguageError("A lattice view cannot map its axes.") }
+      if let map = maps.x, let range = x { x = try windowToScreen(map, range[0], range[1]) }
+      if let map = maps.y, let range = y { y = try windowToScreen(map, range[0], range[1]) }
+      // A map alone frames its axis around the screen's origin, when it can.
+      if x == nil && y == nil, let map = maps.x ?? maps.y {
+        let axis = map.axis.rawValue
+        if !screenWindowOk(map, -5, 5) {
+          throw LanguageError("Give \(axis) a range that \(axis) = \(map.text) can show, like \(axis) = 1..10.")
+        }
+        if map.axis == .x { x = [-5, 5] } else { y = [-5, 5] }
+      }
+      return .mappedView(x: x, y: y, ratio: ratio, locked: locked, maps: maps)
     }
     if x == nil && y == nil { throw LanguageError(usage) }
     return .view(x: x, y: y, ratio: ratio, locked: locked)

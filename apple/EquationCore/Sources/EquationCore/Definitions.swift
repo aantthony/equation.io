@@ -12,9 +12,9 @@
 /// - `a = e^(i pi/3)` names a complex number, written in where it is read.
 /// - `M = ((1, 2), (3, 4))` names a matrix, expanded where it is used.
 ///
-/// States (`a' = …`), data files, lists, intervals and multivectors are not
-/// ported: their rows are reported as not supported yet, and so is every row
-/// that names one.
+/// Data files, lists, intervals and multivectors are not ported (states are
+/// in States.swift): their rows are reported as not supported yet, and so is
+/// every row that names one.
 public enum Definition: Equatable, Sendable {
   /// `draw`: `p ∈ A`, a binder over A's members.
   case constant(name: String, rhs: String, draw: Bool = false)
@@ -456,6 +456,10 @@ struct BuiltDefs {
   var unsupported: [String: String] = [:]
   /// The constants a definition's Σ/Π bounds read (`sumBoundConsts`).
   var sumBoundConsts: Set<String> = []
+  /// Scalar states by name, a vector state's components among them (States.swift).
+  var states = OrderedMap<StateDef>()
+  /// Vector states and how many components each has.
+  var vecStates: [String: Int] = [:]
 }
 
 private let positionVars: Set<String> = ["x", "y", "z", "w"]
@@ -487,15 +491,20 @@ func buildDefs(_ raw: [Definition], skip: Set<String>, sequences: [SeqScan] = []
   var known = Set(raw.map(\.name))
   // The sequences index too: b_[n+1].
   let seqIndexNames = Set(seq.sequences.keys.map { $0 + "_" })
+  // States (States.swift): their derivatives and starting values as they resolve.
+  var states = StateDraft()
+  states.names = Set(raw.compactMap { if case .state(let name, _) = $0 { name } else { nil } })
 
   func comps(_ name: String) -> [String]? {
-    defs.points.contains(name) ? pointComps(name, defs.pointDims[name] ?? 2) : nil
+    defs.points.contains(name)
+      ? pointComps(name, defs.pointDims[name] ?? 2) : defs.vecStates[name].map { vecStateComps(name, $0) }
   }
   func options() -> ResolveOpts {
     var opts = ResolveOpts()
     opts.inDefinition = true
     // Live: definitions above this one (a point's components included).
-    opts.definition = { defs.conditions[$0] ?? defs.consts[$0] }
+    // A state stands for itself: defined, and constant across space.
+    opts.definition = { defs.conditions[$0] ?? defs.consts[$0] ?? (states.names.contains($0) ? .var($0) : nil) }
     opts.comps = comps
     opts.documentNames = Set(byName.keys)
     opts.complex = { defs.complexes[$0] }
@@ -609,8 +618,10 @@ func buildDefs(_ raw: [Definition], skip: Set<String>, sequences: [SeqScan] = []
         _ = try getFn(name)
       case .table:
         throw Unsupported("data files")
-      case .state, .initial:
-        throw Unsupported("states (a' = …)")
+      case .state(let name, _):
+        states.derivs[name] = try Resolver(getFn: getFn, opts: options()).resolve(try parse(d))
+      case .initial(let name, _):
+        states.inits[name] = try Resolver(getFn: getFn, opts: options()).resolve(try parse(d))
       case .constant(let name, _, let draw):
         if draw { throw Unsupported("drawing a name from a list (∈)") }
         let resolved = try Resolver(getFn: getFn, opts: options()).resolve(try parse(d))
@@ -699,6 +710,12 @@ func buildDefs(_ raw: [Definition], skip: Set<String>, sequences: [SeqScan] = []
     for (name, e) in defs.consts.entries {
       defs.consts[name] = writeConditions(e, { defs.conditions[$0] }, whole: false)
     }
+    for (name, e) in states.derivs.entries {
+      states.derivs[name] = writeConditions(e, { defs.conditions[$0] }, whole: false)
+    }
+    for (name, e) in states.inits.entries {
+      states.inits[name] = writeConditions(e, { defs.conditions[$0] }, whole: false)
+    }
   }
 
   func dropPoint(_ owner: String) {
@@ -722,6 +739,12 @@ func buildDefs(_ raw: [Definition], skip: Set<String>, sequences: [SeqScan] = []
   }
 
   writeComplexConstants(&defs)
+  // Vector states split into their scalar components (States.swift).
+  let (pointNames, pointDims, matrices) = (defs.points, defs.pointDims, defs.mats)
+  lowerVectorStates(
+    &defs, &states, defined: { byName[$0] != nil },
+    comps: { name in pointNames.contains(name) ? pointComps(name, pointDims[name] ?? 2) : nil },
+    mats: { matrices[$0] })
 
   // A definition whose value depends on position — x, y, or z, directly or
   // via another such definition — is a coordinate field, not a constant. So
@@ -799,7 +822,9 @@ func buildDefs(_ raw: [Definition], skip: Set<String>, sequences: [SeqScan] = []
       )
     }
     for fv in vars
-    where !positionVars.contains(fv) && !paramVars.contains(fv) && fv != "t" && fv != "i" && !constNames.contains(fv) {
+    where !positionVars.contains(fv) && !paramVars.contains(fv) && fv != "t" && fv != "i" && !constNames.contains(fv)
+      && !states.names.contains(fv)
+    {
       throw LanguageError(
         param != nil || paramNames.contains(name)
           ? "\(shown) is a curve or surface (it uses u or v), so it may only use u, v, t, and constants (found \(fv))."
@@ -873,7 +898,9 @@ func buildDefs(_ raw: [Definition], skip: Set<String>, sequences: [SeqScan] = []
       let c = sub.isEmpty ? written : substVars(written, sub)
       let vars = freeVars(c).list
       for fv in vars {
-        if positionVars.contains(fv) || paramVars.contains(fv) || fv == "t" || fv == "i" || constNames.contains(fv) {
+        if positionVars.contains(fv) || paramVars.contains(fv) || fv == "t" || fv == "i" || constNames.contains(fv)
+          || states.names.contains(fv)
+        {
           continue
         }
         throw LanguageError(
@@ -896,9 +923,9 @@ func buildDefs(_ raw: [Definition], skip: Set<String>, sequences: [SeqScan] = []
     }
   }
 
-  // Constants may only depend on other constants and time.
+  // Constants may only depend on other constants, states, and time.
   for (name, e) in defs.consts.entries {
-    for fv in freeVars(e) where fv != "t" && !constNames.contains(fv) {
+    for fv in freeVars(e) where fv != "t" && !constNames.contains(fv) && !states.names.contains(fv) {
       defs.errors[name] =
         fv == "inf"
         ? "inf only works as an ∫ bound — write it inline: int[-inf..x] f(x) dx."
@@ -923,8 +950,10 @@ func buildDefs(_ raw: [Definition], skip: Set<String>, sequences: [SeqScan] = []
     if visiting.contains(name) { throw LanguageError("\(name) is defined in terms of itself.") }
     visiting.insert(name)
     var env: [String: Double] = ["t": 0]
+    // States are leaves here: the integrator supplies their values, so they
+    // stand in as 0 and never recurse.
     for fv in freeVars(e) where fv != "t" {
-      try check(fv, &visiting)
+      if !states.names.contains(fv) { try check(fv, &visiting) }
       env[fv] = 0
     }
     visiting.remove(name)
@@ -941,6 +970,8 @@ func buildDefs(_ raw: [Definition], skip: Set<String>, sequences: [SeqScan] = []
     }
   }
   for name in bad { defs.consts[name] = nil }
+
+  validateStates(&defs, states, constNames: constNames)
 
   // Component validation is atomic at the owner boundary: a failed vector
   // cannot leave usable scalar aliases behind, or hide its error on an alias.
@@ -963,17 +994,22 @@ func buildDefs(_ raw: [Definition], skip: Set<String>, sequences: [SeqScan] = []
       defs.fields[c] = nil
     }
   }
+  for (component, owner) in states.vecOwnerKey.entries
+  where defs.vecStates[owner] == nil || defs.errors.has(owner) {
+    defs.states[component] = nil
+  }
 
   // A successful sibling may already have been inlined before another
   // definition failed. Retain source dependencies, so no binding can outlive
   // a failed one merely because its lowered expression hid that reference.
   if !defs.errors.isEmpty {
-    func ownerOf(_ name: String) -> String { compOwner[name] ?? name }
-    let known = Set(byName.keys).union(compOwner.keys).union(defs.consts.keys)
+    func ownerOf(_ name: String) -> String { compOwner[name] ?? states.vecOwnerKey[name] ?? name }
+    let known = Set(byName.keys).union(compOwner.keys).union(states.vecOwnerKey.keys).union(defs.consts.keys)
     func present(_ name: String) -> Bool {
       defs.consts.has(name) || defs.fields.has(name) || defs.conditions.has(name) || defs.points.contains(name)
         || defs.complexes.has(name)
         || defs.fns[name] != nil || defs.unsupported[name] != nil || defs.mats.has(name) || defs.tensors.has(name)
+        || defs.states.has(name) || defs.vecStates[name] != nil
     }
     func references(_ expr: Expr) -> NameSet {
       var names = freeVars(expr)
@@ -1008,12 +1044,17 @@ func buildDefs(_ raw: [Definition], skip: Set<String>, sequences: [SeqScan] = []
       defs.complexes[name] = nil
       defs.mats[name] = nil
       defs.tensors[name] = nil
+      defs.states[name] = nil
     }
     func remove(_ name: String) {
       let owner = ownerOf(name)
       if compOwner.has(name) {
         dropPoint(owner)
         for alias in pointComps(owner, defs.pointDims[owner] ?? 2) { forget(alias) }
+      } else if states.vecOwnerKey.has(name) {
+        // The dimension map may have been removed by earlier validation.
+        for (alias, state) in states.vecOwnerKey.entries where state == owner { defs.states[alias] = nil }
+        defs.vecStates[owner] = nil
       } else {
         forget(name)
       }
@@ -1026,6 +1067,7 @@ func buildDefs(_ raw: [Definition], skip: Set<String>, sequences: [SeqScan] = []
       candidates += defs.fields.entries.map { ($0.key, $0.value, []) }
       candidates += defs.complexes.entries.map { ($0.key, $0.value, []) }
       candidates += defs.conditions.entries.map { ($0.key, $0.value, []) }
+      candidates += defs.states.entries.map { ($0.key, $0.value.deriv, []) }
       candidates += defs.fns.entries.map { ($0.key, $0.value.body, $0.value.params) }
       // (A matrix's entries are checked one by one, to the same end.)
       for (name, matrix) in defs.mats.entries { candidates += matrix.flatMap { $0 }.map { (name, $0, []) } }
@@ -1041,6 +1083,26 @@ func buildDefs(_ raw: [Definition], skip: Set<String>, sequences: [SeqScan] = []
         changed = true
       }
     }
+    // Initial conditions retain their established recoverable behavior: an
+    // invalid component gets the zero seed, while its state and valid sibling
+    // seeds survive. Direct tuple sources preserve per-component provenance.
+    for (name, state) in defs.states.entries {
+      let owner = ownerOf(name)
+      var source = parsed["\(owner)(0)"]
+      if case .vec(let items)? = source, states.vecOwnerKey.has(name),
+        let at = vecStateComps(owner, defs.vecStates[owner] ?? 0).firstIndex(of: name), at < items.count
+      {
+        source = items[at]
+      }
+      var refs = references(state.initial)
+      if let source {
+        for ref in references(source) { refs.insert(ref) }
+      }
+      guard let failed = failedRef(refs) else { continue }
+      let row = "\(owner)(0)"
+      if !defs.errors.has(row) { defs.errors[row] = "\(failed) has an error in its definition." }
+      defs.states[name] = StateDef(deriv: state.deriv, initial: .num(0))
+    }
   }
   defs.sumBoundConsts = boundConsts.names
   return defs
@@ -1054,7 +1116,7 @@ func animatedConstNames(_ defs: BuiltDefs) -> Set<String> {
   while changed {
     changed = false
     for (name, e) in defs.consts.entries where !out.contains(name) {
-      if freeVars(e).contains(where: { $0 == "t" || out.contains($0) }) {
+      if freeVars(e).contains(where: { $0 == "t" || out.contains($0) || defs.states.has($0) }) {
         out.insert(name)
         changed = true
       }
@@ -1063,9 +1125,11 @@ func animatedConstNames(_ defs: BuiltDefs) -> Set<String> {
   return out
 }
 
-/// Every constant's value at a time (lib/env.ts `evaluateFrame`).
-func evaluateFrame(_ defs: BuiltDefs, time: Double) throws -> [String: Double] {
-  var out: [String: Double] = [:]
+/// Every constant's value at a time (lib/env.ts `evaluateFrame`). State
+/// references read the supplied integrated values (`states`), which are in
+/// the result too; derivative expressions are never evaluated here.
+func evaluateFrame(_ defs: BuiltDefs, time: Double, states: [String: Double] = [:]) throws -> [String: Double] {
+  var out = states
   var visiting: Set<String> = []
   func get(_ name: String) throws -> Double {
     if let value = out[name] { return value }

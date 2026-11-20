@@ -1,4 +1,5 @@
 import CoreGraphics
+import EquationCore
 import Foundation
 import Metal
 

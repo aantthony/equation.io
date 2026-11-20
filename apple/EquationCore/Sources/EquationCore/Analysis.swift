@@ -71,6 +71,13 @@ public struct DocumentAnalysis: Equatable, Sendable {
   /// The document's random variables, the anonymous ones of its expression
   /// rows among them: what a density, pmf, prob or expect plan's `rv` names.
   public var random = RVSystem()
+  /// The document's planar coordinate fields, whose level sets grid the
+  /// panel each is defined in (Grid.swift).
+  public var gridFields: [GridField] = []
+  /// The states to integrate (`a' = …`), or nil when the document has none,
+  /// and where each starts (States.swift). `env` has them at their starts.
+  public var stateSystem: StateSystem?
+  public var initialState: [String: Double] = [:]
   /// The document's own functions (a slider's `clamp` is not one of these).
   var userFns: Set<String>
   /// Each constant's expression, in the order the rows define them.
@@ -83,7 +90,26 @@ public struct DocumentAnalysis: Equatable, Sendable {
     if animated.isEmpty { return env }
     var defs = BuiltDefs()
     for (name, expr) in zip(constNames, constExprs) { defs.consts[name] = expr }
-    return (try? evaluateFrame(defs, time: time)) ?? env
+    return (try? evaluateFrame(defs, time: time, states: initialState)) ?? env
+  }
+
+  /// The constants as definitions, for the evaluators that read them.
+  var defs: BuiltDefs {
+    var defs = BuiltDefs()
+    for (name, expr) in zip(constNames, constExprs) { defs.consts[name] = expr }
+    if let sys = stateSystem {
+      for (k, name) in sys.names.enumerated() {
+        defs.states[name] = StateDef(deriv: sys.derivs[k], initial: sys.initials[k])
+      }
+    }
+    return defs
+  }
+
+  /// Every constant's value at a time, with the states at `states`: a run's
+  /// values (`StateStepper.environment(at:)`), which are in the result too.
+  public func environment(at time: Double, states: [String: Double]) -> [String: Double] {
+    if stateSystem == nil { return environment(at: time) }
+    return (try? evaluateFrame(defs, time: time, states: states)) ?? states
   }
 
   /// The row's text with its slider moved to `value`: held to the slider's
@@ -344,11 +370,15 @@ public func analyze(_ sources: [String]) -> DocumentAnalysis {
     }
   }
 
-  // Only static constants can affect compilation.
-  let constEnv = (try? evaluateFrame(built, time: 0)) ?? [:]
+  let stateSystem = buildStateSystem(built)
+  // Only static constants can affect compilation. Dummy states permit evaluating
+  // unrelated constants; every state and dependent constant is removed below.
+  var dummyStates: [String: Double] = [:]
+  for name in built.states.keys { dummyStates[name] = 0 }
+  let constEnv = (try? evaluateFrame(built, time: 0, states: dummyStates)) ?? [:]
   let animated = animatedConstNames(built)
-  // Pass 2: viewport rows and plots.
-  var constNames = Set(built.consts.keys)
+  // Pass 2: viewport rows and plots. States are constants to every consumer.
+  var constNames = Set(built.consts.keys).union(built.states.keys)
   // A named condition is written into a row as a field is.
   var fieldEnv: [String: Expr] = [:]
   for (name, e) in built.fields.entries { fieldEnv[name] = e }
@@ -370,11 +400,16 @@ public func analyze(_ sources: [String]) -> DocumentAnalysis {
   // A view's bounds read the constants' values at t = 0, the animated ones excluded.
   var boundVals = constEnv
   for name in animated { boundVals[name] = nil }
+  for name in built.states.keys { boundVals[name] = nil }
   func comps(_ name: String) -> [String]? {
-    built.points.contains(name) ? pointComps(name, built.pointDims[name] ?? 2) : nil
+    built.points.contains(name)
+      ? pointComps(name, built.pointDims[name] ?? 2) : built.vecStates[name].map { vecStateComps(name, $0) }
   }
   var ropts = ResolveOpts()
-  ropts.definition = { built.fields[$0] ?? built.conditions[$0] ?? built.consts[$0] }
+  // A state stands for itself: defined, and constant across space.
+  ropts.definition = {
+    built.fields[$0] ?? built.conditions[$0] ?? built.consts[$0] ?? (built.states.has($0) ? .var($0) : nil)
+  }
   ropts.comps = comps
   ropts.documentNames = documentNames
   ropts.complex = { built.complexes[$0] }
@@ -400,6 +435,8 @@ public func analyze(_ sources: [String]) -> DocumentAnalysis {
   // Each panel's rows are read with its view's maps, its surface and its
   // metric, none of which is ported: a panel that has one is left alone.
   var panelBlocked: Set<Int> = []
+  // Each panel's axis maps, from its view(…) row wherever in the panel it sits (AxisMap.swift).
+  var panelMaps: [Int: AxisMaps] = [:]
   do {
     var at = 0
     for (i, text) in texts.enumerated() where !text.isEmpty && rows[i].definition == nil && !rows[i].comment {
@@ -409,7 +446,11 @@ public func analyze(_ sources: [String]) -> DocumentAnalysis {
         panelBlocked.insert(at)
       } else if let head = viewHead(text), head == "view" || head == "on", !fnNames.contains(head) {
         do {
-          _ = try parseViewRow(text, boundVals)
+          if case .mappedView(_, _, _, _, let maps)? = try parseViewRow(text, boundVals, documentNames: documentNames),
+            panelMaps[at] == nil
+          {
+            panelMaps[at] = maps
+          }
         } catch is Unsupported {
           panelBlocked.insert(at)
         } catch {
@@ -424,7 +465,7 @@ public func analyze(_ sources: [String]) -> DocumentAnalysis {
   let random = document.random
   var distributions = DistributionRows(
     rvs: RVSystem(random.built.declarations), rvNames: random.built.names, constNames: constNames,
-    constEnv: constEnv, moving: animated,
+    constEnv: constEnv, moving: animated.union(built.states.keys),
     parse: { body in
       try Resolver(getFn: getFn, opts: ropts).resolve(
         try parseExpr(body, userFns: fnNames, listNames: listNames, valueNames: valueNames))
@@ -445,6 +486,9 @@ public func analyze(_ sources: [String]) -> DocumentAnalysis {
     }
   }
 
+  // The coordinate fields a grid can draw (Grid.swift).
+  let gridFields = buildGridFields(built, constNames: constNames)
+  let gridNames = Set(gridFields.map(\.name))
   var seenViewKinds: Set<String> = []
   var viewsUnknown = false
   var panel = 0
@@ -465,7 +509,7 @@ public func analyze(_ sources: [String]) -> DocumentAnalysis {
       if isDividerRow(text) || (head != nil && !fnNames.contains(head!)) {
         if viewsUnknown && !isDividerRow(text) { throw Unsupported("a view row after one that is not supported") }
         var latticeAxes: [String]?
-        if let view = try parseViewRow(text, boundVals, latticeAxes: &latticeAxes) {
+        if let view = try parseViewRow(text, boundVals, documentNames: documentNames, latticeAxes: &latticeAxes) {
           // Each panel frames itself: a divider starts a fresh set.
           if case .split = view {
             panel += 1
@@ -477,13 +521,26 @@ public func analyze(_ sources: [String]) -> DocumentAnalysis {
               "\(view.kind) is already set by another row\(panel > 0 ? " in this panel" : "")"
                 + (panel > 0 ? "." : " — a --- row starts a new panel with its own."))
           }
+          if case .gridCoords(let names) = view {
+            for name in names {
+              if let problem = gridCoordinateProblem(name, gridFields: gridNames, fields: { built.fields.has($0) }) {
+                // A field the port could not read may be the coordinate meant.
+                if blocked.contains(where: { rows[$0.key].definition?.name == name }) {
+                  throw Unsupported("a grid of \(name), which is not supported yet")
+                }
+                throw LanguageError(problem)
+              }
+            }
+          }
           seenViewKinds.insert(view.kind)
           rows[i].view = view
           rows[i].viewAxes = latticeAxes
           continue
         }
       }
-      if panelBlocked.contains(panel) { throw Unsupported("a panel with mapped axes, a surface or a metric") }
+      if panelBlocked.contains(panel) {
+        throw Unsupported("a panel with (x, y) mapped together, a surface or a metric")
+      }
       if isMetricRow(text) && !documentNames.contains("ds") { throw Unsupported("metrics (ds^2 = …)") }
       let trimmed = jsTrimmed(text)
       if (trimmed == "lightcones" || trimmed == "tidal") && !documentNames.contains(trimmed) {
@@ -521,7 +578,16 @@ public func analyze(_ sources: [String]) -> DocumentAnalysis {
       if let takenName = takenBinder(text) { throw LanguageError(takenName) }
       let rawParsed = try parseExpr(text, userFns: fnNames, listNames: listNames, valueNames: valueNames)
       // `p(50..400)`: where p goes over that time.
-      if case .bin(.mul, _, .range, _) = rawParsed { throw Unsupported("orbits") }
+      if case .bin(.mul, let value, .range(let from, let to), _) = rawParsed {
+        func lower(_ e: Expr) throws -> Expr {
+          try lowerObjects(
+            try Resolver(getFn: getFn, opts: ropts).resolve(e), comps: comps, mats: { built.mats[$0] },
+            tensors: { name, _ in built.tensors[name] })
+        }
+        rows[i].classified = try classifyOrbit(
+          try lower(value), from: try lower(from), to: try lower(to), built, constNames: constNames)
+        continue
+      }
       // A row not drawn over the plane may test equality in a case: `f(2)`
       // with f(m) = {mod(m, 2) = 0: …}.
       func plane(_ e: Expr) -> Bool { freeVars(e).contains(where: ["x", "y", "z"].contains) }
@@ -556,6 +622,10 @@ public func analyze(_ sources: [String]) -> DocumentAnalysis {
       let lowered = try lowerObjects(
         resolved, comps: comps, mats: { built.mats[$0] }, tensors: { name, _ in built.tensors[name] })
       var cls = try classify(lowered, defined: constNames, fields: fieldEnv)
+      // A mapped panel draws per-pixel rows in its screen coordinates (AxisMap.swift).
+      if let maps = panelMaps[panel] {
+        cls = try classifyMapped(cls, lowered, maps, defined: constNames, fields: fieldEnv)
+      }
       rows[i].info = curveHint(cls.object, text)
       // `e = 0.6` parsed with e already a number; only the text still says e.
       if let taken, case .note(let expr, let variable, _, let identity) = cls.object {
@@ -586,8 +656,12 @@ public func analyze(_ sources: [String]) -> DocumentAnalysis {
     }
   }
 
+  // What the rows read out, and the uniforms' values at t = 0: every state
+  // at its start (lib/analysis.ts `analyzeRows`).
+  let initial = stateSystem.map { initialState(built, $0) } ?? [:]
+  let frameEnv = stateSystem == nil ? constEnv : (try? evaluateFrame(built, time: 0, states: initial)) ?? initial
   // Backend compilation is explicit and never changes the semantic object.
-  var readoutEnv = constEnv
+  var readoutEnv = frameEnv
   for (name, value) in boundVals { readoutEnv[name] = value }
   readoutEnv["t"] = 0
   for i in 0..<count {
@@ -691,7 +765,7 @@ public func analyze(_ sources: [String]) -> DocumentAnalysis {
       row.kind =
         switch view {
         case .split: "panel divider (the rows below it draw in a panel of their own)"
-        case .grid: "grid (what draws behind its panel's plots)"
+        case .grid, .gridCoords: "grid (what draws behind its panel's plots)"
         default: "viewport (\(view.kind))"
         }
     } else if let dist = row.dist {
@@ -718,7 +792,7 @@ public func analyze(_ sources: [String]) -> DocumentAnalysis {
       var value = form.literal
       let lo: Double
       let hi: Double
-      if let bounds = sliderBounds(form, constEnv, userFns: userFns) {
+      if let bounds = sliderBounds(form, frameEnv, userFns: userFns) {
         (lo, hi) = bounds
         value = sliderValue(form, value, bounds)
       } else {
@@ -735,10 +809,11 @@ public func analyze(_ sources: [String]) -> DocumentAnalysis {
     }
   }
   // The constants once more: a recurrence's chain of terms is among them now.
-  let env = (try? evaluateFrame(built, time: 0)) ?? constEnv
+  let env = (try? evaluateFrame(built, time: 0, states: initial)) ?? frameEnv
   return DocumentAnalysis(
     rows: rows, env: env, animated: animatedConstNames(built), names: boundNames(document),
-    random: distributions.rvs, userFns: userFns,
+    random: distributions.rvs, gridFields: inPanels(gridFields, owner: owner, rows: rows),
+    stateSystem: stateSystem, initialState: initial, userFns: userFns,
     constNames: built.consts.keys,
     constExprs: built.consts.entries.map(\.value))
 }
