@@ -88,6 +88,20 @@ const DOCUMENTS: Array<[text: string, time?: number]> = [
     'A = (2.5, -2, -2); B = (2.5, 2, 2); L = line(A, B); L; th = 1; S = motor(L, th, th/4); S; rotate((1, 1, 1), S); [e_x, 2 e_y]; motor(L, t)',
     1,
   ],
+  // Solids over three parameters, and curves and surfaces over the intervals u and v are defined as.
+  [
+    '(interval(0, 1), interval(0, 1), interval(0, 1)); r = interval(0.7, 1); (r cos(2 pi u), r sin(2 pi u), 2v) + (3, 0, 0); ' +
+      's = interval(0, 1); (s, 2 s, 3 s); (s, u, s u - 2)',
+  ],
+  [
+    'k = 0.75; r = interval(0, 1); p = interval(0, pi); q = interval(0, 2 pi k); (r sin(p) cos(q), r sin(p) sin(q), r cos(p) + t); ' +
+      'a = interval(1, 2); y = a x; (a, a); (a u, v)',
+    0.5,
+  ],
+  [
+    'camera(-0.9, 0.7, 11); u = interval(0, 2pi); v = interval(0, 2pi); S = ((3 + cos(v)) cos(u), (3 + cos(v)) sin(u), sin(v)); ' +
+      'gaussian(S); (cos(u), sin(u), 2); (u, v, -3)',
+  ],
 ];
 
 const recorded = DOCUMENTS.map(([text, time = 0]) => {

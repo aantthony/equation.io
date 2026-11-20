@@ -14,7 +14,10 @@
 /// - `M = ((1, 2), (3, 4))` names a matrix, expanded where it is used.
 /// - `L = [1, 2, 3]`, `T = (1, 2, 3, 4)` and `p ∈ L` name lists (Lists.swift).
 ///
-/// Data files, lists, intervals and multivectors are not ported (states are
+/// - a name for an interval, or for anything built from one, is the hidden parameter every row
+///   using it shares (Interval.swift); u and v take one as the range they run over.
+///
+/// Data files, lists and multivectors are not ported (states are
 /// in States.swift): their rows are reported as not supported yet, and so is
 /// every row that names one.
 public enum Definition: Equatable, Sendable {
