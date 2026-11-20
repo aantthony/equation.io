@@ -139,7 +139,7 @@ func translateFragment(_ glsl: String) -> TranslatedShader {
 }
 
 /// GLSL's names in Metal, the frame's uniforms, and the triangle every pass draws.
-private let header = """
+let header = """
   #include <metal_stdlib>
   using namespace metal;
 
