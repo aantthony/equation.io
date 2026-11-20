@@ -5,7 +5,7 @@
  *
  *   pnpm swift:corpus
  */
-import { readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { closeSync, openSync, readdirSync, readFileSync, rmSync, writeFileSync, writeSync } from 'node:fs';
 import { parseExpr } from '../../lib/expr.ts';
 import { encodePayload } from '../../lib/link.ts';
 
@@ -42,28 +42,39 @@ writeFileSync(new URL('parse-corpus.json', fixtures), JSON.stringify(entries) + 
 rmSync(out, { recursive: true });
 
 // Every prefix of every input, as typing produces them: half-written rows are
-// where auto-closing brackets and most of the errors live.
+// where auto-closing brackets and most of the errors live. An input's
+// prefixes cost its length squared (each is parsed, and its tree written),
+// so a generated one is typed only as far as PREFIX_LIMIT: the suite's
+// 57,000-character composition alone would be gigabytes of trees. Each is
+// written as it is parsed, so none is held.
+const PREFIX_LIMIT = 600;
 const replacer = (key: string, value: unknown): unknown =>
   typeof value === 'number' && !Number.isFinite(value) ? String(value) : value;
-const prefixes = new Map<string, Entry>();
+const prefixFile = openSync(new URL('parse-prefixes.json', fixtures), 'w');
+const seenPrefixes = new Set<string>();
+let prefixErrors = 0;
 for (const e of entries) {
-  const units = e.src.length;
+  const units = Math.min(e.src.length, PREFIX_LIMIT + 1);
   for (let n = 1; n < units; n++) {
     const src = e.src.slice(0, n);
     const key = JSON.stringify([src, e.userFns, e.listNames, e.valueNames]);
-    if (byKey.has(key) || prefixes.has(key)) continue;
+    if (byKey.has(key) || seenPrefixes.has(key)) continue;
     const input = { src, userFns: e.userFns, listNames: e.listNames, valueNames: e.valueNames };
+    let entry: string;
     try {
       const expr = parseExpr(src, new Set(e.userFns), new Set(e.listNames), new Set(e.valueNames));
-      prefixes.set(key, JSON.parse(JSON.stringify({ ...input, expr }, replacer)) as Entry);
+      entry = JSON.stringify({ ...input, expr }, replacer);
     } catch (err) {
-      prefixes.set(key, { ...input, error: (err as Error).message, errorType: (err as Error).constructor.name });
+      entry = JSON.stringify({ ...input, error: (err as Error).message, errorType: (err as Error).constructor.name });
+      prefixErrors++;
     }
+    writeSync(prefixFile, (seenPrefixes.size ? ',' : '[') + entry);
+    seenPrefixes.add(key);
   }
 }
-const prefixList = [...prefixes.values()];
-writeFileSync(new URL('parse-prefixes.json', fixtures), JSON.stringify(prefixList) + '\n');
-console.log(`${prefixList.length} prefixes, ${prefixList.filter(e => e.error !== undefined).length} errors`);
+writeSync(prefixFile, (seenPrefixes.size ? '' : '[') + ']\n');
+closeSync(prefixFile);
+console.log(`${seenPrefixes.size} prefixes, ${prefixErrors} errors`);
 
 // Share links: each input alone, runs of three as one graph, and the cases
 // the codec exists for (a `;` or `%` inside a row, blank rows, unicode).
