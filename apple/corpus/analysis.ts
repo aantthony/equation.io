@@ -46,6 +46,7 @@ import { DISCRETE_CASES } from './cases-discrete.ts';
 import { FITS_CASES } from './cases-fits.ts';
 import { INTEGRAL_CASES } from './cases-integrals.ts';
 import { PANEL_CASES, recordGridFields, recordStates } from './cases-panels.ts';
+import { SURFACE_CASES } from './cases-surfaces.ts';
 
 const fixtures = new URL('../EquationCore/Tests/EquationCoreTests/Fixtures/', import.meta.url);
 
@@ -829,6 +830,7 @@ DISCRETE_CASES.forEach((text, k) => docs.push({ name: `case discrete ${k + 1}`, 
 FITS_CASES.forEach((text, k) => docs.push({ name: `case fits ${k + 1}`, rows: splitStatements(text) }));
 ALGEBRA_CASES.forEach((text, k) => docs.push({ name: `case algebra ${k + 1}`, rows: splitStatements(text) }));
 INTEGRAL_CASES.forEach((text, k) => docs.push({ name: `case integral ${k + 1}`, rows: splitStatements(text) }));
+SURFACE_CASES.forEach((text, k) => docs.push({ name: `case surfaces ${k + 1}`, rows: splitStatements(text) }));
 randomDocs(Number(process.env.RANDOM_DOCS ?? 600)).forEach((text, k) => docs.push({ name: `case random ${k + 1}`, rows: splitStatements(text) }));
 randomListDocs(Number(process.env.RANDOM_LIST_DOCS ?? 400)).forEach((text, k) =>
   docs.push({ name: `case random list ${k + 1}`, rows: splitStatements(text) }),

@@ -269,16 +269,14 @@ struct Resolver {
       if let term = try opts.sequenceTerm?(name, nil, opts.openVars) { return term }
       if let value = try namedInterval(name) { return value }
       if let value = opts.complex(name) { return value }
-      // What the port cannot write in yet, by the names that ask for it.
-      if name == "grad" || name == "div" || name == "curl" || name == "laplacian" {
-        throw Unsupported("vector calculus")
-      }
       if let value = opts.multivector(name) { return value }
       if let value = unitVector(name, opts) { return value }
       return pointCoord(name) ?? e
     case .neg(let a):
       return .neg(try resolve(a))
     case .bin(let op, let lhs, let rhs, let glyph):
+      // `∇f`, `∇·F`, `∇×F`, `∇²f` (VectorCalculus.swift).
+      if op == .mul || op == .div, let nabla = try splitNablaChain(e) { return try resolve(nabla) }
       // Σ/∫ headers capture their trailing product chain before it resolves.
       if op == .mul || op == .div, let m = splitSumChain(e) {
         let body = try isSumHeader(m.header) ? expandSum(m.header, m.body) : expandInt(intBounds(m.header), m.body)
@@ -388,6 +386,8 @@ struct Resolver {
       if name == "label", case .str = arg { return arg }
       return try resolve(arg)
     }
+    if vectorOps.contains(name) { return try vectorCalculus(name, args) }
+    if curveOps.contains(name) { return try curveGeometry(name, args) }
     if name == "clamp" {
       // clamp(x, lo, hi) ≡ min(max(x, lo), hi): every backend already runs those.
       if args.count != 3 { throw LanguageError("clamp takes three arguments: clamp(x, lo, hi).") }
