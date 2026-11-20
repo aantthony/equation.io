@@ -38,6 +38,7 @@ import { rowKind } from '../../lib/row-kind.ts';
 import { sliderBounds, sliderForm, sliderValue, writeSlider } from '../../lib/slider.ts';
 import { keepNote, noteStart, splitStatements } from '../../lib/statements.ts';
 import { EXAMPLES } from '../../web/examples.ts';
+import { DISCRETE_CASES } from './cases-discrete.ts';
 
 const fixtures = new URL('../EquationCore/Tests/EquationCoreTests/Fixtures/', import.meta.url);
 
@@ -471,6 +472,7 @@ const docs: Doc[] = [];
 for (const [category, items] of EXAMPLES)
   for (const [label, text] of items) docs.push({ name: `${category} / ${label}`, rows: splitStatements(text) });
 CASES.forEach((text, k) => docs.push({ name: `case ${k + 1}`, rows: splitStatements(text) }));
+DISCRETE_CASES.forEach((text, k) => docs.push({ name: `case discrete ${k + 1}`, rows: splitStatements(text) }));
 randomDocs(Number(process.env.RANDOM_DOCS ?? 600)).forEach((text, k) => docs.push({ name: `case random ${k + 1}`, rows: splitStatements(text) }));
 
 const recorded = docs.map(({ name, rows }) => {

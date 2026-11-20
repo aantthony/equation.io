@@ -413,6 +413,11 @@ public func analyze(_ sources: [String]) -> DocumentAnalysis {
   ropts.comps = comps
   ropts.documentNames = documentNames
   ropts.complex = { built.complexes[$0] }
+  // Σ/Π bounds in plot rows expand against the constants' values at t = 0.
+  let boundConsts = NameBox()
+  boundConsts.names = built.sumBoundConsts
+  ropts.consts = { boundVals[$0] }
+  ropts.boundConsts = boundConsts
 
   // Each panel's rows are read with its view's maps, its surface and its
   // metric, none of which is ported: a panel that has one is left alone.
@@ -581,9 +586,10 @@ public func analyze(_ sources: [String]) -> DocumentAnalysis {
     }
   }
 
-  // A slider that is a Σ/Π bound steps in whole numbers. Sums are not
-  // ported, so which sliders those are is not known here: one a row with a
-  // sum in reach names is left alone rather than given the wrong step.
+  // A slider that is a Σ/Π bound steps in whole numbers. A row the port
+  // leaves alone never expands its sums, so which sliders it bounds one by is
+  // not known here: one such a row names, with a sum in reach, is left alone
+  // rather than given the wrong step.
   let sumGlyphs: Set<UInt16> = [0x03A3, 0x2211, 0x03A0, 0x220F]
   let hasSums = texts.contains { text in
     text.utf16.contains(where: sumGlyphs.contains)
@@ -636,7 +642,7 @@ public func analyze(_ sources: [String]) -> DocumentAnalysis {
       !jsTrimmed(sources[i]).isEmpty && !row.comment && (row.definition == nil || named) && row.view == nil
       && noteColor(sources[i]) == nil && draws
     // A constant whose right-hand side is a number the user wrote is a slider.
-    if case .constant(_, let rhs, false)? = row.definition, row.error == nil,
+    if case .constant(let name, let rhs, false)? = row.definition, row.error == nil,
       let form = sliderForm(jsTrimmed(rhs), userFns: userFns)
     {
       var value = form.literal
@@ -652,7 +658,7 @@ public func analyze(_ sources: [String]) -> DocumentAnalysis {
       }
       // Whole-number sliders step one at a time; otherwise a round step
       // (1, 2 or 5 × 10^k), so round values sit on it.
-      row.slider = Slider(min: lo, max: hi, step: form.whole ? 1 : niceSpacing((hi - lo) / 400, 1).major, value: value)
+      row.slider = Slider(min: lo, max: hi, step: form.whole || boundConsts.names.contains(name) ? 1 : niceSpacing((hi - lo) / 400, 1).major, value: value)
     }
   }
   return DocumentAnalysis(

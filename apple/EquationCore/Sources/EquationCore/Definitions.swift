@@ -454,6 +454,8 @@ struct BuiltDefs {
   var errors = OrderedMap<String>()
   /// Definitions the port cannot read yet, by key, with what stopped it.
   var unsupported: [String: String] = [:]
+  /// The constants a definition's Σ/Π bounds read (`sumBoundConsts`).
+  var sumBoundConsts: Set<String> = []
 }
 
 private let positionVars: Set<String> = ["x", "y", "z", "w"]
@@ -477,6 +479,7 @@ func buildDefs(_ raw: [Definition], skip: Set<String>) -> BuiltDefs {
   /// Derived point component → the point row it belongs to (A_x → A).
   var compOwner = OrderedMap<String>()
   var resolving: [String] = []
+  let boundConsts = NameBox()
 
   func comps(_ name: String) -> [String]? {
     defs.points.contains(name) ? pointComps(name, defs.pointDims[name] ?? 2) : nil
@@ -489,6 +492,9 @@ func buildDefs(_ raw: [Definition], skip: Set<String>) -> BuiltDefs {
     opts.comps = comps
     opts.documentNames = Set(byName.keys)
     opts.complex = { defs.complexes[$0] }
+    // Σ/Π bounds in later definitions may use the constants resolved so far.
+    opts.consts = { numEnv[$0] }
+    opts.boundConsts = boundConsts
     return opts
   }
   // List names accumulate in definition order: a point indexes (`T[2]`) only
@@ -1016,6 +1022,7 @@ func buildDefs(_ raw: [Definition], skip: Set<String>) -> BuiltDefs {
       }
     }
   }
+  defs.sumBoundConsts = boundConsts.names
   return defs
 }
 
