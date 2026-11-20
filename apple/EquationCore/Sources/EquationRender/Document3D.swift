@@ -20,8 +20,12 @@ public enum Graph {
   /// panels' rows masked out, as for its `Graph2D`; `Document3D` skips the
   /// same rows.
   public static func kind(of analysis: DocumentAnalysis) -> Kind {
-    analysis.rows.contains { $0.error == nil && $0.unsupported == nil && $0.classified?.needs3D == true }
-      ? .space : .plane
+    analysis.rows.contains {
+      guard $0.error == nil, $0.unsupported == nil else { return false }
+      // A panel drawn on a surface (an on(…) row) is 3D.
+      if case .surface? = $0.view { return true }
+      return $0.classified?.needs3D == true
+    } ? .space : .plane
   }
 }
 
@@ -64,6 +68,10 @@ public struct Document3D: Equatable, Sendable {
   /// integral curves.
   public var streamlines: Set<Int> = []
   public var arrows: Set<Int> = []
+  /// The theme the panel is drawn in, which shades a panel's bare surface.
+  public var theme: GraphTheme = .light
+  /// The surface the panel's 2D rows are drawn on (an on(…) row; Document3D+Surface.swift).
+  var surface: SurfaceMesh?
 
   /// What was traced on the CPU, kept between frames.
   private let traces = TraceCache()
@@ -91,6 +99,7 @@ public struct Document3D: Equatable, Sendable {
       if row.error == nil, row.unsupported == nil, row.classified?.animated == true { animated = true }
     }
     if let spin, spin != 0 { animated = true }
+    surface = SurfaceMesh(analysis)
   }
 
   /// The constants' values `time` seconds after the graph opened: what the uniforms read.
@@ -113,20 +122,27 @@ public struct Document3D: Equatable, Sendable {
     var scene = Scene3D()
     var env = environment(at: time)
     env["t"] = time
+    if let surface { drawSurface(surface, into: &scene) }
     for (index, row) in analysis.rows.enumerated() {
       guard row.error == nil, row.unsupported == nil, let cpu = row.cpu, index < colors.count,
         let color = colors[index]
       else { continue }
       // A family draws member by member, each a shade lighter (web/main.ts `renderMembers`).
       for (member, shade) in Graph2D.familyMembers(row, cpu, color) {
+        if let surface,
+          drawOnSurface(surface, member.cpu!, member, index, shade, env, time, camera, into: &scene)
+        {
+          continue
+        }
         draw(member.cpu!, member, index, shade, env, time, camera, into: &scene)
       }
     }
+    if let surface { drawSurfacePoints(surface, env, camera, into: &scene) }
     return scene
   }
 
   /// One row's part of the scene (the `switch (plot.type)` of renderPanel).
-  private func draw(
+  func draw(
     _ cpu: CpuPlan, _ row: RowAnalysis, _ index: Int, _ color: RGB, _ env: [String: Double], _ time: Double,
     _ camera: Camera3D, into scene: inout Scene3D
   ) {
@@ -186,6 +202,11 @@ public struct Document3D: Equatable, Sendable {
       scene.psurfaces.append(
         Scene3D.PSurface(
           uniforms: uniforms, comps: glsl, du: du, dv: dv, color: color, params: params, paint: painted, gain: gain))
+    case .pregion:
+      // A filled planar region lies in z = 0 (compileGpu gives it as a surface).
+      guard case .psurface(let glsl, let du, let dv, _)? = row.gpu?.shader else { break }
+      scene.psurfaces.append(
+        Scene3D.PSurface(uniforms: uniforms, comps: glsl, du: du, dv: dv, color: color, params: params))
     case .pcurve(_, let comps, _, _, _):
       // (A curve in the plane lies in z = 0.)
       scene.curves.append(Scene3D.Curve(pts: Self.sample(comps, env), color: color))
@@ -262,7 +283,7 @@ public struct Document3D: Equatable, Sendable {
     case .spacecurve(let residuals):
       let paths = traced(key("curve")) { traceIntersection(residuals, lo, hi, env) }
       scene.curves.append(Scene3D.Curve(pts: lifted(paths), color: color))
-    case .system(let dim, let residuals, let parametric, let angular):
+    case .system(let dim, let residuals, let parametric, let angular, _):
       let vars = Array(["x", "y", "z"][..<dim])
       let (l, h) = (Array(lo[..<dim]), Array(hi[..<dim]))
       if parametric {

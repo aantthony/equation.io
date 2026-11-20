@@ -46,6 +46,7 @@ import { DISCRETE_CASES } from './cases-discrete.ts';
 import { FITS_CASES } from './cases-fits.ts';
 import { INTEGRAL_CASES } from './cases-integrals.ts';
 import { PANEL_CASES, recordGridFields, recordStates } from './cases-panels.ts';
+import { SURFACE_CASES } from './cases-surfaces.ts';
 
 const fixtures = new URL('../EquationCore/Tests/EquationCoreTests/Fixtures/', import.meta.url);
 
@@ -82,7 +83,7 @@ const PORTED = new Set([
 for (const type of ['polygon', 'label', 'tuple', 'tfield2d']) PORTED.add(type);
 for (const type of ['sequence', 'cobweb', 'bifurcation', 'automaton', 'lattice']) PORTED.add(type);
 // In space.
-for (const type of ['implicit3d', 'scalar3d', 'spacecurve', 'system', 'vfield3d', 'psurface']) PORTED.add(type);
+for (const type of ['implicit3d', 'scalar3d', 'spacecurve', 'system', 'vfield3d', 'psurface', 'pregion']) PORTED.add(type);
 // Random variables (lib/dist.ts): what the CPU draws of one, by its name.
 for (const type of ['density', 'pmf', 'expect', 'prob']) PORTED.add(type);
 // Lists and families (Lists.swift, ObjectLists.swift, ListPlans.swift).
@@ -829,6 +830,7 @@ DISCRETE_CASES.forEach((text, k) => docs.push({ name: `case discrete ${k + 1}`, 
 FITS_CASES.forEach((text, k) => docs.push({ name: `case fits ${k + 1}`, rows: splitStatements(text) }));
 ALGEBRA_CASES.forEach((text, k) => docs.push({ name: `case algebra ${k + 1}`, rows: splitStatements(text) }));
 INTEGRAL_CASES.forEach((text, k) => docs.push({ name: `case integral ${k + 1}`, rows: splitStatements(text) }));
+SURFACE_CASES.forEach((text, k) => docs.push({ name: `case surfaces ${k + 1}`, rows: splitStatements(text) }));
 randomDocs(Number(process.env.RANDOM_DOCS ?? 600)).forEach((text, k) => docs.push({ name: `case random ${k + 1}`, rows: splitStatements(text) }));
 randomListDocs(Number(process.env.RANDOM_LIST_DOCS ?? 400)).forEach((text, k) =>
   docs.push({ name: `case random list ${k + 1}`, rows: splitStatements(text) }),

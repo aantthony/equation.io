@@ -19,6 +19,9 @@ public indirect enum MathObject: Equatable, Sendable {
   case curveGraph(rhs: Expr, equation: Expr, levels: LevelSetSpec?)
   case curveImplicit(residual: Expr, equation: Expr, levels: LevelSetSpec?)
   case region(constraints: [Constraint])
+  /// A pair in u and v: the region it fills as both run from 0 to 1 (the
+  /// site's region of form `parametric`).
+  case regionParametric(coordinates: [Expr])
   case scalarField(expr: Expr)
   case vectorField(components: [Expr])
   case point(coordinates: [Expr])
@@ -79,7 +82,9 @@ public indirect enum MathObject: Equatable, Sendable {
   case scalarField3D(expr: Expr)
   /// A square system, one residual per unknown: its isolated solutions, or
   /// with u (`parametric`) the curve they trace.
-  case system(residuals: [Expr], parametric: Bool, angular: [Bool])
+  /// `coordinates` are the coordinates a position names, `(r, theta) = (2, 0.8)`,
+  /// as functions of x and y: a drag of its point writes them back.
+  case system(residuals: [Expr], parametric: Bool, angular: [Bool], coordinates: [Expr]? = nil)
   /// A complex equation in w, `w^3 = 1`: its roots, the solutions of the
   /// system its real and imaginary parts make in x and y (ComplexRoots.swift).
   case complexSystem(equation: Expr)
@@ -116,6 +121,7 @@ public indirect enum MathObject: Equatable, Sendable {
     switch self {
     case .curveGraph, .curveImplicit: "implicit2d"
     case .region: "ineq2d"
+    case .regionParametric: "pregion"
     case .scalarField: "scalar2d"
     case .vectorField(let components): components.count == 3 ? "vfield3d" : "vfield2d"
     case .point: "point"
@@ -331,32 +337,10 @@ func classify(_ lowered: Expr, defined: Set<String>, fields: [String: Expr]) thr
     throw LanguageError(conditionAsNumber(misread))
   }
   // A row naming coordinates in a tuple on the left: a position
-  // `(r, theta) = (2, pi/4)`, or a planar flow `(r', theta') = (F, G)`
-  // (lib/coordinate.ts). Only the Cartesian flow (x', y') is ported.
-  if case .eq(.vec(let names), _) = expr,
-    names.allSatisfy({ if case .var = $0 { true } else { false } })
-  {
-    let written = names.compactMap { item -> String? in if case .var(let n) = item { n } else { nil } }
-    let flow = written.contains { $0.hasSuffix("'") }
-    if let spaceFlow = try lowerSpaceFlow(expr, fields) {
-      expr = spaceFlow
-    } else if try isSpacePosition(written, expr, fields) {
-      // Three coordinates on the left: a system in space, below.
-    } else if flow
-      ? written != ["x'", "y'"] : written.allSatisfy({ spaceVarNames.contains($0) || fields[$0] != nil })
-    {
-      throw Unsupported("coordinates named in a tuple")
-    }
-    if flow, written.count == 2, case .eq(_, let rhs) = expr {
-      guard case .vec(let velocity) = rhs else {
-        throw LanguageError("A coordinate flow needs two components on the right.")
-      }
-      if velocity.count != 2 {
-        throw LanguageError("Mismatched components: 2 on the left, \(velocity.count) on the right.")
-      }
-    }
-  }
-  if !fields.isEmpty { expr = substVars(expr, fields) }
+  // `(r, theta) = (2, pi/4)`, or a flow `(r', theta') = (F, G)`, which
+  // lowers to the Cartesian one (Coordinate.swift).
+  let coordinate = try coordinateRow(expr, fields)
+  expr = try lowerCoordinateFlow(expr, fields)
   let ode = try matchODE(expr)
   if let ode { expr = .vec(ode) }
   if let nested = nestedFigure(expr) { throw LanguageError("\(nested)(…) must be the whole expression.") }
@@ -489,7 +473,7 @@ func classify(_ lowered: Expr, defined: Set<String>, fields: [String: Expr]) thr
     if vars.contains("v") && !vars.contains("u") { throw LanguageError("Parametric surfaces use u (and v).") }
     if vars.contains("u") && vars.contains("v") {
       // Two parameters in the plane fill the region they trace.
-      if items.count == 2 { throw Unsupported("parametric regions") }
+      if items.count == 2 { return done(.regionParametric(coordinates: items)) }
       return done(.surfaceParametric(coordinates: items, paint: nil))
     }
     if vars.contains("u") {
@@ -520,7 +504,9 @@ func classify(_ lowered: Expr, defined: Set<String>, fields: [String: Expr]) thr
       throw LanguageError("Mismatched components: \(left.count) on the left, \(right.count) on the right.")
     }
     if complexRow { throw LanguageError("Complex values are not supported in systems.") }
-    return done(try classifySystem(left, right, vars: vars, hasParam: hasParam, parametric: paramSystem))
+    return done(
+      try classifySystem(
+        left, right, vars: vars, hasParam: hasParam, parametric: paramSystem, coordinate: coordinate, fields: fields))
   }
 
   if case .ineq = expr {

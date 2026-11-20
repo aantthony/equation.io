@@ -110,7 +110,7 @@ import Testing
   }
 
   @Test func whatIsNotPortedSaysSo() {
-    let rows = ["p = open(\"a.csv\")", "(x, y) = (1, 2)", "s_{n+1} = push(s_n, n)", "(u, v)"]
+    let rows = ["p = open(\"a.csv\")", "s_{n+1} = push(s_n, n)"]
     for text in rows {
       let row = analyze([text]).rows[0]
       #expect(row.unsupported != nil, "\(text)")
@@ -201,6 +201,7 @@ import Testing
             sharedX: (view["shared"] as? [String: Any])?["x"] as? Bool ?? false,
             sharedY: (view["shared"] as? [String: Any])?["y"] as? Bool ?? false)
         case "grid": (view["coords"] as? [String]).map { .gridCoords($0) } ?? .grid(mode: view["mode"] as! String)
+        case "surface": surfaceSpec(view["surface"] as! [String: Any])
         default: nil
         }
       // (JSON has no -0: a lattice view's down range from 0 is [-80, -0] on the site too.)
@@ -425,14 +426,15 @@ import Testing
     case "scalar3d": return .scalar3d(expr: try expr("expr"))
     case "spacecurve": return .spacecurve(residuals: try exprs("residuals"))
     case "system":
-      if o["coordinates"] != nil { throw FixtureError(description: "a positional system") }
       if let equation = o["complexEquation"] {
         return .complexSystem(residuals: try exprs("residuals"), equation: try decode(equation))
       }
       return .system(
         dim: (o["dim"] as! NSNumber).intValue, residuals: try exprs("residuals"),
-        parametric: o["parametric"] as? Bool ?? false, angular: o["angular"] as? [Bool] ?? [])
+        parametric: o["parametric"] as? Bool ?? false, angular: o["angular"] as? [Bool] ?? [],
+        coordinates: o["coordinates"] == nil ? nil : try exprs("coordinates"))
     case "vfield3d": return .vfield3d(comps: try exprs("comps"))
+    case "pregion": return .pregion(comps: try exprs("comps"))
     case "psurface": return .psurface(comps: try exprs("comps"), paint: try o["paint"].map { try decode($0) })
     case "density", "pmf":
       if o["mass"] != nil { throw FixtureError(description: "a density scaled by its intervals' length") }
@@ -570,4 +572,13 @@ func normalizeGLSL(_ glsl: String) -> String {
     }
   }
   return out
+}
+
+/// An on(…) row's surface as the site records it (lib/surface-map.ts `SurfaceMap`).
+private func surfaceSpec(_ surface: [String: Any]) -> ViewSpec? {
+  guard let embed = try? (surface["embed"] as! [Any]).map({ try decode($0) }) else { return nil }
+  return .surface(
+    SurfaceMap(
+      text: surface["text"] as! String, embed: embed, x: (surface["x"] as! [Any]).map(number),
+      y: (surface["y"] as! [Any]).map(number)))
 }

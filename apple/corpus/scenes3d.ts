@@ -53,6 +53,19 @@ const DOCUMENTS: Array<[text: string, time?: number]> = [
   ],
   ['hull((0, 0, 0), (2, 0, 0), (0, 2, 0), (0, 0, 2), (1, 1, 1)); hull((3, 0, 0), (3, 1, 0), (3, 0, 1)); z = -1'],
   ['z = x y / 4; polygon((0, 0), (2, 0), (2, 2), (0, 2)); segment((0, 0), (1, 3)); label((1, 2), "flat"); (1, 2)'],
+  // Rows drawn on a surface: painted per pixel, and carried point by point.
+  [
+    'on((X, Y, Z) = (2cos(y) cos(x), 2cos(y) sin(x), 2sin(y)), x = -pi..pi, y = -pi/2..pi/2); 4cos(y)^3 cos(3x); ' +
+      'sin((x - 4 asinh(tan(y)))/2) = 0; cos(y) cos(0.5) cos(x + 0.8) + sin(y) sin(0.5) > cos(0.35); camera(-0.5, 0.45, 8)',
+  ],
+  [
+    'a = 0.5; P = (0.6, 0.5); on((X, Y, Z) = (x, y, a x y), x = -2..2, y = -2..2); (1, 1); (cos(2pi u), sin(2pi u) + t); ' +
+      'segment((0, 0), P); polygon((0, 0), (1, 0), (0, 1)); label(P, "here"); [(0, -1), (1, -1)]; z = 2; (1, 1, 3)',
+    0.25,
+  ],
+  ['on((X, Y, Z) = (2cos(y) cos(x), 2cos(y) sin(x), 2sin(y)), x = -pi..pi, y = -pi/2..pi/2); a = 0.6; (cos(a) - sin(a) tan(y) cos(x), sin(a) sin(x)); (x^2, 1/x); (0, pi/2 - a)'],
+  ['a = 0.5; on((X, Y, Z) = (x, y, x y), x = -1..1, y = -1..1); (u/2, v/2); (a u, v - 1); (x, a)'],
+  ['z = 1; (u, v); a = 2; (a u cos(2 pi v), u sin(2 pi v))'],
   // Positions in coordinates named on the left.
   [
     'rho = sqrt(x^2 + y^2 + z^2); theta = atan2(y, x); phi = acos(z/rho); (rho, theta, phi) = (2, pi/4, pi/3); ' +

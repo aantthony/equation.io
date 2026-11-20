@@ -25,7 +25,7 @@ func objectNeeds3D(_ object: MathObject) -> Bool {
   case .surfaceImplicit, .surfaceParametric, .intersection, .scalarField3D, .curveTube: true
   case .point(let coordinates), .curveParametric(let coordinates): coordinates.count == 3
   case .vectorField(let components): components.count == 3
-  case .system(let residuals, _, _): residuals.count == 3
+  case .system(let residuals, _, _, _): residuals.count == 3
   // (A list of points in space; ListPlans.swift.)
   case .list(.points(3, _)), .list(.scatter(3, _)): true
   default: false
@@ -131,7 +131,8 @@ private func isAngle(_ e: Expr) -> Bool {
 /// Square systems (as many equations as unknowns) cut out isolated points;
 /// the solver finds them numerically.
 func classifySystem(
-  _ left: [Expr], _ right: [Expr], vars: NameSet, hasParam: Bool, parametric: Bool
+  _ left: [Expr], _ right: [Expr], vars: NameSet, hasParam: Bool, parametric: Bool,
+  coordinate: CoordinateRow? = nil, fields: [String: Expr] = [:]
 ) throws -> MathObject {
   let dim = vars.contains("z") ? 3 : 2
   if left.count == 2 && dim == 3 && !hasParam {
@@ -145,55 +146,17 @@ func classifySystem(
     let eqs = "\(left.count) equation\(left.count == 1 ? "" : "s")"
     throw LanguageError("\(eqs) in \(dim) unknowns — a system needs one equation per unknown.")
   }
+  // (Dragging writes the pointer's chart coordinates back, and a pointer
+  // ray does not determine a point in space: planar rows only.)
+  var coordinates: [Expr]?
+  if let coordinate, dim == 2, !hasParam,
+    !coordinate.rhs.contains(where: { e in
+      freeVars(e).contains { ["x", "y", "z"].contains($0) || fields[$0] != nil }
+    })
+  {
+    coordinates = coordinate.coords
+  }
   return .system(
-    residuals: zip(left, right).map { .bin(.sub, $0, $1) }, parametric: parametric, angular: left.map(isAngle))
-}
-
-/// A flow in space written on the axes themselves, `(x', y', z') = (P, Q, R)`
-/// in any order (lib/coordinate.ts `lowerCoordinateFlow`, its three-coordinate
-/// case): the velocities solved for x', y' and z' by Cramer's rule through
-/// the coordinates' Jacobian, a permutation here. Nil for any other row — a
-/// flow in coordinates that are fields is not ported.
-func lowerSpaceFlow(_ expr: Expr, _ fields: [String: Expr]) throws -> Expr? {
-  guard case .eq(.vec(let names), let right) = expr, names.count == 3 else { return nil }
-  var bases: [String] = []
-  for item in names {
-    guard case .var(let name) = item, name.hasSuffix("'") else { return nil }
-    bases.append(String(name.dropLast()))
-  }
-  guard Set(bases) == spaceVarNames else { return nil }
-  guard case .vec(let velocity) = right else {
-    throw LanguageError("A coordinate flow needs two components on the right.")
-  }
-  if velocity.count != 3 {
-    throw LanguageError("Mismatched components: 3 on the left, \(velocity.count) on the right.")
-  }
-  let axes = ["x", "y", "z"]
-  let jac: [[Expr]] = bases.map { base in axes.map { .num($0 == base ? 1 : 0) } }
-  // (An axis does not move with t: its time derivative is the 0 taken off.)
-  let rhs = velocity.map { Expr.bin(.sub, fields.isEmpty ? $0 : substVars($0, fields), .num(0)) }
-  return .eq(.vec(["x'", "y'", "z'"].map { .var($0) }), .vec(solveVec(jac, rhs)))
-}
-
-/// Whether a row names three coordinates in a tuple on the left — a position
-/// in space, `(rho, theta, phi) = (2, pi/4, pi/3)` — with what the site says
-/// of one it cannot read (lib/coordinate.ts `coordinateRow`). Its
-/// coordinates are axes or fields, which classify writes in: it is then a
-/// system in x, y and z like any other.
-func isSpacePosition(_ names: [String], _ expr: Expr, _ fields: [String: Expr]) throws -> Bool {
-  guard names.count == 3, names.allSatisfy({ spaceVarNames.contains($0) || fields[$0] != nil }),
-    case .eq(_, let right) = expr
-  else { return false }
-  if Set(names).count != names.count {
-    throw LanguageError(
-      "(\(names.joined(separator: ", "))) repeats a coordinate — use distinct coordinates to determine "
-        + "a point or flow.")
-  }
-  guard case .vec(let items) = right else {
-    throw LanguageError("A vector equation needs components on both sides.")
-  }
-  if items.count != 3 {
-    throw LanguageError("Mismatched components: 3 on the left, \(items.count) on the right.")
-  }
-  return true
+    residuals: zip(left, right).map { .bin(.sub, $0, $1) }, parametric: parametric, angular: left.map(isAngle),
+    coordinates: coordinates)
 }
