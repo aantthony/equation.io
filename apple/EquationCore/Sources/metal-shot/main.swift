@@ -183,6 +183,19 @@ if let path = options["--scene"] {
   }
   let graph = Graph2D(analysis, colors: colors)
   if flags.contains("--explain") { print(graph.animated ? "moves with t" : "still") }
+  // A split view (`---` rows): each panel in its box (GraphPanels.swift).
+  let panels = GraphPanels(analysis, colors: colors)
+  if panels.split {
+    guard let metal = MetalContext() else { fail("No Metal device.") }
+    let frame = panels.scene(
+      at: options["--time"].flatMap(Double.init) ?? 0, width: size[0] * scale, height: size[1] * scale, dpr: scale)
+    guard
+      let image = metal.image(
+        of: frame, width: Int(size[0] * scale), height: Int(size[1] * scale), dpr: scale, theme: theme)
+    else { fail("Couldn't draw.") }
+    save(image, out)
+    exit(0)
+  }
   scene = graph.scene(
     at: options["--time"].flatMap(Double.init) ?? 0, width: size[0] * scale, height: size[1] * scale, dpr: scale,
     theme: theme)
