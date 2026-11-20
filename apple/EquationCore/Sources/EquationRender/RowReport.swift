@@ -226,6 +226,7 @@ extension DocumentAnalysis {
         case "view": "sets the 2D window"
         case "camera": "sets the 3D camera"
         case "grid": "sets what draws behind its panel's plots"
+        case "surface": "draws its panel's 2D rows on a surface in space"
         default: "starts a new panel; the rows below it draw there"
         }
     } else if row.dist != nil {
