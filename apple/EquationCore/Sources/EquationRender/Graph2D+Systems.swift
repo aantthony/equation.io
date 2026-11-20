@@ -9,8 +9,8 @@ import Foundation
 /// Port: the site traces a parametric system in a worker and shows the last
 /// finished curve meanwhile; here it is traced where the frame is built, and
 /// kept (as the site keeps a solve) while the window stays inside the box it
-/// was solved over. A complex root's exact name (lib/complex-label.ts) waits
-/// on lib/poly.ts: the dots are drawn without one.
+/// was solved over. A complex root is drawn with its exact name
+/// (lib/complex-label.ts, the core's `complexRootLabel`).
 
 /// What each system row last solved, and over what. Shared by the copies of
 /// a graph, which are the same rows.
@@ -62,9 +62,10 @@ extension Graph2D {
     let residuals: [Expr]
     var parametric = false
     var angular: [Bool] = []
+    var complexEquation: Expr?
     switch cpu {
     case .system(2, let r, let p, let a, _): (residuals, parametric, angular) = (r, p, a)
-    case .complexSystem(let r, _): residuals = r
+    case .complexSystem(let r, let equation): (residuals, complexEquation) = (r, equation)
     default: return
     }
     // (With no window given, the one a graph opens on.)
@@ -93,7 +94,8 @@ extension Graph2D {
       return
     }
     for p in points where p.count >= 2 {
-      overlay.points.append(.init(x: p[0], y: p[1], color: color))
+      overlay.points.append(
+        .init(x: p[0], y: p[1], color: color, label: complexRootLabel(complexEquation, p, env)))
     }
   }
 }

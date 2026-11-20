@@ -785,7 +785,7 @@ func polynomialRoots(_ e: Expr, _ v: String) -> PolyRoots? {
   return .roots(stableSorted(out) { $0.x < $1.x })
 }
 
-struct ComplexRootLabel: Equatable {
+struct ComplexRootLabel: Equatable, Sendable {
   var re: Double
   var im: Double
   var label: String
