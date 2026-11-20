@@ -16,6 +16,7 @@ import { writeFileSync } from 'node:fs';
 import { analyzeRows } from '../../lib/analysis.ts';
 import { diff } from '../../lib/diff.ts';
 import { type PmfStems, type RVSystem, markerHeight, shadePolygon } from '../../lib/dist.ts';
+import { runPaths, shadeNames, shadeRuns } from '../../lib/intshade.ts';
 import {
   childrenOf,
   type Expr,
@@ -43,6 +44,7 @@ import { EXAMPLES } from '../../web/examples.ts';
 import { ALGEBRA_CASES } from './cases-algebra.ts';
 import { DISCRETE_CASES } from './cases-discrete.ts';
 import { FITS_CASES } from './cases-fits.ts';
+import { INTEGRAL_CASES } from './cases-integrals.ts';
 import { PANEL_CASES, recordGridFields, recordStates } from './cases-panels.ts';
 
 const fixtures = new URL('../EquationCore/Tests/EquationCoreTests/Fixtures/', import.meta.url);
@@ -139,6 +141,16 @@ function drawnOf(plan: { type: string } | undefined, rvs: RVSystem, constEnv: Re
     }
     case 'expect':
       return { mark: attempt(() => markerHeight(rvs, cpu.rv, env)) };
+    case 'value': {
+      // The area a definite integral's row shades (lib/intshade.ts), through a window.
+      const shade = cpu.shade;
+      if (!shade) return null;
+      return {
+        names: shadeNames(shade),
+        runs: attempt(() => shadeRuns(shade, env, window.lo, window.hi)),
+        paths: attempt(() => shadeRuns(shade, env, window.lo, window.hi).map(run => runPaths(run, -1.5, 2.5))),
+      };
+    }
     default:
       return null;
   }
@@ -816,6 +828,7 @@ CASES.forEach((text, k) => docs.push({ name: `case ${k + 1}`, rows: splitStateme
 DISCRETE_CASES.forEach((text, k) => docs.push({ name: `case discrete ${k + 1}`, rows: splitStatements(text) }));
 FITS_CASES.forEach((text, k) => docs.push({ name: `case fits ${k + 1}`, rows: splitStatements(text) }));
 ALGEBRA_CASES.forEach((text, k) => docs.push({ name: `case algebra ${k + 1}`, rows: splitStatements(text) }));
+INTEGRAL_CASES.forEach((text, k) => docs.push({ name: `case integral ${k + 1}`, rows: splitStatements(text) }));
 randomDocs(Number(process.env.RANDOM_DOCS ?? 600)).forEach((text, k) => docs.push({ name: `case random ${k + 1}`, rows: splitStatements(text) }));
 randomListDocs(Number(process.env.RANDOM_LIST_DOCS ?? 400)).forEach((text, k) =>
   docs.push({ name: `case random list ${k + 1}`, rows: splitStatements(text) }),
