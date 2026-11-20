@@ -58,6 +58,16 @@ public enum CpuPlan: Equatable, Sendable {
   case automaton(rule: Expr, radius: Int, seed: Expr?, dims: Int, axes: [String])
   /// A table's value over the cells.
   case lattice(expr: Expr, axes: [String])
+  // In space (Compiler3D.swift).
+  /// `heightmap`: f, when the surface is z = f(x, y).
+  case implicit3d(residual: Expr, equation: Expr, heightmap: Expr?)
+  case scalar3d(expr: Expr)
+  case spacecurve(residuals: [Expr])
+  case system(dim: Int, residuals: [Expr], parametric: Bool, angular: [Bool])
+  case vfield3d(comps: [Expr])
+  /// A `pcurve` in space with its `tube` radius (the TypeScript's plan is one type).
+  case tube(comps: [Expr], radius: Expr, d1: [Expr]?, d2: [Expr]?, d3: [Expr]?)
+  case psurface(comps: [Expr], paint: Expr?)
 
   /// The plan's `type`, as the TypeScript spells it.
   public var type: String {
@@ -82,6 +92,13 @@ public enum CpuPlan: Equatable, Sendable {
     case .bifurcation: "bifurcation"
     case .automaton: "automaton"
     case .lattice: "lattice"
+    case .implicit3d: "implicit3d"
+    case .scalar3d: "scalar3d"
+    case .spacecurve: "spacecurve"
+    case .system: "system"
+    case .vfield3d: "vfield3d"
+    case .tube: "pcurve"
+    case .psurface: "psurface"
     }
   }
 }
@@ -121,6 +138,14 @@ public struct GpuPlan: Equatable, Sendable {
     case cobweb(curveField: String)
     /// A recurrence's map in the float `a`, its parameter the pixel's x.
     case bifurcation(field: String)
+    // In space (Compiler3D.swift).
+    /// F in floats x, y, z and t; `grad` its gradient, where it has one.
+    case implicit3d(field: String, grad: [String]?)
+    case scalar3d(field: String)
+    case vfield3d(comps: [String])
+    /// P(u, v), with its tangents when they are cheaper than finite
+    /// differences, and the scalar in u and v it is coloured by.
+    case psurface(comps: [String], du: [String]?, dv: [String]?, paint: String?)
   }
 
   public var type: String {
@@ -136,6 +161,10 @@ public struct GpuPlan: Equatable, Sendable {
     case .tfield2d: "tfield2d"
     case .cobweb: "cobweb"
     case .bifurcation: "bifurcation"
+    case .implicit3d: "implicit3d"
+    case .scalar3d: "scalar3d"
+    case .vfield3d: "vfield3d"
+    case .psurface: "psurface"
     }
   }
 }
@@ -182,7 +211,10 @@ public func compileCpu(_ classified: Classified) throws -> CpuPlan {
   case .scalarField(let expr):
     return .scalar2d(expr: try real(expr))
   case .vectorField(let components):
-    return .vfield2d(comps: try components.map(real))
+    let comps = try components.map(real)
+    return comps.count == 3 ? .vfield3d(comps: comps) : .vfield2d(comps: comps)
+  case .curveTube, .surfaceImplicit, .surfaceParametric, .intersection, .scalarField3D, .system:
+    return try compileCpu3D(classified.object)
   case .point(let coordinates):
     return .point(dim: coordinates.count, coords: try coordinates.map(real))
   case .complexPoint(let expr):
@@ -227,7 +259,7 @@ public func compileCpu(_ classified: Classified) throws -> CpuPlan {
 
 /// GLSL for an expression, with what the shader emitter does not cover yet
 /// told apart from what the site refuses too.
-private func glsl(_ e: Expr) throws -> String {
+func glsl(_ e: Expr) throws -> String {
   do {
     return try toGLSL(e)
   } catch {
@@ -283,6 +315,10 @@ public func compileGpu(_ classified: Classified) throws -> GpuPlan {
     return plan(.ineq2d(field: field, edges: fields.filter(\.edge).map(\.code)))
   case .scalarField(let expr):
     return plan(.scalar2d(field: try scalar(expr)))
+  case .vectorField(let components) where components.count == 3:
+    return plan(try compileGpu3D(classified.object, sub, scalar))
+  case .surfaceImplicit, .surfaceParametric, .scalarField3D:
+    return plan(try compileGpu3D(classified.object, sub, scalar))
   case .vectorField(let components):
     return plan(.vfield2d(fx: try glsl(sub(components[0])), fy: try glsl(sub(components[1]))))
   case .colorField(let space, let channels):
@@ -302,7 +338,7 @@ public func compileGpu(_ classified: Classified) throws -> GpuPlan {
   case .bifurcation(let expr, let variable, _):
     return plan(.bifurcation(field: try glsl(sub(substVars(expr, [variable: .var("a")])))))
   case .point, .complexPoint, .curveParametric, .complexPath, .value, .note, .label, .figure, .tuple, .sequence,
-    .automaton, .lattice:
+    .automaton, .lattice, .curveTube, .intersection, .system:
     return plan(.none)
   }
 }

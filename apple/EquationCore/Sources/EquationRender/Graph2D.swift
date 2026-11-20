@@ -87,6 +87,9 @@ public struct Graph2D: Equatable, Sendable {
         var seed = 0.5
         if case .bifurcation(_, _, let a0Name)? = row.cpu { seed = Self.seed(a0Name, analysis.env) }
         bifs.append(Bif2D(field: field, color: color, params: gpu.params, uniforms: ["uSeed": seed]))
+      case .implicit3d, .scalar3d, .vfield3d, .psurface:
+        // Drawn in space (Document3D).
+        break
       }
     }
     // A vector field's streamlines flow whether or not it reads t.

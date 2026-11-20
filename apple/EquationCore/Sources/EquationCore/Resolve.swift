@@ -402,6 +402,7 @@ struct Resolver {
     if opts.inDefinition, name == "rgb" || name == "hsl" || name == "oklch" || name == "label" {
       throw LanguageError("\(name)(…) must be a whole row, not part of a definition.")
     }
+    if name == "tube" || name == "revolve" { return try resolveSpaceForm(name, args) }
     guard
       elementaryFunctions.contains(name) || complexFunctions.contains(name) || geometryFunctions.contains(name)
     else {

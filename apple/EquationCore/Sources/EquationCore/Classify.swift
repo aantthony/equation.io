@@ -65,6 +65,20 @@ public indirect enum MathObject: Equatable, Sendable {
   case automaton(rule: Expr, radius: Int, seed: Expr?, dims: Int, axes: [String])
   /// A function on the integer lattice, `T[i, j] = …`.
   case lattice(expr: Expr, axes: [String])
+  // In space (Classify3D.swift).
+  /// `tube(curve[, radius])`: a curve in space swept as a lit tube.
+  case curveTube(coordinates: [Expr], radius: Expr)
+  /// An equation in x, y and z: the surface it holds on.
+  case surfaceImplicit(residual: Expr, equation: Expr)
+  /// A triple in u and v; `paint` a scalar in u and v it is coloured by.
+  case surfaceParametric(coordinates: [Expr], paint: Expr?)
+  /// `(f, g) = (a, b)` in x, y and z: the curve two surfaces meet in.
+  case intersection(residuals: [Expr])
+  /// A bare expression in x, y and z, drawn as a translucent cloud.
+  case scalarField3D(expr: Expr)
+  /// A square system, one residual per unknown: its isolated solutions, or
+  /// with u (`parametric`) the curve they trace.
+  case system(residuals: [Expr], parametric: Bool, angular: [Bool])
 
   /// The kind as the site's tools name it (`publicKind`).
   public var publicKind: String {
@@ -72,9 +86,14 @@ public indirect enum MathObject: Equatable, Sendable {
     case .curveGraph, .curveImplicit: "implicit2d"
     case .region: "ineq2d"
     case .scalarField: "scalar2d"
-    case .vectorField: "vfield2d"
+    case .vectorField(let components): components.count == 3 ? "vfield3d" : "vfield2d"
     case .point: "point"
-    case .curveParametric: "pcurve"
+    case .curveParametric, .curveTube: "pcurve"
+    case .surfaceImplicit: "implicit3d"
+    case .surfaceParametric: "psurface"
+    case .intersection: "spacecurve"
+    case .scalarField3D: "scalar3d"
+    case .system: "system"
     case .value: "value"
     case .label: "label"
     case .figure: "polygon"
@@ -287,6 +306,9 @@ func classify(_ lowered: Expr, defined: Set<String>, fields: [String: Expr]) thr
   let ode = try matchODE(expr)
   if let ode { expr = .vec(ode) }
   if let nested = nestedFigure(expr) { throw LanguageError("\(nested)(…) must be the whole expression.") }
+  let tube = try matchTube(expr)
+  if let tube { expr = tube.inner }
+  if let surface = try matchRevolve(expr) { expr = surface }
 
   let special = specialForm(expr)
   if let nested = nestedSpecial(expr, isRoot: true) {
@@ -300,6 +322,7 @@ func classify(_ lowered: Expr, defined: Set<String>, fields: [String: Expr]) thr
     vars.insert("x")
     vars.insert("y")
   }
+  if let tube { try checkTubeRadius(tube.radius, &vars) }
   var params: [String] = []
   for v in vars.list where defined.contains(v) {
     params.append(v)
@@ -335,8 +358,8 @@ func classify(_ lowered: Expr, defined: Set<String>, fields: [String: Expr]) thr
 
   func done(_ object: MathObject) -> Classified {
     var moving = animated
-    if case .vectorField = object { moving = true }
-    return Classified(object: object, animated: moving, needs3D: false, params: params)
+    if case .vectorField(let components) = object, components.count == 2 { moving = true }
+    return Classified(object: object, animated: moving, needs3D: objectNeeds3D(object), params: params)
   }
 
   // A matrix or tensor on a row of its own.
@@ -391,14 +414,21 @@ func classify(_ lowered: Expr, defined: Set<String>, fields: [String: Expr]) thr
     }
     if hasSpace || ode != nil {
       if hasParam { throw LanguageError("Vector fields cannot use u or v.") }
-      if items.count == 3 { throw Unsupported("vector fields in space") }
+      if items.count == 3 { return done(.vectorField(components: items)) }
       if vars.contains("z") { throw LanguageError("A field using z needs three components.") }
       return done(.vectorField(components: items))
     }
     if vars.contains("v") && !vars.contains("u") { throw LanguageError("Parametric surfaces use u (and v).") }
-    if vars.contains("u") && vars.contains("v") { throw Unsupported("parametric regions and surfaces") }
-    if items.count == 3 { throw Unsupported(vars.contains("u") ? "parametric curves in space" : "points in space") }
-    if vars.contains("u") { return done(.curveParametric(coordinates: items)) }
+    if vars.contains("u") && vars.contains("v") {
+      // Two parameters in the plane fill the region they trace.
+      if items.count == 2 { throw Unsupported("parametric regions") }
+      return done(.surfaceParametric(coordinates: items, paint: nil))
+    }
+    if vars.contains("u") {
+      if let tube { return done(.curveTube(coordinates: items, radius: tube.radius)) }
+      return done(.curveParametric(coordinates: items))
+    }
+    if tube != nil { throw LanguageError("tube(…) needs a curve in u, like tube((cos(u), sin(u), u/4)).") }
     return done(.point(coordinates: items))
   }
 
@@ -422,7 +452,7 @@ func classify(_ lowered: Expr, defined: Set<String>, fields: [String: Expr]) thr
       throw LanguageError("Mismatched components: \(left.count) on the left, \(right.count) on the right.")
     }
     if complexRow { throw LanguageError("Complex values are not supported in systems.") }
-    throw Unsupported("systems of equations")
+    return done(try classifySystem(left, right, vars: vars, hasParam: hasParam, parametric: paramSystem))
   }
 
   if case .ineq = expr {
@@ -452,7 +482,7 @@ func classify(_ lowered: Expr, defined: Set<String>, fields: [String: Expr]) thr
       // Port: a complex equation is a system in x and y (lib/plot.ts), solved for its roots.
       throw Unsupported("complex equations")
     }
-    if vars.contains("z") { throw Unsupported("surfaces in space") }
+    if vars.contains("z") { return done(.surfaceImplicit(residual: .bin(.sub, l, r), equation: expr)) }
     let graphRhs: Expr? = isVar(l, "y") ? r : isVar(r, "y") ? l : nil
     let levels = levelFamily(l, r, params, defined)
     if let graphRhs, !freeVars(graphRhs).contains("y"), !freeVars(graphRhs).contains("w") {
@@ -468,7 +498,7 @@ func classify(_ lowered: Expr, defined: Set<String>, fields: [String: Expr]) thr
     if !hasSpace && !hasParam { return done(.complexPoint(expr: expr)) }
     return done(.complexField(form: .potential, expr: expr))
   }
-  if vars.contains("z") { throw Unsupported("scalar fields in space") }
+  if vars.contains("z") { return done(.scalarField3D(expr: expr)) }
   if hasSpace { return done(.scalarField(expr: expr)) }
   return done(.value(expr: expr))
 }

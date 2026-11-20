@@ -97,7 +97,7 @@ import Testing
 
   @Test func whatIsNotPortedSaysSo() {
     let rows = [
-      "L = [1, 2, 3]", "z = x^2 + y^2", "X ~ Normal(0, 1)", "s_{n+1} = push(s_n, n)", "int[0..1] x dx", "(u, u, u)",
+      "L = [1, 2, 3]", "(x, y) = (1, 2)", "X ~ Normal(0, 1)", "s_{n+1} = push(s_n, n)", "int[0..1] x dx", "(u, v)",
     ]
     for text in rows {
       let row = analyze([text]).rows[0]
@@ -257,6 +257,19 @@ import Testing
         same("curveField", curveField, gpu["curveField"])
       case .bifurcation(let field):
         same("field", field, gpu["field"])
+      case .implicit3d(let field, let grad):
+        if gpu["plane"] != nil { out.append("gpu: the site draws a plane here") }
+        same("field", field, gpu["field"])
+        sameList("grad", grad, gpu["grad"])
+      case .scalar3d(let field):
+        same("field", field, gpu["field"])
+      case .vfield3d(let comps):
+        sameList("comps", comps, gpu["comps"])
+      case .psurface(let comps, let du, let dv, let paint):
+        sameList("comps", comps, gpu["comps"])
+        sameList("du", du, gpu["du"])
+        sameList("dv", dv, gpu["dv"])
+        same("paint", paint, gpu["paint"])
       }
     }
     return out
@@ -286,8 +299,12 @@ import Testing
       return .scalar2d(expr: try expr("expr"))
     case "point": return .point(dim: (o["dim"] as! NSNumber).intValue, coords: try exprs("coords"))
     case "pcurve":
-      if o["tube"] != nil { throw FixtureError(description: "a tube") }
       func optional(_ key: String) throws -> [Expr]? { try (o[key] as? [Any])?.map(decode) }
+      if o["tube"] != nil {
+        return .tube(
+          comps: try exprs("comps"), radius: try expr("tube"), d1: try optional("d1"), d2: try optional("d2"),
+          d3: try optional("d3"))
+      }
       return .pcurve(
         dim: (o["dim"] as! NSNumber).intValue, comps: try exprs("comps"), d1: try optional("d1"),
         d2: try optional("d2"), d3: try optional("d3"))
@@ -335,6 +352,21 @@ import Testing
     case "lattice":
       if o["rows"] != nil { throw FixtureError(description: "a table of computed rows") }
       return .lattice(expr: try expr("expr"), axes: o["axes"] as! [String])
+    case "implicit3d":
+      return .implicit3d(
+        residual: try expr("residual"), equation: try expr("equation"),
+        heightmap: try o["heightmap"].map { try decode($0) })
+    case "scalar3d": return .scalar3d(expr: try expr("expr"))
+    case "spacecurve": return .spacecurve(residuals: try exprs("residuals"))
+    case "system":
+      if o["complexEquation"] != nil || o["coordinates"] != nil {
+        throw FixtureError(description: "a complex or positional system")
+      }
+      return .system(
+        dim: (o["dim"] as! NSNumber).intValue, residuals: try exprs("residuals"),
+        parametric: o["parametric"] as? Bool ?? false, angular: o["angular"] as? [Bool] ?? [])
+    case "vfield3d": return .vfield3d(comps: try exprs("comps"))
+    case "psurface": return .psurface(comps: try exprs("comps"), paint: try o["paint"].map { try decode($0) })
     default: throw FixtureError(description: "a \(o["type"]!) plan")
     }
   }
