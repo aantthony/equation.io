@@ -23,6 +23,12 @@ public struct Graph2D: Equatable, Sendable {
   /// The sequence rows that plot their partial sums S_N = Σ a_n instead of
   /// their terms (the site's toggle on such a row).
   public var partialSums: Set<Int> = []
+  /// The index names across and down when the graph is a lattice panel (its
+  /// rows are an automaton's or a table's, or its view row names them): the
+  /// grid then runs between cells and the cells are numbered. Nil for the plane.
+  public var lattice: [String]?
+  /// The cells kept from frame to frame.
+  let discrete = DiscreteCache()
 
   public struct Window: Equatable, Sendable {
     public var x: [Double]?
@@ -44,10 +50,14 @@ public struct Graph2D: Equatable, Sendable {
     var complexLayers = ComplexLayers()
     var tfields: [TField2D] = []
     var bifs: [Bif2D] = []
+    var written: [String]?
+    func error(_ row: RowAnalysis) -> String? { row.error ?? row.unsupported }
     for (index, row) in analysis.rows.enumerated() {
       switch row.view {
       case .grid(let mode)?: grid = Frame2D.Grid(rawValue: mode) ?? .on
-      case .view(let x, let y, let ratio, _, _)?: window = Window(x: x, y: y, ratio: ratio)
+      case .view(let x, let y, let ratio, _, let axes)?:
+        window = Window(x: x, y: y, ratio: ratio)
+        if error(row) == nil, written == nil { written = axes }
       default: break
       }
       if row.classified?.animated == true { animated = true }
@@ -85,6 +95,11 @@ public struct Graph2D: Equatable, Sendable {
     complexLayers.write(to: &layers)
     if !tfields.isEmpty { layers.tfields = tfields }
     if !bifs.isEmpty { layers.bifs = bifs }
+    lattice = Self.latticeAxes(analysis)
+    if let lattice, let written, let asked = window {
+      let oriented = Self.orientLattice(x: asked.x, y: asked.y, written: written, axes: lattice)
+      window = Window(x: oriented.x, y: oriented.y, ratio: asked.ratio)
+    }
   }
 
   /// The constants' values `time` seconds after the graph opened: what the uniforms read.
@@ -149,9 +164,21 @@ public struct Graph2D: Equatable, Sendable {
 
   /// The window the graph opens with in a frame `width` × `height` pixels:
   /// the one a `view(…)` row asks for, or else the origin at the center with
-  /// 12 units across the shorter side.
-  public func opening(width: Double, height: Double) -> View2D {
+  /// 12 units across the shorter side. A lattice with no view row opens on
+  /// its cells (lib/automaton.ts `latticeFrame`), a table's big enough to
+  /// print its values at `dpr` pixels to a point.
+  public func opening(width: Double, height: Double, dpr: Double = 1) -> View2D {
     var view = View2D.opening(width: width, height: height)
+    if lattice != nil, window == nil, width > 0, height > 0 {
+      let first = analysis.rows.lazy.filter { $0.error == nil && $0.unsupported == nil }.compactMap(\.cpu).first {
+        switch $0 {
+        case .automaton, .lattice: true
+        default: false
+        }
+      }
+      let frame = latticeFrame(first, analysis.env, width: width, height: height, cellPx: (latticeValuePx + 30) * dpr)
+      return View2D(cx: frame.cx, cy: frame.cy, upp: frame.upp)
+    }
     guard let window, width > 0, height > 0 else { return view }
     if let ratio = window.ratio, ratio > 0, ratio.isFinite { view.ratio = ratio }
     if let x = window.x, x.count == 2 { view.cx = (x[0] + x[1]) / 2 }
@@ -163,11 +190,20 @@ public struct Graph2D: Equatable, Sendable {
     return view
   }
 
+  /// How the frame is drawn: how much of the grid, and whether between the
+  /// cells of a lattice.
+  public var frame: Frame2D { Frame2D(grid: grid, lattice: lattice == nil ? nil : true) }
+
   /// The frame written down, for a picture of it (`MetalContext.image`).
-  public func scene(at time: Double, width: Double, height: Double, theme: GraphTheme = .light) -> Scene2D {
-    var scene = Scene2D(layers: layers, env: environment(at: time), frame: Frame2D(grid: grid), time: time)
-    let view = opening(width: width, height: height)
+  public func scene(
+    at time: Double, width: Double, height: Double, dpr: Double = 1, theme: GraphTheme = .light
+  ) -> Scene2D {
+    var scene = Scene2D(layers: layers, env: environment(at: time), frame: frame, time: time)
+    let view = opening(width: width, height: height, dpr: dpr)
     scene.view = view
+    let drawn = cells(at: time, view: view, width: width, height: height, dpr: dpr)
+    if !drawn.cells.isEmpty { scene.layers.cells = drawn.cells }
+    scene.lattice = drawn.labels
     scene.overlay = overlay(at: time, bounds: Bounds(view: view, width: width, height: height), theme: theme)
     return scene
   }

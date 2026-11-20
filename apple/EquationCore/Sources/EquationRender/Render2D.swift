@@ -131,6 +131,8 @@ public struct Frame2D: Equatable, Codable, Sendable {
   /// The ticks of the axes the panel's view(…) maps, which are gridded at
   /// them: the site's `maps`, as `mappedTicks` reads them (Frag2D+Ticks.swift).
   public var ticks: MappedTicks?
+  /// A lattice panel: its grid runs between the cells (`latticeGrid`).
+  public var lattice: Bool?
 
   public struct Box: Equatable, Codable, Sendable {
     public var x: Double
@@ -150,10 +152,11 @@ public struct Frame2D: Equatable, Codable, Sendable {
     case on, off, axes
   }
 
-  public init(vp: Box? = nil, grid: Grid? = nil, ticks: MappedTicks? = nil) {
+  public init(vp: Box? = nil, grid: Grid? = nil, ticks: MappedTicks? = nil, lattice: Bool? = nil) {
     self.vp = vp
     self.grid = grid
     self.ticks = ticks
+    self.lattice = lattice
   }
 }
 
@@ -205,7 +208,9 @@ public final class Renderer2D {
 
     let grid = frame.grid ?? .on
     var specs = grid == .off ? [] : gridSpecs ?? []
-    if grid != .off, specs.isEmpty {
+    if grid != .off, specs.isEmpty, frame.lattice == true {
+      specs = latticeGrid(view)
+    } else if grid != .off, specs.isEmpty {
       let spacing = niceSpacing(view.upp, 90)
       let spacingY = niceSpacing(view.uppY, 90)
       specs = [

@@ -740,6 +740,12 @@ public func cellShades(_ grid: CellGrid) -> [UInt8] {
   return out
 }
 
+/// A cell's value as a lattice panel prints it (web/main.ts `latticeValues`):
+/// a whole number as it is, anything else to three significant figures.
+public func cellText(_ v: Double) -> String {
+  JS.isInteger(v) ? JS.string(v) : JS.string(JS.number(JS.toPrecision(v, 3)))
+}
+
 /// A table's values as shades (`tableShades`): every finite value shows, the
 /// smallest faint and the largest solid (a Cayley table's identity 0 is
 /// still a cell), and undefined cells are empty.
