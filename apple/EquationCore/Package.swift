@@ -7,6 +7,7 @@ let package = Package(
   products: [
     .library(name: "EquationCore", targets: ["EquationCore"]),
     .library(name: "EquationRender", targets: ["EquationRender"]),
+    .library(name: "EquationAssist", targets: ["EquationAssist"]),
   ],
   targets: [
     // The language core: no Foundation, so it also builds for WebAssembly.
@@ -22,5 +23,9 @@ let package = Package(
       resources: [.copy("Fixtures")]
     ),
     .testTarget(name: "EquationRenderTests", dependencies: ["EquationCore", "EquationRender"]),
+    // Ask's lookups (lib/assistant-tools.ts), answered from data the app
+    // bundles: Foundation only, and nothing of the language's.
+    .target(name: "EquationAssist"),
+    .testTarget(name: "EquationAssistTests", dependencies: ["EquationAssist"], resources: [.copy("Fixtures")]),
   ]
 )

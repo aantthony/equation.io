@@ -255,6 +255,24 @@ export function builtinNames(): string[] {
   return [...new Set([...FUNCTIONS, ...Object.keys(signatures)])];
 }
 
+/**
+ * What builtinHelp reads, as data, for a port that must answer as it does
+ * (the Apple app's lookups, apple/EquationCore EquationAssist): every name in
+ * builtinNames' order, the parser's functions, each signature and
+ * description by its key, and the distributions' names and aliases, lower
+ * case, with the family each spells (distFamily).
+ */
+export function builtinTable() {
+  return {
+    names: builtinNames(),
+    functions: [...FUNCTIONS],
+    signatures,
+    distributions: Object.fromEntries(
+      DIST_FAMILIES.flatMap(f => [f.name, ...f.aliases].map(n => [n.toLowerCase(), f.name])),
+    ),
+  };
+}
+
 /** A built-in function's signature and description, as autocomplete shows
  *  them; case folds as the parser folds it (`Sin` is sin). The call forms
  *  that are not functions — P(…), view(…), a distribution — only count when
