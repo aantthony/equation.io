@@ -68,6 +68,10 @@ public struct Document3D: Equatable, Sendable {
   /// integral curves.
   public var streamlines: Set<Int> = []
   public var arrows: Set<Int> = []
+  /// The rows whose curve in space wears a comb of its curvature, and of its
+  /// torsion (Curve3D+Combs.swift): toggles of the page too.
+  public var combK: Set<Int> = []
+  public var combT: Set<Int> = []
   /// The theme the panel is drawn in, which shades a panel's bare surface.
   public var theme: GraphTheme = .light
   /// The surface the panel's 2D rows are drawn on (an on(…) row; Document3D+Surface.swift).
@@ -249,8 +253,12 @@ public struct Document3D: Equatable, Sendable {
         scene.curves.append(Scene3D.Curve(pts: pts, color: color))
         break
       }
-      scene.curves.append(Scene3D.Curve(pts: Self.sample(comps, env), color: color))
-    case .tube(let comps, let radius, let d1, _, _):
+      let pts = Self.sample(comps, env)
+      scene.curves.append(Scene3D.Curve(pts: pts, color: color))
+      if case .pcurve(_, _, let d1, let d2, let d3) = cpu {
+        drawCombs(index, pts, [d1, d2, d3], color, env, into: &scene)
+      }
+    case .tube(let comps, let radius, let d1, let d2, let d3):
       // Tubes are opt-in through tube(…). The radius may use sliders and t;
       // while it evaluates ≤ 0 (say, mid slider drag) the curve draws as a
       // bare line instead of an inside-out tube.
@@ -262,6 +270,7 @@ public struct Document3D: Equatable, Sendable {
       } else {
         scene.curves.append(Scene3D.Curve(pts: pts, color: color))
       }
+      drawCombs(index, pts, [d1, d2, d3], color, env, into: &scene)
     case .point(_, let coords):
       let p = coords.map { value($0, env) }
       guard p.count >= 2, p.allSatisfy(\.isFinite) else { break }
@@ -380,6 +389,7 @@ public struct Document3D: Equatable, Sendable {
   public static func == (a: Document3D, b: Document3D) -> Bool {
     a.analysis == b.analysis && a.colors == b.colors && a.grid == b.grid && a.camera == b.camera && a.spin == b.spin
       && a.locked == b.locked && a.animated == b.animated && a.streamlines == b.streamlines && a.arrows == b.arrows
+      && a.combK == b.combK && a.combT == b.combT
   }
 }
 

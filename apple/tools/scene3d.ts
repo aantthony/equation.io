@@ -12,7 +12,8 @@
  *
  * It follows web/scene.ts renderPanel for the rows a document can draw
  * without the page: surfaces, planes, clouds, parametric surfaces and
- * curves (tubes too), points, polygons and hulls, vector fields
+ * curves (tubes too; a curve's curvature and torsion combs when its row's
+ * note says `# kappa`, `# tau`), points, polygons and hulls, vector fields
  * (streamlines when the row's note says `# streamlines`, arrows for
  * `# arrows`: the page keeps those toggles outside the text), systems and
  * intersections. What needs the page's state — orbits, trails, geodesics,
@@ -20,7 +21,7 @@
  */
 import { analyzeRows } from '../../lib/analysis.ts';
 import { type CpuPlan, type GpuPlan, parametricGLSL } from '../../lib/compiler.ts';
-import { buildTube, curveFrames } from '../../lib/curve3d.ts';
+import { buildComb, buildTube, combScale, curveExtent, curveFrames } from '../../lib/curve3d.ts';
 import { evaluateFrame } from '../../lib/env.ts';
 import { type Expr, evaluate, substVars } from '../../lib/expr.ts';
 import { fanFillable, vertexSampler } from '../../lib/figure-vertices.ts';
@@ -249,9 +250,27 @@ export function graphJSON(
               k % 3 < 2 ? flat[((k / 3) | 0) * 2 + (k % 3)] : 0,
             )
           : sample(cpu.comps)!;
-        if (radius > 0 && isFinite(radius)) {
+        // The combs a row's note asks for (`# kappa`, `# tau`): toggles of the page, as the streamlines are.
+        const combK = cpu.dim === 3 && /#.*kappa/.test(text);
+        const combT = cpu.dim === 3 && /#.*tau/.test(text);
+        if ((radius > 0 && isFinite(radius)) || combK || combT) {
           const frames = curveFrames(pts, sample(cpu.d1), sample(cpu.d2), sample(cpu.d3));
-          scene.tubes.push({ ...buildTube(pts, frames, radius, TUBE_SEGMENTS), color });
+          if (radius > 0 && isFinite(radius)) {
+            scene.tubes.push({ ...buildTube(pts, frames, radius, TUBE_SEGMENTS), color });
+          } else scene.curves.push({ pts, color });
+          const extent = curveExtent(pts);
+          if (combK) {
+            const shade = color.map(c => c * 0.7) as RGB;
+            const comb = buildComb(pts, frames.frenetNormal, frames.kappa, -combScale(frames.kappa, extent), 4);
+            scene.segments.push({ pts: comb.teeth, color: shade });
+            scene.curves.push({ pts: comb.tips, color: shade });
+          }
+          if (combT) {
+            const shade = color.map(c => c * 0.45 + 0.25) as RGB;
+            const comb = buildComb(pts, frames.frenetBinormal, frames.tau, combScale(frames.tau, extent), 4);
+            scene.segments.push({ pts: comb.teeth, color: shade });
+            scene.curves.push({ pts: comb.tips, color: shade });
+          }
         } else scene.curves.push({ pts, color });
         break;
       }

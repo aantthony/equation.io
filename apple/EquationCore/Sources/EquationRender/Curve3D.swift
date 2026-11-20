@@ -9,8 +9,8 @@ import Foundation
 /// All point arrays are flat xyz triples. NaN samples flow through as NaN
 /// frames; the mesh builder skips geometry touching them.
 ///
-/// Not ported: curvature, torsion and the Frenet directions, which only the
-/// curvature and torsion combs read (toggles the page keeps outside the text).
+/// Curvature, torsion and the Frenet directions, which only the curvature
+/// and torsion combs read, are Curve3D+Combs.swift.
 struct CurveFrames {
   /// Unit tangent per sample.
   var tangent: [Float]

@@ -38,6 +38,8 @@ import Testing
     for (k, text) in rows.enumerated() {
       if text.contains("# streamlines") { document.streamlines.insert(k) }
       if text.contains("# arrows") { document.arrows.insert(k) }
+      if text.range(of: "#.*kappa", options: .regularExpression) != nil { document.combK.insert(k) }
+      if text.range(of: "#.*tau", options: .regularExpression) != nil { document.combT.insert(k) }
     }
     // (The recorded camera is the row's, before any spin.)
     return (document, document.graph(at: time, camera: document.camera))

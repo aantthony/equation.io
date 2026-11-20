@@ -31,6 +31,9 @@ const DOCUMENTS: Array<[text: string, time?: number]> = [
   ['(cos(6 pi u), sin(6 pi u), 4 u - 2); (u, u, floor(4 u)); (u, 1/(u - 0.5), 0)'],
   ['tube((2 cos(2 pi u), 2 sin(2 pi u), sin(6 pi u)), 0.2); tube((u, u^2, u^3)); a = 0.3; tube((u, 0, 1), a t)', 1],
   ['a = 0.3; tube((u, 0, 1), a t); tube((u, abs(u - 0.5), 1), 0.05); tube((1, 1, 1 + 0 u))'],
+  // Curvature and torsion combs: toggles of the page, asked for here by a note.
+  ['(cos(4 pi u), sin(4 pi u), 2 u - 1) # kappa tau; (2 u - 1, (2 u - 1)^2, 0) # kappa; (u, 2 u, 1 - u) # kappa tau'],
+  ['a = 0.2; tube((2 cos(2 pi u), 2 sin(2 pi u), sin(6 pi u)), a) # tau; (u, abs(u - 0.5), u^3 + t) # kappa', 0.5],
   // Surfaces coloured by their curvature.
   ['S = (4 u - 2, 4 v - 2, (2 u - 1)^2 - (2 v - 1)^2); gaussian(S)'],
   ['a = 2; T = ((a + cos(2 pi v)) cos(2 pi u), (a + cos(2 pi v)) sin(2 pi u), sin(2 pi v) + t); meancurvature(T)', 1],
