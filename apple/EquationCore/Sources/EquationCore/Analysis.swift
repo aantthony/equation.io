@@ -176,22 +176,6 @@ func usesIndex(_ u: Units, _ index: String) -> Bool {
   return false
 }
 
-/// `^\s*ds\s*(?:\^\s*2|²)\s*=`: a panel's metric row.
-private func isMetricRow(_ text: String) -> Bool {
-  var s = RowScanner(text)
-  s.space()
-  guard s.eat(word: "ds") else { return false }
-  s.space()
-  if s.eat("^") {
-    s.space()
-    guard s.eat("2") else { return false }
-  } else if !s.eat("\u{B2}") {
-    return false
-  }
-  s.space()
-  return s.peek == unit("=")
-}
-
 /// A scalar field in x alone (or y alone) is most often a curve meant as
 /// `y = …`: the row says how to write that, since it now draws a field.
 private func curveHint(_ object: MathObject, _ text: String) -> String? {
@@ -450,8 +434,23 @@ public func analyze(_ sources: [String]) -> DocumentAnalysis {
   sequences.defineConstant = { built.consts[$0] = $1 }
   sequences.setValue = { boundVals[$0] = $1 }
 
-  // Each panel's rows are read with its view's maps, its surface and its
-  // metric, none of which is ported: a panel that has one is left alone.
+  // Each panel's metric, from its ds^2 row (AnalysisMetrics.swift).
+  let metrics = PanelMetrics(
+    texts: texts, parse: { try parseExpr($0, userFns: fnNames, listNames: listNames, valueNames: valueNames) },
+    lower: { try lowerObjects(try Resolver(getFn: getFn, opts: ropts).resolve($0), built, ropts).e },
+    fieldEnv: fieldEnv, fieldNames: built.fields.keys, documentNames: documentNames, fnNames: fnNames,
+    constNames: { constNames },
+    values: { stateSystem.flatMap { try? evaluateFrame(built, time: 0, states: initialState(built, $0)) } ?? constEnv },
+    moving: { animated.union(built.states.keys) },
+    surfaceOperand: { arg in
+      var written = arg
+      if case .var(let name) = arg, try getFn(name) != nil {} else {
+        written = try Resolver(getFn: getFn, opts: ropts).resolve(arg)
+      }
+      _ = try Resolver(getFn: getFn, opts: ropts).surfaceOperand("geodesic", written)
+    })
+  // Each panel's rows are read with its view's maps and its surface, which
+  // are not ported where they map (x, y) together: such a panel is left alone.
   var panelBlocked: Set<Int> = []
   // Each panel's axis maps, from its view(…) row wherever in the panel it sits (AxisMap.swift).
   var panelMaps: [Int: AxisMaps] = [:]
@@ -462,8 +461,8 @@ public func analyze(_ sources: [String]) -> DocumentAnalysis {
     for (i, text) in texts.enumerated() where !text.isEmpty && rows[i].definition == nil && !rows[i].comment {
       if isDividerRow(text) {
         at += 1
-      } else if isMetricRow(text) && !documentNames.contains("ds") {
-        panelBlocked.insert(at)
+      } else if metrics.isMetricRow(text) {
+        metrics.rows[at, default: []].append(i)
       } else if let head = viewHead(text), head == "view" || head == "on", !fnNames.contains(head) {
         do {
           let spec = try parseViewRow(text, boundVals, documentNames: documentNames)
@@ -476,6 +475,8 @@ public func analyze(_ sources: [String]) -> DocumentAnalysis {
         }
       }
     }
+    metrics.mapped = Set(panelMaps.keys)
+    metrics.surfaces = Set(panelSurfaces.keys)
   }
 
   // Random variables next, so P(…) and bare-expression rows can reference
@@ -564,12 +565,12 @@ public func analyze(_ sources: [String]) -> DocumentAnalysis {
         }
       }
       if panelBlocked.contains(panel) {
-        throw Unsupported("a panel with (x, y) mapped together, a surface or a metric")
+        throw Unsupported("a panel with (x, y) mapped together or a surface")
       }
-      if isMetricRow(text) && !documentNames.contains("ds") { throw Unsupported("metrics (ds^2 = …)") }
-      let trimmed = jsTrimmed(text)
-      if (trimmed == "lightcones" || trimmed == "tidal") && !documentNames.contains(trimmed) {
-        throw Unsupported("light cones and tidal forces")
+      // ds^2 = …, lightcones, tidal: the panel's metric and what is drawn of it.
+      if let cls = try metrics.row(text, index: i, panel: panel) {
+        rows[i].classified = cls
+        continue
       }
       // `P(…)` shades an area under a declared density — unless the user
       // has defined P themselves. With no random variable there is none.
@@ -613,6 +614,15 @@ public func analyze(_ sources: [String]) -> DocumentAnalysis {
         rows[i].classified = try classifyOrbit(
           try lower(value), from: try lower(from), to: try lower(to), built, constNames: constNames)
         continue
+      }
+      // geodesic(P, d), lightray(P, d), lightcone(P), tidal(P) under the panel's metric.
+      if let cls = try metrics.call(rawParsed, panel: panel) {
+        rows[i].classified = cls
+        continue
+      }
+      // (gaussian(x, y) under a metric is its curvature, shaded to its own size: not ported.)
+      if metrics.rows[panel] != nil, writtenNames(text).contains(where: ["gaussian", "meancurvature"].contains) {
+        throw Unsupported("the curvature of a panel's metric (gaussian(x, y))")
       }
       // A row not drawn over the plane may test equality in a case: `f(2)`
       // with f(m) = {mod(m, 2) = 0: …}.
@@ -848,7 +858,7 @@ public func analyze(_ sources: [String]) -> DocumentAnalysis {
     // usually a curve being typed.
     var draws = true
     switch row.cpu {
-    case .note, .value(_, nil): draws = false
+    case .note, .value(_, nil), .metric(.row): draws = false
     default: break
     }
     row.takesColor =

@@ -115,6 +115,9 @@ public indirect enum MathObject: Equatable, Sendable {
   /// One copy of the row per list element. `shared`: the one program its
   /// members are drawn with, each choosing itself by the uniform `index`.
   case family(members: [Classified], shared: FamilyShared?)
+  /// A panel's metric (`ds^2 = …`) and the rows that follow it: geodesics,
+  /// light cones, tidal forces (MetricObjects.swift).
+  case metric(MetricObject)
 
   /// The kind as the site's tools name it (`publicKind`).
   public var publicKind: String {
@@ -155,6 +158,7 @@ public indirect enum MathObject: Equatable, Sendable {
     case .histogram: "histogram"
     case .tuples, .blades, .flat: "tuple"
     case .family: "family"
+    case .metric(let object): object.publicKind
     }
   }
 }
