@@ -5,34 +5,47 @@ import Foundation
 // A document as the panels the graph view shows: one, and one more for each
 // `---` row, each with its own rows, window or camera, and grid.
 //
-// This is the app's side of two things EquationRender is still getting: a
-// panels API (the site's lib/panels.ts over a document) and a 3D scene
-// builder (which says whether a panel is 2D or 3D and gives its Scene3D).
-// Until they land, a panel's 2D graph is `Graph2D` over the document with
-// the other panels' rows masked out, and a 3D panel's scene is a fixture
-// (`SpaceGraph.fixture`). Plugging the real ones in is `GraphPanels.init`
-// and `SpaceGraph`: nothing past this file knows where a panel's graph came from.
+// This is the app's side of a panels API EquationRender is still getting
+// (the site's lib/panels.ts over a document). Until it lands, a panel's
+// graph is built over the document with the other panels' rows masked out:
+// `Graph2D` for one in the plane, and for one with a row in space
+// (`Graph.kind(of:)`) `Document3D`, the 3D scene builder. Nothing past this
+// file knows where a panel's graph came from.
 
 /// A 3D panel's graph: what the scene builder gives for a panel's rows.
 struct SpaceGraph: Equatable {
-  /// A scene written down (apple/tools/scene3d.ts), standing in for the builder.
-  var graph: Graph3D
+  /// The panel's rows, as the builder draws them.
+  var document: Document3D?
+  /// A scene written down (apple/tools/scene3d.ts), in place of the builder's
+  /// (EQUATION_SCENE3D, below).
+  var graph: Graph3D?
+
+  init(document: Document3D) { self.document = document }
+  init(graph: Graph3D) { self.graph = graph }
 
   /// The camera the panel opens with, when no camera(…) row says.
-  var opening: Camera3D { graph.camera ?? Camera3D() }
-  /// The GLSL of the loop helpers the scene's shaders name.
-  var helpers: String? { graph.helpers }
+  var opening: Camera3D { document?.camera ?? graph?.camera ?? Camera3D() }
+  /// The GLSL of the loop helpers a written scene's shaders name (the
+  /// builder's link from the language's own registry).
+  var helpers: String? { graph?.helpers }
   /// Something moves with t, so the panel redraws every frame.
-  var animated: Bool { graph.scene.streamlines?.isEmpty == false }
+  var animated: Bool { document?.animated ?? (graph?.scene.streamlines?.isEmpty == false) }
 
-  func scene(at time: Double) -> Scene3D { graph.scene }
-  func environment(at time: Double) -> [String: Double] { graph.env ?? [:] }
+  /// What the panel draws at a time, seen from `camera`: what is solved or
+  /// traced on the CPU is found over the box the camera looks at.
+  func scene(at time: Double, camera: Camera3D) -> Scene3D {
+    document?.scene(at: time, camera: camera) ?? graph?.scene ?? Scene3D()
+  }
+  func environment(at time: Double) -> [String: Double] {
+    document?.environment(at: time) ?? graph?.env ?? [:]
+  }
 
   #if DEBUG
     /// EQUATION_SCENE3D: a Graph3D's JSON, or the path of a file of it the
-    /// app can read (its container), or `demo` for a scene made here. With
-    /// it set, a panel with a camera(…) row is 3D, or the first panel when
-    /// none has one:
+    /// app can read (its container), or `demo` for a scene made here: a
+    /// scene the TypeScript builds, to set beside the builder's in the app.
+    /// With it set, that scene is drawn in the panel with a camera(…) row,
+    /// or the first panel when none has one:
     ///
     ///   node --experimental-transform-types apple/tools/scene3d.ts "z = sin(x) cos(y)" > scene.json
     ///   open -n Equation.app --env EQUATION_SCRATCH='y = x' --env EQUATION_SCENE3D="$(cat scene.json)"
@@ -40,7 +53,7 @@ struct SpaceGraph: Equatable {
       guard let value = ProcessInfo.processInfo.environment["EQUATION_SCENE3D"], !value.isEmpty else { return nil }
       if value == "demo" { return SpaceGraph(graph: demo) }
       let json = value.hasPrefix("{") ? Data(value.utf8) : (try? Data(contentsOf: URL(fileURLWithPath: value)))
-      return json.flatMap { try? Graph3D.decode($0) }.map(SpaceGraph.init)
+      return json.flatMap { try? Graph3D.decode($0) }.map { SpaceGraph(graph: $0) }
     }()
 
     /// A sphere through a saddle, with a named point: an implicit surface
@@ -117,6 +130,10 @@ struct GraphPanels: Equatable {
       var panel = GraphPanel(rows: rows, plane: Graph2D(own, colors: colors))
       if k == spatial {
         panel.space = fixture
+      } else if Graph.kind(of: own) == .space {
+        panel.space = SpaceGraph(document: Document3D(own, colors: colors))
+      }
+      if panel.space != nil {
         panel.frameRow = cameraRow(rows)
         if let row = panel.frameRow,
           case .camera(let theta, let phi, let radius, let target, let spin, let locked)? = analysis.rows[row].view

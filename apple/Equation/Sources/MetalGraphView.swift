@@ -55,8 +55,9 @@ final class GraphViewport {
       guard k < states.count, k < boxes.count else { return nil }
       let panel = content.panels[k]
       if let space = panel.space {
+        let camera = states[k].camera
         return PanelFrame(
-          box: boxes[k], content: .space(camera: states[k].camera, scene: space.scene(at: time)),
+          box: boxes[k], content: .space(camera: camera, scene: space.scene(at: time, camera: camera)),
           env: space.environment(at: time), grid: panel.grid)
       }
       var extras: Overlay2D?
