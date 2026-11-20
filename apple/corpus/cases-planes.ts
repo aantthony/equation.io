@@ -58,6 +58,9 @@ export const PLANE_CASES: string[] = [
   "view(x = 1..100, x = 10^X); r = sqrt(x^2 + y^2); th = atan2(y, x); (r', th') = (0, 1); (r, th) = (20, 1); r = [10, 20]",
   'view(x = 1..100, x = 10^X); a_n = 1/n; a_n; b_(n+1) = b_n/2; b_0 = 1; b_n; X1 ~ Normal(10, 1); X1; P(X1 < 11); E(X1)',
   'view(x = 1..100, x = 10^X); int[1..10] 1/x dx; int[1..2] u du; z = x y; (cos(u), sin(u), u); tube((u, u, u))',
+  // Rows over an interval: what a family sweeps is refused, what it places is carried.
+  'view(x = 1..100, x = 10^X); a = interval(1, 2); y = a x; x^2 + y^2 < 100 a; (10 a, a); a; (10 a, u)',
+  'view((x, y) = (Y cos(X), Y sin(X))); a = interval(1, 2); x^2 + y^2 = a; (a, 1); y > a x; a + 1; segment((a, 0), (0, a))',
 ];
 
 // --- the way back through a plane map ---
