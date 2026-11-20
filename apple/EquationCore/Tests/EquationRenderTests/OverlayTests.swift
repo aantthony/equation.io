@@ -346,4 +346,49 @@ private struct Reference: Decodable {
     mapOverlay(&lost, mark: markOverlay(Overlay2D()), maps: polar)
     #expect(lost.points.isEmpty)
   }
+
+  /// A document whose view maps (x, y) together: what its rows place is on the screen, its coordinate
+  /// grids go through the map, its window is written in X and Y, and a drag reads the screen back.
+  @Test func aPlaneMappedPanel() throws {
+    let rows = [
+      "r = sqrt(x^2 + y^2)", "view((x, y) = (Y cos(X), Y sin(X)), X = -pi..pi, Y = 0..4)", "(0, 2)", "A = (-1, 0)",
+      "x^2 + y^2 = 4", "segment((1, 0), (0, 1))", "w^2 = -1", "int[0..1] x dx", "hist([1, 2])",
+    ]
+    let analysis = analyze(rows)
+    #expect(analysis.rows[8].error?.contains("histogram bars") == true)
+    #expect(analysis.rows.dropLast().allSatisfy { $0.error == nil && $0.unsupported == nil })
+    let graph = Graph2D(analysis, colors: analysis.rows.map { _ in RGB(0.2, 0.4, 0.6) })
+    #expect(graph.maps?.plane?.text == "(Y cos(X), Y sin(X))")
+    let (width, height) = (800.0, 400.0)
+    let scene = graph.scene(at: 0, width: width, height: height)
+    let view = try #require(scene.view)
+    let bounds = Graph2D.Bounds(view: view, width: width, height: height)
+    // (The window that shows both ranges asked for, at one scale.)
+    #expect(abs(bounds.xmin + 4) < 1e-9 && abs(bounds.xmax - 4) < 1e-9 && abs(bounds.ymax - 4) < 1e-9)
+    let overlay = try #require(scene.overlay)
+    func has(_ x: Double, _ y: Double) -> Bool {
+      overlay.points.contains { abs($0.x - x) < 1e-6 && abs($0.y - y) < 1e-6 }
+    }
+    // (0, 2) at the angle π/2; A at π and at −π, the window's two edges; the roots ±i.
+    #expect(has(.pi / 2, 2))
+    #expect(has(.pi, 1) && has(-.pi, 1))
+    #expect(has(.pi / 2, 1) && has(-.pi / 2, 1))
+    // The segment is a line, bent: from angle 0 to π/2, nearest the origin half way. (And again on the
+    // copies of the plane just past the window, where a line is still followed.)
+    let line = try #require(overlay.polylines.first { abs($0.pts[0]) < 1e-6 })
+    #expect(overlay.polylines.count >= 2 && line.pts.count > 4)
+    #expect(abs(line.pts[line.pts.count - 2] - .pi / 2) < 1e-6)
+    #expect(abs(line.pts.enumerated().filter { $0.offset % 2 == 1 }.map(\.element).min()! - 0.5.squareRoot()) < 1e-3)
+    // The integral reads out, and shades nothing: its area would stand on a bent y = 0.
+    if case .value(_, let shade)? = analysis.rows[7].cpu { #expect(shade == nil) } else { Issue.record("no value") }
+    // r's circles are level lines of the screen's Y.
+    let specs = try #require(scene.gridSpecs)
+    #expect(specs.count == 1 && specs[0].gradGlsl != nil)
+    #expect(graph.screenPoint(0, 2, bounds: bounds).map { abs($0.x - .pi / 2) < 1e-6 && abs($0.y - 2) < 1e-6 } == true)
+    let dropped = try #require(graph.dragToPlane(.pi / 2, 3, upp: view.upp, uppY: view.uppY))
+    #expect(dropped.x == 0 && dropped.y == 3)
+    #expect(
+      formatViewRow(view, width: width, height: height, maps: graph.maps)
+        == "view((x, y) = (Y cos(X), Y sin(X)), X = -4..4, Y = 0..4)")
+  }
 }
