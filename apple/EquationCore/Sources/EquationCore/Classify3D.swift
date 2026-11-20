@@ -149,3 +149,39 @@ func classifySystem(
   return .system(
     residuals: zip(left, right).map { .bin(.sub, $0, $1) }, parametric: parametric, angular: left.map(isAngle))
 }
+
+/// det of a 3×3 matrix of expressions, by cofactors along the first row (lib/mat.ts `detOf`).
+private func detOf(_ m: [[Expr]]) -> Expr {
+  func minor(_ c0: Int, _ c1: Int) -> Expr { sub(mul(m[1][c0], m[2][c1]), mul(m[1][c1], m[2][c0])) }
+  return add(sub(mul(m[0][0], minor(1, 2)), mul(m[0][1], minor(0, 2))), mul(m[0][2], minor(0, 1)))
+}
+
+/// A flow in space written on the axes themselves, `(x', y', z') = (P, Q, R)`
+/// in any order (lib/coordinate.ts `lowerCoordinateFlow`, its three-coordinate
+/// case): the velocities solved for x', y' and z' by Cramer's rule through
+/// the coordinates' Jacobian, a permutation here. Nil for any other row — a
+/// flow in coordinates that are fields is not ported.
+func lowerSpaceFlow(_ expr: Expr, _ fields: [String: Expr]) throws -> Expr? {
+  guard case .eq(.vec(let names), let right) = expr, names.count == 3 else { return nil }
+  var bases: [String] = []
+  for item in names {
+    guard case .var(let name) = item, name.hasSuffix("'") else { return nil }
+    bases.append(String(name.dropLast()))
+  }
+  guard Set(bases) == spaceVarNames else { return nil }
+  guard case .vec(let velocity) = right else {
+    throw LanguageError("A coordinate flow needs two components on the right.")
+  }
+  if velocity.count != 3 {
+    throw LanguageError("Mismatched components: 3 on the left, \(velocity.count) on the right.")
+  }
+  let axes = ["x", "y", "z"]
+  let jac: [[Expr]] = bases.map { base in axes.map { .num($0 == base ? 1 : 0) } }
+  // (An axis does not move with t: its time derivative is the 0 taken off.)
+  let rhs = velocity.map { Expr.bin(.sub, fields.isEmpty ? $0 : substVars($0, fields), .num(0)) }
+  let d = detOf(jac)
+  let solved = (0..<3).map { i in
+    div(detOf(jac.enumerated().map { r, row in row.enumerated().map { c, entry in c == i ? rhs[r] : entry } }), d)
+  }
+  return .eq(.vec(["x'", "y'", "z'"].map { .var($0) }), .vec(solved))
+}

@@ -290,10 +290,14 @@ func classify(_ lowered: Expr, defined: Set<String>, fields: [String: Expr]) thr
   {
     let written = names.compactMap { item -> String? in if case .var(let n) = item { n } else { nil } }
     let flow = written.contains { $0.hasSuffix("'") }
-    if flow ? written != ["x'", "y'"] : written.allSatisfy({ spaceVarNames.contains($0) || fields[$0] != nil }) {
+    if let spaceFlow = try lowerSpaceFlow(expr, fields) {
+      expr = spaceFlow
+    } else if flow
+      ? written != ["x'", "y'"] : written.allSatisfy({ spaceVarNames.contains($0) || fields[$0] != nil })
+    {
       throw Unsupported("coordinates named in a tuple")
     }
-    if flow, case .eq(_, let rhs) = expr {
+    if flow, written.count == 2, case .eq(_, let rhs) = expr {
       guard case .vec(let velocity) = rhs else {
         throw LanguageError("A coordinate flow needs two components on the right.")
       }
