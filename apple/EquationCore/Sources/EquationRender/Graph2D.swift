@@ -66,6 +66,8 @@ public struct Graph2D: Equatable, Sendable {
         complexLayers.add(gpu, color: color)
       case .tfield2d(let entries, let streamlines):
         tfields.append(TField2D(entries: entries, color: color, params: gpu.params, streamlines: streamlines))
+      case .cobweb, .bifurcation:
+        break
       }
     }
     // A vector field's streamlines flow whether or not it reads t.

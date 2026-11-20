@@ -35,6 +35,10 @@ import Testing
         if isExample { exampleRows += 1 }
         if let why = got.unsupported {
           whole = false
+          // ANALYSIS_UNSUPPORTED=<name prefix> lists the rows left alone in those documents.
+          if let prefix = ProcessInfo.processInfo.environment["ANALYSIS_UNSUPPORTED"], name.hasPrefix(prefix) {
+            print("  \(name), row \(i + 1) \(rows[i].debugDescription): \(why)")
+          }
           reasons[why, default: 0] += 1
           continue
         }
@@ -92,7 +96,7 @@ import Testing
   }
 
   @Test func whatIsNotPortedSaysSo() {
-    let rows = ["L = [1, 2, 3]", "z = x^2 + y^2", "X ~ Normal(0, 1)", "a_n = 1/n", "int[0..1] x dx", "(u, u, u)"]
+    let rows = ["L = [1, 2, 3]", "z = x^2 + y^2", "X ~ Normal(0, 1)", "T[i, j] = i j", "int[0..1] x dx", "(u, u, u)"]
     for text in rows {
       let row = analyze([text]).rows[0]
       #expect(row.unsupported != nil, "\(text)")
@@ -244,6 +248,10 @@ import Testing
         sameList("entries", entries, gpu["entries"])
         check("gpu streamlines", streamlines, gpu["streamlines"] as? Bool ?? false)
         if gpu["jacobian"] != nil { out.append("gpu: a matrix field on mapped axes") }
+      case .cobweb(let curveField):
+        same("curveField", curveField, gpu["curveField"])
+      case .bifurcation(let field):
+        same("field", field, gpu["field"])
       }
     }
     return out
@@ -311,6 +319,10 @@ import Testing
         step: try expr("step"), seed: o["seed"] as! String, maxIter: (o["maxIter"] as! NSNumber).intValue)
     case "rgb2d", "hsl2d", "oklch2d":
       return .color2d(space: String((o["type"] as! String).dropLast(2)), channels: try exprs("channels"))
+    case "sequence": return .sequence(term: try expr("term"), index: o["index"] as! String)
+    case "cobweb": return .cobweb(f: try expr("f"), recVar: o["recVar"] as! String, a0Name: o["a0Name"] as? String)
+    case "bifurcation":
+      return .bifurcation(expr: try expr("expr"), recVar: o["recVar"] as! String, a0Name: o["a0Name"] as? String)
     default: throw FixtureError(description: "a \(o["type"]!) plan")
     }
   }

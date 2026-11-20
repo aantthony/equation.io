@@ -305,7 +305,9 @@ struct Resolver {
         guard case .eq = c.cond else { continue }
         // A case testing equality is a lattice row's, or a function body's
         // for the lattice rows that call it.
-        if opts.inDefinition { throw Unsupported("a case testing equality in a definition") }
+        if opts.inDefinition && !opts.exactConditions {
+          throw Unsupported("a case testing equality in a definition")
+        }
         if !opts.exactConditions {
           throw LanguageError(equalityCaseMessage)
         }

@@ -281,117 +281,6 @@ private func numberEnd(_ u: [UInt16], _ i: Int, _ end: Int) -> Int? {
   return k > i ? k : nil
 }
 
-// MARK: - Sequences
-
-/// How a sequence row reads (lib/seq.ts `scanSeqRec`), as far as the names it binds go.
-private enum SequenceRow {
-  /// `a_n = …` or the recurrence `a_{n+1} = …`.
-  case terms(name: String, index: String, rec: Bool, rhs: [UInt16])
-  /// An automaton's rule or seed over cells, or a table `T[i, j] = …`: no
-  /// name of the document's, and no row of definitions.
-  case lattice(name: String, rule: Bool)
-  /// `L_0 = [` or `s_0 = ()`: a seed if its letter turns out to be an automaton or a recurrence.
-  case seed(name: String, list: Bool)
-}
-
-private func scanSeqRec(_ u: [UInt16]) -> SequenceRow? {
-  var c = RowScanner(u)
-  c.space()
-  guard let letter = c.peek, isNameLetter(letter) else { return nil }
-  c.i += 1
-  let name = String(decoding: [letter], as: UTF16.self)
-  /// One sequence letter, between optional spaces.
-  func index(_ c: inout RowScanner) -> String? {
-    c.space()
-    guard let p = c.peek, isNameLetter(p) else { return nil }
-    c.i += 1
-    c.space()
-    return String(decoding: [p], as: UTF16.self)
-  }
-  /// `[i]` or `[i, j]`: the cells an automaton row is written over.
-  func cells(_ c: inout RowScanner, pair: Bool = false) -> Bool {
-    var k = c
-    guard k.eat(0x5B), index(&k) != nil else { return false }
-    let comma = k.eat(0x2C)
-    if comma { guard index(&k) != nil else { return false } }
-    guard k.eat(0x5D), comma || !pair else { return false }
-    c = k
-    return true
-  }
-  /// `=(?!=)` and a right side.
-  func rhs(_ c: RowScanner) -> [UInt16]? {
-    var k = c
-    k.space()
-    guard k.assign(), !k.atEnd else { return nil }
-    return Array(u[k.i...])
-  }
-  // T[i, j] = …: a function on the integer lattice.
-  var table = c
-  table.space()
-  if cells(&table, pair: true), rhs(table) != nil { return .lattice(name: name, rule: false) }
-  guard c.eat(0x5F) else { return nil }
-  enum Sub { case step(String), zero, plain(String) }
-  var sub: Sub?
-  let open = c.peek
-  if open == 0x7B || open == 0x28 {
-    let close: UInt16 = open == 0x7B ? 0x7D : 0x29
-    c.i += 1
-    var zero = c
-    zero.space()
-    if zero.eat(0x30) {
-      zero.space()
-      guard zero.eat(close) else { return nil }
-      c = zero
-      sub = .zero
-    } else {
-      guard let letter = index(&c) else { return nil }
-      if c.eat(0x2B) {
-        c.space()
-        guard c.eat(0x31) else { return nil }
-        c.space()
-        sub = .step(letter)
-      } else {
-        sub = .plain(letter)
-      }
-      guard c.eat(close) else { return nil }
-    }
-  } else if c.eat(0x30) {
-    sub = .zero
-  } else if let p = c.peek, isNameLetter(p) {
-    c.i += 1
-    sub = .plain(String(decoding: [p], as: UTF16.self))
-  }
-  guard let sub else { return nil }
-  var celled = c
-  celled.space()
-  let hasCells = cells(&celled)
-  switch sub {
-  case .step(let index):
-    if hasCells, rhs(celled) != nil { return .lattice(name: name, rule: true) }
-    return rhs(c).map { .terms(name: name, index: index, rec: true, rhs: $0) }
-  case .zero:
-    if hasCells, rhs(celled) != nil { return .lattice(name: name, rule: false) }
-    guard let right = rhs(c) else { return nil }
-    let value = jsTrim(right[...])
-    if value.first == 0x5B { return .seed(name: name, list: true) }
-    // ^\(\s*\)$
-    var empty = RowScanner(right, value.indices)
-    if empty.eat(0x28) {
-      empty.space()
-      if empty.eat(0x29), empty.atEnd { return .seed(name: name, list: false) }
-    }
-    return nil
-  case .plain(let index):
-    // Every letter_letter row used to be a sequence, which stole the
-    // subscripted constants physics and chemistry are written with (T_c,
-    // k_B, v_x). Require a conventional index or one the term actually uses.
-    guard let right = rhs(c) else { return nil }
-    let conventional = index == "n" || index == "k" || index == "m"
-    guard conventional || (!reservedNames.contains(index) && usesIndex(right, index)) else { return nil }
-    return .terms(name: name, index: index, rec: false, rhs: right)
-  }
-}
-
 // MARK: - Bound names
 
 /// The names a document's rows bind, as the site's highlighter reads them
@@ -414,6 +303,10 @@ func boundNames(_ document: PreparedDocument) -> BoundNames {
   names.values.formUnion(built.mats.keys)
   names.values.formUnion(built.tensors.keys)
   names.functions.formUnion(built.fns.keys)
+  // The sequences of the rows the port reads (lib/defs.ts `defs.sequences`).
+  for (k, scan) in document.seqScans.enumerated() where document.blocked[k] == nil {
+    if let scan, !scan.lattice, !scan.emptyTuple { names.sequences.append(.init(name: scan.name, index: scan.index)) }
+  }
   scanBoundNames(document.texts.map { Array($0.utf16) }, rows: Set(document.blocked.keys), into: &names)
   return names
 }
@@ -436,22 +329,7 @@ private func scanBoundNames(_ texts: [[UInt16]], rows: Set<Int>, into names: ino
   let live = texts.map { !$0.isEmpty && $0[0] != 0x23 && !isViewportText(String($0)) }
   // lib/seq.ts scanSequences: a letter can be a sequence once. Beside
   // `a_n = 1/n`, a row like `a_k = 7` that never uses its k is the constant a_k.
-  let scans = texts.indices.map { live[$0] ? scanSeqRec(texts[$0]) : nil }
-  var owners = Set<String>()
-  var automata = Set<String>()
-  var recurrences = Set<String>()
-  for case let scan? in scans {
-    switch scan {
-    case .terms(let name, let index, let rec, let rhs):
-      if rec || usesIndex(rhs, index) { owners.insert(name) }
-      if rec { recurrences.insert(name) }
-    case .lattice(let name, let rule):
-      owners.insert(name)
-      if rule { automata.insert(name) }
-    case .seed:
-      break
-    }
-  }
+  let scans = scanSequences(texts.map { String(decoding: $0, as: UTF16.self) })
   // lib/regression.ts declaredNames: names some row defines, by text alone.
   var declared = Set<String>()
   for text in texts {
@@ -466,18 +344,10 @@ private func scanBoundNames(_ texts: [[UInt16]], rows: Set<Int>, into names: ino
   var models: [[UInt16]] = []
   var vectorStates: [String: Int] = [:]
   for (k, text) in texts.enumerated() where live[k] && rows.contains(k) {
-    switch scans[k] {
-    case .terms(let name, let index, let rec, let rhs)?:
-      if rec || !owners.contains(name) || usesIndex(rhs, index) {
-        names.sequences.append(.init(name: name, index: index))
-        continue
-      }
-    case .lattice?:
+    if let scan = scans[k] {
+      // An automaton's rows, a table's and `s_0 = ()` bind no name of the document's.
+      if !scan.lattice && !scan.emptyTuple { names.sequences.append(.init(name: scan.name, index: scan.index)) }
       continue
-    case .seed(let name, let list)?:
-      if list ? automata.contains(name) : recurrences.contains(name) { continue }
-    case nil:
-      break
     }
     // A fit, `Y ~ m X + b`, is a definition of its coefficients, found once every other name is.
     if let model = regressionModel(text, declared) {

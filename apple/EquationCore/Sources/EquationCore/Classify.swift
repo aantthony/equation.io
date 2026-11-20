@@ -52,6 +52,12 @@ public indirect enum MathObject: Equatable, Sendable {
   case fractal(step: Expr, seed: String, maxIter: Int)
   /// `rgb(…)`, `hsl(…)`, `oklch(…)`: a colour at every pixel; `space` is the call's name.
   case colorField(space: String, channels: [Expr])
+  /// `a_n = …`: a sequence's terms, drawn at whole n (Sequences.swift).
+  case sequence(term: Expr, index: String)
+  /// A recurrence `a_{n+1} = f(a_n)`: its cobweb diagram, or (with x free in
+  /// f) its orbit diagram over x. `variable` is the previous term's name.
+  case cobweb(expr: Expr, variable: String, seedName: String?)
+  case bifurcation(expr: Expr, variable: String, seedName: String?)
 
   /// The kind as the site's tools name it (`publicKind`).
   public var publicKind: String {
@@ -73,6 +79,9 @@ public indirect enum MathObject: Equatable, Sendable {
     case .complexField(let form, _): form.planType
     case .fractal: "fractal2d"
     case .colorField(let space, _): "\(space)2d"
+    case .sequence: "sequence"
+    case .cobweb: "cobweb"
+    case .bifurcation: "bifurcation"
     }
   }
 }
