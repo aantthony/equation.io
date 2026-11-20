@@ -23,9 +23,12 @@ import simd
 ///   axes carried. The drawer keeps the windows from then on: a gesture in
 ///   panel k moves `views[k]` and calls `syncLinks(&views, layout, moved: k)`
 ///   to carry the axes it shares; `panelAt` finds the panel under a point.
-/// - `scene(at:width:height:dpr:views:)` writes one frame down, and
+/// - `scene(at:width:height:dpr:theme:views:run:)` writes one frame down, and
 ///   `Renderer2D.render(_:target:scene:theme:)` with `drawPanelLabels` draw
 ///   it (`MetalContext.image(of:)` does both).
+/// - A document with states (`a' = …`) has a run, an EquationCore
+///   `StateStepper` the drawer owns: advanced to each frame's time and passed
+///   to `scene` as `run` (Graph2D+States.swift).
 public struct GraphPanels: Equatable, Sendable {
   public struct Panel: Equatable, Sendable {
     /// The panel's rows, its divider first (the first panel has none).
@@ -84,11 +87,16 @@ public struct GraphPanels: Equatable, Sendable {
 
   /// Each panel's opening window (web/main.ts `syncPanels`, then
   /// `applyViewportRows` and `syncLinks`): 12 units across the shorter side
-  /// of its box, then what its view(…) row frames, with shared axes taken
-  /// from the panels that own them, which are earlier and already framed.
+  /// of its box (a lattice with no view row opens on its cells), then what
+  /// its view(…) row frames, with shared axes taken from the panels that own
+  /// them, which are earlier and already framed.
   public func opening(width: Double, height: Double, dpr: Double) -> [View2D] {
     let layout = layout(width: width, height: height, dpr: dpr)
-    var views = layout.map { View2D(cx: 0, cy: 0, upp: 12 / max(min($0.rect.w, $0.rect.h), 1)) }
+    var views = zip(layout, panels).map { box, panel in
+      panel.graph.window == nil && box.rect.w >= 1 && box.rect.h >= 1
+        ? panel.graph.opening(width: box.rect.w, height: box.rect.h, dpr: dpr)
+        : View2D(cx: 0, cy: 0, upp: 12 / max(min(box.rect.w, box.rect.h), 1))
+    }
     for (p, panel) in panels.enumerated() {
       guard let spec = panel.graph.windowSpec, layout[p].rect.w > 0 else { continue }
       let (rx, ry) = (linkRoot(layout, p, .x), linkRoot(layout, p, .y))
@@ -103,9 +111,11 @@ public struct GraphPanels: Equatable, Sendable {
   }
 
   /// One frame written down: each panel's box and, for a 2D panel, its
-  /// scene. `views` are the panels' windows (the opening ones without).
+  /// scene. `views` are the panels' windows (the opening ones without);
+  /// `run` has the states where the frame finds them (their starts without).
   public func scene(
-    at time: Double, width: Double, height: Double, dpr: Double, views: [View2D]? = nil
+    at time: Double, width: Double, height: Double, dpr: Double, theme: GraphTheme = .light,
+    views: [View2D]? = nil, run: StateStepper? = nil
   ) -> PanelScene {
     let layout = layout(width: width, height: height, dpr: dpr)
     let opening = opening(width: width, height: height, dpr: dpr)
@@ -115,7 +125,8 @@ public struct GraphPanels: Equatable, Sendable {
       var entry = PanelScene.Entry(layout: layout[p])
       if !panel.needs3D, r.w >= 1, r.h >= 1 {
         let view = views.flatMap { p < $0.count ? $0[p] : nil } ?? opening[p]
-        var scene = panel.graph.scene(at: time, width: r.w, height: r.h, view: view)
+        var scene = panel.graph.scene(
+          at: time, width: r.w, height: r.h, dpr: dpr, theme: theme, view: view, run: run)
         // A lone panel fills the frame, with no box of its own.
         if split {
           var frame = scene.frame ?? Frame2D()
@@ -134,15 +145,6 @@ extension Graph2D {
   /// What the panel's view(…) row frames, if it has one.
   public var windowSpec: WindowSpec? {
     window.map { WindowSpec(x: $0.x, y: $0.y, ratio: $0.ratio) }
-  }
-
-  /// The frame written down with the window given, not the opening one.
-  public func scene(at time: Double, width: Double, height: Double, view: View2D) -> Scene2D {
-    var scene = scene(at: time, width: width, height: height)
-    scene.view = view
-    // The grid's spacing follows the window.
-    scene.gridSpecs = gridSpecs(at: time, view: view, width: width, height: height)
-    return scene
   }
 }
 

@@ -178,6 +178,37 @@ private func same(_ a: View2D, _ b: View2D?) -> Bool {
     #expect(metal.failures == 0)
   }
 
+  @Test func statesStepWithTheirRun() throws {
+    let rows = ["a' = -a", "a(0) = 2", "(a, 1)", "P = (1, a)", "y = a x", "a(0..3)", "a(3..1)", "---", "(a, a)"]
+    let document = panels(rows)
+    #expect(document.animated)
+    let graph = document.panels[0].graph
+    // The orbit is drawn against t, integrated once; one that runs backwards says so.
+    let orbit = try #require(graph.orbits[5])
+    #expect(orbit[0] == 0 && orbit[1] == 2 && abs(orbit[orbit.count - 3] - 2 * exp(-3)) < 1e-6)
+    #expect(graph.orbitErrors[6] == "An orbit runs forward in time: write the earlier time first, like p(0..50).")
+    // Without a run every state is at its start.
+    let still = document.scene(at: 1, width: 800, height: 600, dpr: 1)
+    #expect(still.panels[0].scene?.overlay?.points.map(\.x) == [2, 1])
+    #expect(still.panels[0].scene?.env?["a"] == 2)
+    // A run stepped to t = 1 has a at 2/e, in every panel: the point, the named point, the uniform.
+    var run = StateStepper(document.analysis)
+    run.play(to: 1)
+    let frame = document.scene(at: 1, width: 800, height: 600, dpr: 1, run: run)
+    let a = try #require(frame.panels[0].scene?.env?["a"])
+    // (Whole steps only: the run may be a step short of the frame.)
+    #expect(abs(a - 2 * exp(-1)) < 0.01)
+    #expect(frame.panels[0].scene?.overlay?.points.map(\.x) == [a, 1])
+    #expect(frame.panels[0].scene?.overlay?.points.map(\.y) == [1, a])
+    #expect(frame.panels[1].scene?.overlay?.points.map(\.x) == [a])
+    #expect(frame.panels[0].scene?.overlay?.polylines.first?.pts == orbit)
+    // An edit that leaves the system as written keeps the run; one that changes it starts again.
+    run.adopt(analyze(rows + ["y = x"]))
+    #expect(run.values["a"] == a)
+    run.adopt(analyze(["a' = -2 a", "a(0) = 2"]))
+    #expect(run.values["a"] == 2)
+  }
+
   @Test func aSplitFrameDraws() throws {
     let metal = try #require(MetalContext())
     let document = panels(["y = sin(x)", "--- right 40%", "x^2 + y^2 < 4", "--- inset bottom left", "(y, -x)"])
