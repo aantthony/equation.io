@@ -33,14 +33,16 @@ func fieldEvaluator(_ comps: [Expr], _ env: [String: Double]) -> ([Double]) -> [
 /// A bounded RK4 streamline of the normalized field through `seed`, both
 /// directions (`streamline`). Time is held fixed: these are integral curves
 /// of a field, not time-integrated simulation states.
+/// `metric` scales each component before the field is normalized (a panel
+/// whose axes differ in scale steps evenly on screen).
 func streamline(
   _ f: ([Double]) -> [Double], _ seed: [Double], _ step: Double, _ lo: [Double], _ hi: [Double],
-  steps: Int = FLOW_STEPS
+  steps: Int = FLOW_STEPS, metric: [Double]? = nil
 ) -> [[Double]] {
   guard seed.allSatisfy(\.isFinite), step > 0 else { return [] }
   func direction(_ p: [Double]) -> [Double]? {
     let v = f(p)
-    let n = hypot(v)
+    let n = hypot(metric.map { m in v.indices.map { v[$0] * m[$0] } } ?? v)
     return n.isFinite && n > 1e-12 ? v.map { $0 / n } : nil
   }
   func side(_ sign: Double) -> [[Double]] {

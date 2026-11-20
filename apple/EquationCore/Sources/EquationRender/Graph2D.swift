@@ -51,6 +51,15 @@ public struct Graph2D: Equatable, Sendable {
   let planes = PlaneInverses()
   /// Each graph row's layout (Graph2D+Graphs.swift).
   let graphLayouts = GraphLayouts()
+  /// The integral-curve seeds dropped on the panel's vector fields, and the
+  /// one under the pointer (Graph2D+Seeds.swift): the drawer's, like `partialSums`.
+  public var seeds: [FieldSeed] = []
+  public var hotSeed: Int?
+  /// The matrix-field rows that draw streamlines of their major eigenvector
+  /// instead of glyphs (the site's toggle on such a row), and the row of each
+  /// matrix-field pass.
+  public var tensorStreamlines: Set<Int> = []
+  var tensorRows: [Int] = []
 
   public struct Window: Equatable, Sendable {
     public var x: [Double]?
@@ -116,6 +125,7 @@ public struct Graph2D: Equatable, Sendable {
         tfields.append(
           TField2D(
             entries: entries, color: color, params: gpu.params, streamlines: streamlines, jacobian: jacobian))
+        tensorRows.append(index)
       case .cobweb(let curveField):
         // The map's curve y = f(x); its path is the overlay's.
         curves.append(Curve2D(field: curveField, color: color, params: gpu.params))
@@ -160,9 +170,10 @@ public struct Graph2D: Equatable, Sendable {
   /// apart whole numbers stand on screen, which says whether stems have room
   /// for their dots. `run` has the states where the frame finds them
   /// (Graph2D+States.swift).
+  /// `view` is the window itself, which a seeded integral curve steps by.
   public func overlay(
     at time: Double, bounds: Bounds? = nil, theme: GraphTheme = .light, pointsPerUnit: Double? = nil,
-    run: StateStepper? = nil
+    run: StateStepper? = nil, view: View2D? = nil
   ) -> Overlay2D {
     let window = bounds
     let bounds = bounds ?? Bounds(xmin: -4000, xmax: 3999, ymin: -4000, ymax: 4000)
@@ -217,6 +228,9 @@ public struct Graph2D: Equatable, Sendable {
         drawIntegral(shade, row: index, color: color, env: env, bounds: bounds, into: &overlay)
       case .pregion(let comps) where comps.count == 2:
         drawParametricRegion(comps, row: index, env: env, color: color, into: &overlay)
+      case .vfield2d(let comps):
+        // The curves through the seeds a viewer dropped (Graph2D+Seeds.swift).
+        drawSeeds(comps, color: css, env: env, view: view, bounds: bounds, into: &overlay)
       case .graph(let edges):
         drawGraph(edges, row: index, color: css, env: env, time: time, pointsPerUnit: pointsPerUnit, into: &overlay)
       case .orbit:
@@ -282,7 +296,7 @@ public struct Graph2D: Equatable, Sendable {
     at time: Double, width: Double, height: Double, dpr: Double = 1, theme: GraphTheme = .light,
     view: View2D? = nil, run: StateStepper? = nil
   ) -> Scene2D {
-    var scene = Scene2D(layers: layers, env: environment(at: time, run: run), frame: frame, time: time)
+    var scene = Scene2D(layers: toggled(layers), env: environment(at: time, run: run), frame: frame, time: time)
     let view = view ?? opening(width: width, height: height, dpr: dpr)
     scene.view = view
     let drawn = cells(at: time, view: view, width: width, height: height, dpr: dpr)
@@ -290,7 +304,7 @@ public struct Graph2D: Equatable, Sendable {
     scene.lattice = drawn.labels
     scene.overlay = overlay(
       at: time, bounds: Bounds(view: view, width: width, height: height), theme: theme,
-      pointsPerUnit: 1 / (view.upp * dpr), run: run)
+      pointsPerUnit: 1 / (view.upp * dpr), run: run, view: view)
     scene.gridSpecs = gridSpecs(at: time, view: view, width: width, height: height)
     scene.maps = maps
     return scene

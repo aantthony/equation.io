@@ -18,6 +18,7 @@ import UniformTypeIdentifiers
 //   --dark           the dark theme
 //   --view cx,cy,upp the window (upp in math units per device pixel); default the opening window
 //   --time 1.5       seconds since the graph opened (t)
+//   --seeds "1,2;0,-1"  integral-curve seeds dropped on a single 2D panel's vector fields, as a tap drops them
 //   --explain        print what the language made of each row
 //   --file a.csv     a data file the rows may open (any number of them): a row finds it by its hash,
 //                    or by its name when it pins none — `p = open("a.csv")`
@@ -70,7 +71,7 @@ while !arguments.isEmpty {
   let argument = arguments.removeFirst()
   switch argument {
   case "--dark", "--help", "--explain": flags.insert(argument)
-  case "--out", "--scene", "--size", "--scale", "--view", "--time":
+  case "--out", "--scene", "--size", "--scale", "--view", "--time", "--seeds":
     guard !arguments.isEmpty else { fail("\(argument) needs a value.") }
     options[argument] = arguments.removeFirst()
   case "--file":
@@ -198,7 +199,13 @@ if let path = options["--scene"] {
           + "color \(colors[k].map { "\($0)" } ?? "-")\(row.info.map { ", reads \($0)" } ?? "")")
     }
   }
-  let graph = Graph2D(analysis, colors: colors)
+  var graph = Graph2D(analysis, colors: colors)
+  // The seeds a viewer would have dropped (Graph2D+Seeds.swift).
+  for seed in (options["--seeds"] ?? "").split(separator: ";") {
+    let at = seed.split(separator: ",").compactMap { Double($0.trimmingCharacters(in: .whitespaces)) }
+    guard at.count == 2 else { fail("--seeds is x,y;x,y;….") }
+    graph.dropSeed(x: at[0], y: at[1])
+  }
   // States (`a' = …`) stepped as frames would have stepped them by --time.
   var run = StateStepper(analysis)
   run.play(to: options["--time"].flatMap(Double.init) ?? 0)

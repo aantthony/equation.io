@@ -66,6 +66,41 @@ import Testing
     #expect(overlay.points.map(\.label) == [nil, nil, "A", "B"])
   }
 
+  @Test func aSeedTracesEveryFieldOfItsPanel() {
+    var graph = Self.graph2D(["(y, -x)", "y = x", "(1, x)"])
+    #expect(graph.takesSeeds)
+    #expect(!Self.graph2D(["y = x", "(1, 2)"]).takesSeeds)
+    graph.dropSeed(x: 1, y: 0)
+    graph.dropSeed(x: 0, y: 2)
+    graph.hotSeed = 1
+    let scene = graph.scene(at: 0, width: 800, height: 600)
+    let overlay = scene.overlay ?? Overlay2D()
+    // Two fields, two seeds: a curve and a dot each.
+    #expect(overlay.polylines.count == 4)
+    #expect(overlay.points.map(\.x) == [1, 0, 1, 0])
+    #expect(overlay.points.map { $0.hot == true } == [false, true, false, true])
+    // The rotation's curve through (1, 0) is the unit circle; the slope field's the parabola y = (x² - 1)/2.
+    let circle = overlay.polylines[0].pts
+    #expect(
+      stride(from: 0, to: circle.count, by: 2).allSatisfy { abs(hypot(circle[$0], circle[$0 + 1]) - 1) < 1e-6 })
+    let slope = overlay.polylines[2].pts
+    #expect(slope.count > 200)
+    #expect(
+      stride(from: 0, to: slope.count, by: 2).allSatisfy { abs(slope[$0 + 1] - (slope[$0] * slope[$0] - 1) / 2) < 1e-6 })
+    // The newest twelve are kept.
+    for k in 0..<20 { graph.dropSeed(x: Double(k), y: 0) }
+    #expect(graph.seeds.count == maxFieldSeeds && graph.seeds.last?.x == 19)
+    // No window, no curve: a seed's steps are the window's pixels.
+    #expect(graph.overlay(at: 0).polylines.isEmpty)
+  }
+
+  @Test func aMatrixFieldDrawsStreamlinesWhenAsked() {
+    var graph = Self.graph2D(["y = x", "((x, y), (y, -x))"])
+    #expect(graph.scene(at: 0, width: 400, height: 300).layers.tfields?.first?.streamlines != true)
+    graph.tensorStreamlines = [1]
+    #expect(graph.scene(at: 0, width: 400, height: 300).layers.tfields?.first?.streamlines == true)
+  }
+
   @Test func aTrailInSpaceIsWhatTheRunSaw() {
     let rows = ["trail((cos(t), sin(t), t))", "z = 0", "trail((t, 1))"]
     let analysis = analyze(rows)
