@@ -53,9 +53,14 @@ func decode(_ json: Any) throws -> Expr {
   func number(_ v: Any) throws -> Double {
     if let n = v as? NSNumber { return n.doubleValue }
     switch v as? String {
+    case "-0": return -0.0
     case "Infinity": return .infinity
     case "-Infinity": return -.infinity
     case "NaN": return .nan
+    case let text?:
+      // A num's value is text in the fixtures, as JavaScript prints it (apple/corpus/build.ts).
+      if let value = Double(text) { return value }
+      throw DecodeError(description: "not a number: \(v)")
     default: throw DecodeError(description: "not a number: \(v)")
     }
   }

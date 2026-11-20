@@ -506,29 +506,30 @@ let multiCharOps: [String] = operatorList.map(\.0).filter { $0.utf16.count > 1 }
 /// Functions available in expressions.
 let functions: Set<String> = [
   "sin", "cos", "tan", "asin", "acos", "atan", "atan2", "sinh", "cosh", "tanh", "sech", "asinh", "acosh", "atanh",
-  "sqrt", "abs", "exp", "ln", "log", "log2", "floor", "ceil", "round", "min", "max", "clamp", "mod", "sign",
-  "fract", "erf", "normalpdf", "normalcdf", "gcd", "isprime", "gamma", "factorial", "sinc", "coth", "re", "im",
-  "arg", "conj", "mean", "total", "count", "stdev", "median", "sort", "hist", "push", "pop", "top", "interval",
-  "dot", "cross", "perp", "midpoint", "unit", "rotate", "distance", "angle", "segment", "polyline", "vector",
-  "line", "polygon", "square", "circle", "hull", "det", "trace", "solve", "transpose", "outer", "wedge",
-  "contract", "gp", "rev", "grade", "dual", "quat", "slerp", "vec", "meet", "join", "plane", "project",
-  "reflect", "motor", "action", "streamlines", "qjulia", "sum", "prod", "int", "grad", "div", "curl",
-  "laplacian", "jacobian", "hessian", "curvature", "torsion", "osculating", "frame", "fourier", "reconstruct",
-  "domain", "conformal", "iter", "rgb", "hsl", "oklch", "tube", "trail", "label", "revolve",
+  "sqrt", "abs", "exp", "ln", "log", "log2", "floor", "ceil", "round", "min", "max", "clamp", "mod", "sign", "fract",
+  "erf", "normalpdf", "normalcdf", "gcd", "isprime", "gamma", "factorial", "sinc", "coth", "re", "im", "arg", "conj",
+  "mean", "total", "count", "stdev", "median", "sort", "hist", "push", "pop", "top", "interval", "dot", "cross",
+  "perp", "midpoint", "unit", "rotate", "distance", "angle", "segment", "polyline", "vector", "line", "polygon",
+  "square", "circle", "hull", "det", "trace", "solve", "transpose", "outer", "wedge", "contract", "gp", "rev",
+  "grade", "dual", "quat", "slerp", "vec", "meet", "join", "plane", "project", "reflect", "motor", "action",
+  "streamlines", "qjulia", "sum", "prod", "int", "grad", "div", "curl", "laplacian", "jacobian", "hessian",
+  "curvature", "torsion", "osculating", "frame", "gaussian", "meancurvature", "geodesic", "lightray", "lightcone",
+  "tidal", "fourier", "reconstruct", "domain", "conformal", "iter", "rgb", "hsl", "oklch", "tube", "trail", "label",
+  "revolve",
 ]
 
 /// Builtins added after graphs existed in the wild, which a document's own
 /// definition may claim.
 let shadowableFunctions: Set<String> = [
-  "gamma", "factorial", "sinc", "coth", "clamp", "mean", "total", "count", "stdev", "median", "sort", "hist",
-  "grad", "div", "curl", "laplacian", "polyline", "vector", "distance", "angle", "revolve", "label", "rgb", "hsl",
-  "oklch", "outer", "wedge", "contract", "interval", "gp", "rev", "grade", "dual", "quat", "slerp", "action",
-  "streamlines", "jacobian", "hessian", "qjulia", "vec", "transpose", "curvature", "torsion", "osculating",
-  "frame", "log2", "fourier", "reconstruct", "meet", "join", "plane", "project", "reflect", "motor", "push", "pop",
-  "top",
+  "gamma", "factorial", "sinc", "coth", "clamp", "mean", "total", "count", "stdev", "median", "sort", "hist", "grad",
+  "div", "curl", "laplacian", "polyline", "vector", "distance", "angle", "revolve", "label", "rgb", "hsl", "oklch",
+  "outer", "wedge", "contract", "interval", "gp", "rev", "grade", "dual", "quat", "slerp", "action", "streamlines",
+  "jacobian", "hessian", "qjulia", "vec", "transpose", "curvature", "torsion", "osculating", "frame", "gaussian",
+  "meancurvature", "geodesic", "lightray", "lightcone", "tidal", "log2", "fourier", "reconstruct", "meet", "join",
+  "plane", "project", "reflect", "motor", "push", "pop", "top",
 ]
 
-let constants: [String: Double] = ["pi": Double.pi, "tau": 2 * Double.pi, "e": 2.718281828459045]
+let constants: [String: Double] = ["pi": Double.pi, "e": 2.718281828459045]
 
 /// JavaScript's Number() over a number token: `1.` is 1, and the `0.5.` a
 /// half-typed `[.5..2]` leaves is NaN.

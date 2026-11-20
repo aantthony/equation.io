@@ -32,8 +32,8 @@ public struct ParseError: Error, Equatable, Sendable {
 // MARK: - Character classes
 
 /// Greek letters are ordinary name characters (θ, Δx), except the glyphs
-/// that stand for something by themselves (π τ Σ Π), which tokenize alone.
-let greekNameChars: Set<UInt16> = Set("αβγδεζηθικλμνξορςσυφχψωΑΒΓΔΕΖΗΘΙΚΛΜΝΞΟΡΤΥΦΧΨΩϑϕϖϱϵµ".utf16)
+/// that stand for something by themselves (π Σ Π), which tokenize alone.
+let greekNameChars: Set<UInt16> = Set("αβγδεζηθικλμνξορςστυφχψωΑΒΓΔΕΖΗΘΙΚΛΜΝΞΟΡΤΥΦΧΨΩϑϕϖϱϵµ".utf16)
 
 /// Standalone glyphs and the names they mean.
 let glyphAliases: [UInt16: String] = [
@@ -45,7 +45,6 @@ let glyphAliases: [UInt16: String] = [
   0x221E: "inf",  // ∞
   0x2207: "grad",  // ∇
   0x03C0: "pi",  // π
-  0x03C4: "tau",  // τ
 ]
 
 let superscripts: [UInt16: String] = [

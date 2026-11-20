@@ -227,4 +227,5 @@ vec2 c_tan(vec2 z) { return c_div(c_sin(z), c_cos(z)); }
 vec2 c_sinh(vec2 z) { return vec2(sinh(z.x) * cos(z.y), cosh(z.x) * sin(z.y)); }
 vec2 c_cosh(vec2 z) { return vec2(cosh(z.x) * cos(z.y), sinh(z.x) * sin(z.y)); }
 vec2 c_tanh(vec2 z) { return c_div(c_sinh(z), c_cosh(z)); }
+
 """#

@@ -23,7 +23,9 @@ import Testing
   @Test func functionsTakeTheirShaderNames() throws {
     #expect(try field("ln(x) + log(x)") == "(log(x) + eq_log10(x))")
     #expect(try field("mod(x, 2)") == "mod(x, 2.0)")
-    #expect(try field("max(x, y, 0)") == "max(max(x, y), 0.0)")
+    // As lib/glsl.ts spells any call: lowering has nested or refused it by then.
+    #expect(try field("max(x, y, 0)") == "max(x, y, 0.0)")
+    #expect(try field("mean(x)") == "mean(x)")
   }
 
   @Test func piecewiseIsATernary() throws {
@@ -37,11 +39,14 @@ import Testing
     #expect(plotRow("y = sin(x)") == .curve(field: "(y - (sin(x)))", animated: false))
     #expect(plotRow("y = sin(x - t)") == .curve(field: "(y - (sin((x - t))))", animated: true))
     #expect(plotRow("x = 2") == .curve(field: "(x - (2.0))", animated: false))
+    #expect(plotRow("y = max(x, 1, -x)") == .curve(field: "(y - (max(max(x, 1.0), (-x))))", animated: false))
+    let wide = plotRow("y = 1000000000000000000000 x + 0.0000001")
+    #expect(wide == .curve(field: "(y - (((1E+21 * x) + 1E-7)))", animated: false))
   }
 
   @Test func rowsLeftToTheWebRenderer() {
-    // A slider's constant, a definition, a surface, a field, a point, a list.
-    for row in ["a = 2", "y = a x", "z = x y", "sin(x)", "(1, 2)", "y = [1, 2] x", "y < x", "y = ("] {
+    // A slider's constant, a definition, a surface, a field, a point, a list, a list's reduction.
+    for row in ["a = 2", "y = a x", "z = x y", "sin(x)", "(1, 2)", "y = [1, 2] x", "y < x", "y = (", "y = mean(x)"] {
       #expect(plotRow(row) == nil, "\(row)")
     }
   }

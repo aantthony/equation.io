@@ -24,7 +24,7 @@
     "perf": "node scripts/perf.ts",
     "perf:update": "node scripts/perf.ts --update",
     "traffic": "node scripts/traffic.ts",
-    "swift:corpus": "vitest run -c apple/corpus/vitest.config.ts --silent && node apple/corpus/build.ts",
+    "swift:corpus": "rm -rf apple/corpus/out && vitest run -c apple/corpus/vitest.config.ts --silent && node apple/corpus/build.ts",
     "swift:prelude": "node apple/corpus/prelude.ts",
     "swift:highlight": "node --experimental-transform-types --no-warnings apple/corpus/highlight.ts",
     "swift:diff-corpus": "node apple/corpus/diff.ts",
