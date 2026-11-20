@@ -185,7 +185,7 @@ private func difference(_ a: CGImage, _ b: CGImage) -> Double {
     #expect(program.attributes.map(\.location) == [0, 1])
     #expect(program.attributes.map(\.size) == [2, 3])
     #expect(program.source.contains("float a[3] = {1.0, max(2.0, 3.0), 4.0};"))
-    #expect(program.source.contains("eq3_lessThan(vColor, uColor)"))
+    #expect(program.source.contains("eq3_texture(uStopDepth, vec2(0.5))"))
     #expect(program.source.contains("[[point_size]]"))
     #expect(program.source.contains("[[depth(any)]]"))
     #expect(program.source.contains("depth2d<float> eq_texture0 [[texture(0)]]"))

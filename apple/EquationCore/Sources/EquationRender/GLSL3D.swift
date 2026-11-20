@@ -20,11 +20,14 @@ import Foundation
 /// - Clip space: GL's z runs −w…w and Metal's 0…w, so the vertex stage
 ///   halves it into place. Depths are then the ones `depthOf` computes.
 /// - `discard` is as in GLSL.swift: in `main` or a void function only.
-/// - `float[n](…)` array constructors become braces; `lessThan` and
-///   `texture` are functions here, under names of their own.
+/// - `float[n](…)` array constructors become braces.
+/// - GLSL's own functions are GLSL.swift's header's; `texture` on these
+///   samplers is a function here, under a name of its own.
 ///
-/// What is not translated: uniform arrays, `texelFetch`, `inverse`, the
-/// other vector comparisons, and `%` or `==` on vectors.
+/// What is not translated: uniform arrays, `texelFetch` on these samplers,
+/// and `%` or `==` on vectors. GLSL.swift's translator has since learned
+/// uniform arrays and textures for the 2D passes; one translator for both
+/// would take this file's vertex stage, fields and depth into that one.
 struct TranslatedProgram {
   /// Metal Shading Language: `program_vertex` and `program_fragment`.
   var source: String
@@ -105,8 +108,7 @@ private struct Stage {
           "thread \(match.output[1].substring ?? "") &\(match.output[2].substring ?? "")"
         })
     }
-    body = bracedArrays(lines.joined(separator: "\n")).replacing("lessThan(", with: "eq3_lessThan(")
-      .replacing("texture(", with: "eq3_texture(")
+    body = bracedArrays(lines.joined(separator: "\n")).replacing("texture(", with: "eq3_texture(")
   }
 
   func uses(_ name: String) -> Bool { body.contains(name) }
@@ -270,8 +272,6 @@ func translateProgram(vertex: String, fragment: String) -> TranslatedProgram {
 
 /// What the 3D shaders name beyond GLSL.swift's header.
 private let header3D = """
-  static inline bool3 eq3_lessThan(float3 a, float3 b) { return a < b; }
-
   constexpr sampler eq3_nearest(coord::normalized, filter::nearest, address::clamp_to_edge);
   // A target another pass drew, as a sampler2D: rows from the top in Metal, so v is turned over.
   struct eq3_color { texture2d<float> t; };

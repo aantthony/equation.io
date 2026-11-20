@@ -5,33 +5,10 @@ import Foundation
 // What is drawn over a 3D frame with a 2D context: web/render3d.ts
 // `drawLabels3D`. The context is in points with y down, as Overlay2D's.
 
-/// The system font at `size`, slanted or heavier: the site's `italic 13px`
-/// and `600 13px ui-sans-serif, system-ui`.
-private func labelFont(_ size: CGFloat, italic: Bool = false, weight: CGFloat = 0) -> CTFont {
-  var traits: [CFString: Any] = [kCTFontWeightTrait: weight]
-  if italic { traits[kCTFontSymbolicTrait] = CTFontSymbolicTraits.traitItalic.rawValue }
-  let descriptor = CTFontDescriptorCreateWithAttributes([kCTFontTraitsAttribute: traits] as CFDictionary)
-  return CTFontCreateCopyWithAttributes(overlayFont(size), size, nil, descriptor)
-}
-
-/// A label's text beside its anchor, haloed in the page background so it
-/// stays legible across curves and gridlines (web/render2d.ts `drawTextLabel`).
-func drawTextLabel(_ ctx: CGContext, _ text: String, _ sx: Double, _ sy: Double, color: RGB, theme: GraphTheme) {
-  let font = labelFont(13, weight: 0.3)
-  // The halo: the text's outline, four points wide with round joins.
-  let attributes: [CFString: Any] = [kCTFontAttributeName: font, kCTForegroundColorFromContextAttributeName: true]
-  let line = CTLineCreateWithAttributedString(
-    CFAttributedStringCreate(nil, text as CFString, attributes as CFDictionary)!)
-  ctx.saveGState()
-  ctx.setLineJoin(.round)
-  ctx.setLineWidth(4)
-  ctx.setStrokeColor(cgColor(theme.bg))
-  ctx.setTextDrawingMode(.stroke)
-  ctx.textMatrix = CGAffineTransform(scaleX: 1, y: -1)
-  ctx.textPosition = CGPoint(x: sx + 8, y: sy - 8)
-  CTLineDraw(line, ctx)
-  ctx.restoreGState()
-  fillText(ctx, text, x: sx + 8, y: sy - 8, font: font, color: cgColor(color))
+/// The site's `italic 13px ui-sans-serif, system-ui`.
+private func italicFont(_ size: CGFloat) -> CTFont {
+  let font = overlayFont(size)
+  return CTFontCreateCopyWithSymbolicTraits(font, size, nil, .traitItalic, .traitItalic) ?? font
 }
 
 /// Project axis-end labels (x, y, z), the points' names and the text labels
@@ -50,18 +27,17 @@ public func drawLabels3D(
   ctx.translateBy(x: box.minX, y: box.minY)
   let vp = cameraMatrices(cam, w / h).vp
   let boxR = cameraBoxR(cam)
-  let font = labelFont(13, italic: true)
-  let hex = { (r: Float, g: Float, b: Float) in RGB(r, g, b) / 15 }
-  var labels: [(text: String, at: SIMD3<Double>, color: RGB, dot: Bool)] = []
+  let font = italicFont(13)
+  var labels: [(text: String, at: SIMD3<Double>, color: CSSColor, dot: Bool)] = []
   if axes {
     labels += [
-      ("x", [boxR * 1.04, 0, 0], hex(0xa, 0x4, 0x4), false),
-      ("y", [0, boxR * 1.04, 0], hex(0x4, 0xa, 0x4), false),
-      ("z", [0, 0, boxR * 1.04], hex(0x4, 0x6, 0xa), false),
+      ("x", [boxR * 1.04, 0, 0], "#a44", false),
+      ("y", [0, boxR * 1.04, 0], "#4a4", false),
+      ("z", [0, 0, boxR * 1.04], "#46a", false),
     ]
   }
   for p in points {
-    if let label = p.label, !label.isEmpty { labels.append((label, p.pos, p.color, true)) }
+    if let label = p.label, !label.isEmpty { labels.append((label, p.pos, CSSColor(p.color), true)) }
   }
   for (text, p, color, dot) in labels {
     guard let at = projectToScreen(vp, p, w, h) else { continue }
@@ -69,10 +45,10 @@ public func drawLabels3D(
     // beside one of POINT_PX at the target distance.
     var off = 7.0
     if dot { off = 7 * min(max(cam.radius / viewDepth(vp, p), 0.6), POINT_MAX_PX / POINT_PX) }
-    fillText(ctx, text, x: at.x + off, y: at.y - off, font: font, color: cgColor(color))
+    fillText(ctx, text, x: at.x + off, y: at.y - off, font: font, color: color.cgColor)
   }
   for label in texts {
     guard let at = projectToScreen(vp, label.pos, w, h) else { continue }
-    drawTextLabel(ctx, label.text, at.x, at.y, color: label.color, theme: theme)
+    drawTextLabel(ctx, label.text, sx: at.x, sy: at.y, color: CSSColor(label.color), theme: theme)
   }
 }
