@@ -19,6 +19,9 @@ struct PanelState: Equatable {
   /// The text of the view(…) or camera(…) row the panel was last framed
   /// from, or last wrote: a row that differs is a new framing to take.
   var applied: String?
+  /// The integral-curve seeds a viewer dropped on the panel's vector fields
+  /// (web/session.ts `Panel.drops`): the view's, kept through every edit.
+  var seeds: [FieldSeed] = []
   /// A hand or a move has changed the window since it was framed: until
   /// then a resized view frames it again (a window comes up at one size and
   /// settles at another, and a view(…) row's ranges should fill what it settles at).
@@ -35,8 +38,8 @@ final class GraphViewport {
   /// The Metal view's size in device pixels, and how many of them make a point.
   var pixels = CGSize.zero
   var scale = 1.0
-  /// The row whose point is under a drag, drawn with a halo.
-  var hot: Int?
+  /// The point under a drag, or the seed under the pointer, drawn with a halo.
+  var hot: HotPoint?
   /// The frame as last drawn: each panel in its box, with what goes over
   /// the shader passes (the numbers along the axes, the rows the CPU
   /// evaluates, a 3D panel's names), and every panel's place for the edges.

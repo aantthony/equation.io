@@ -69,10 +69,11 @@ public struct GraphPanels: Equatable, Sendable {
         if case .view(_, _, _, true)? = row.view { locked = true }
         if case .mappedView(_, _, _, true, _)? = row.view { locked = true }
       }
+      // (A panel drawn on a surface, an on(…) row, is 3D too: `Graph.kind`.)
+      let own3D = Graph.kind(of: analysis.panel(index)) == .space
       return Panel(
         rows: rows, split: index == 0 ? nil : analysis.rows[first].view,
-        graph: Graph2D(analysis.panel(index), colors: colors),
-        needs3D: own.contains { $0.unsupported == nil && $0.classified?.needs3D == true }, locked: locked)
+        graph: Graph2D(analysis.panel(index), colors: colors), needs3D: own3D, locked: locked)
     }
     animated = panels.contains { $0.graph.animated }
   }

@@ -91,20 +91,23 @@ private func pairRow(_ row: RowAnalysis) -> PairRow? {
 
 /// How each coordinate of a pair answers a drag: a literal is rewritten in
 /// place, a slider's name moves through its own row (the row's index), and
-/// nil stays pinned. Nil when the text is not a pair or nothing of it moves
-/// (lib/drag.ts `dragAxes`).
+/// nil stays pinned, as does a name in `pinned`. Nil when the text is not a
+/// pair or nothing of it moves (lib/drag.ts `dragAxes`).
 private enum DragAxis: Equatable {
   case literal
   case slider(row: Int)
 }
 
-private func dragAxes(_ pair: String, _ analysis: DocumentAnalysis) -> (parts: [String], axes: [DragAxis?])? {
+private func dragAxes(
+  _ pair: String, _ analysis: DocumentAnalysis, pinned: Set<String> = []
+) -> (parts: [String], axes: [DragAxis?])? {
   guard let (a, b) = splitPair(pair) else { return nil }
   let axes = [a, b].map { part -> DragAxis? in
     if isNumberLiteral(part) { return .literal }
     // Sliders live under canonical names: (r₁, 2) drags r_1's row; a
     // redefined built-in's under its alias (lib/env.ts `boundIn`).
     let name = boundName(canonicalName(part), analysis.valueNames)
+    if pinned.contains(name) { return nil }
     let row = analysis.rows.firstIndex { row in
       if case .constant(name, _, false)? = row.definition { return row.slider != nil && row.error == nil }
       return false
@@ -116,12 +119,14 @@ private func dragAxes(_ pair: String, _ analysis: DocumentAnalysis) -> (parts: [
 
 extension DocumentAnalysis {
   /// The points among `rows` (a panel's) that a drag can move, where they
-  /// are when the constants are `env` (which has t).
-  public func grabPoints(rows: Range<Int>, env: [String: Double]) -> [GrabPoint] {
+  /// are when the constants are `env` (which has t). The names in `pinned`
+  /// are held still: a slider the panel's surface reads, which would move
+  /// the point under the drag (web/main.ts `defPointWriter`).
+  public func grabPoints(rows: Range<Int>, env: [String: Double], pinned: Set<String> = []) -> [GrabPoint] {
     var points: [GrabPoint] = []
     for index in rows where index < self.rows.count {
       let row = self.rows[index]
-      guard let written = pairRow(row), dragAxes(written.pair, self) != nil else { continue }
+      guard let written = pairRow(row), dragAxes(written.pair, self, pinned: pinned) != nil else { continue }
       var at: (Double?, Double?)
       if let name = row.definition?.name {
         guard env["\(name)_z"] == nil else { continue }
@@ -140,10 +145,11 @@ extension DocumentAnalysis {
   /// along x and y). Nil when the row holds no point a drag can move, or
   /// when nothing changes.
   public func movingPoint(
-    row index: Int, to x: Double, _ y: Double, upp: (x: Double, y: Double), in sources: [String]
+    row index: Int, to x: Double, _ y: Double, upp: (x: Double, y: Double), pinned: Set<String> = [],
+    in sources: [String]
   ) -> [String]? {
     guard rows.indices.contains(index), sources.indices.contains(index),
-      let written = pairRow(rows[index]), let drag = dragAxes(written.pair, self)
+      let written = pairRow(rows[index]), let drag = dragAxes(written.pair, self, pinned: pinned)
     else { return nil }
     var out = sources
     var text = drag.parts
@@ -162,6 +168,76 @@ extension DocumentAnalysis {
       }
     }
     out[index] = keepNote(sources[index], written.code("(\(text[0]), \(text[1]))"))
+    return out == sources ? nil : out
+  }
+}
+
+/// A point placed by its coordinates' names — `(r, theta) = (2, 0.8)`, a
+/// system whose plan has `coordinates` — is dragged by evaluating those
+/// coordinates where the pointer is and writing them back as the right-hand
+/// pair (web/main.ts `coordinatePointWriter`, lib/drag.ts `coordinateDragWriter`).
+extension DocumentAnalysis {
+  /// The row's coordinates and its right-hand pair, where it is such a point.
+  private func coordinateRow(_ index: Int, _ source: String) -> (coords: [Expr], lhs: String, pair: String)? {
+    guard rows.indices.contains(index), rows[index].error == nil, rows[index].unsupported == nil,
+      case .system(2, _, false, _, let coords?)? = rows[index].cpu, coords.count == 2
+    else { return nil }
+    let code = stripNote(source)
+    guard let at = code.firstIndex(of: "=") else { return nil }
+    let trim = { (s: Substring) in s.trimmingCharacters(in: .whitespacesAndNewlines) }
+    return (coords, trim(code[..<at]), trim(code[code.index(after: at)...]))
+  }
+
+  /// The names the row's coordinates read, where it is a point placed by
+  /// them: a slider among those (or among what they are made of) changes the
+  /// chart itself, and is held still under a drag.
+  public func coordinateNames(row index: Int) -> [String]? {
+    coordinateRow(index, rows.indices.contains(index) ? rows[index].text : "").map { found in
+      found.coords.flatMap { Array(freeVars($0)) }
+    }
+  }
+
+  /// Whether a drag can move the point of row `index`: it is placed by its
+  /// coordinates' names and some coordinate of its pair is a number, or a
+  /// slider not among `pinned`.
+  public func movesCoordinatePoint(row index: Int, pinned: Set<String> = []) -> Bool {
+    guard rows.indices.contains(index), let found = coordinateRow(index, rows[index].text) else { return false }
+    return dragAxes(found.pair, self, pinned: pinned) != nil
+  }
+
+  /// The document's rows with the point of row `index` moved to (x, y) of
+  /// the plane, each rounded to about a pixel there before the coordinates
+  /// are evaluated ("pixel precision belongs to Cartesian space, before
+  /// changing units"). `env` has the constants and t. Nil when the row holds
+  /// no such point, the coordinates have no value there, or nothing changes.
+  public func movingCoordinatePoint(
+    row index: Int, to x: Double, _ y: Double, upp: (x: Double, y: Double), env: [String: Double],
+    pinned: Set<String> = [], in sources: [String]
+  ) -> [String]? {
+    guard sources.indices.contains(index), let found = coordinateRow(index, sources[index]),
+      let drag = dragAxes(found.pair, self, pinned: pinned)
+    else { return nil }
+    var scope = env
+    scope["x"] = snapToPixel(x, upp: upp.x)
+    scope["y"] = snapToPixel(y, upp: upp.y)
+    // (A singular coordinate keeps the previous values.)
+    let values = found.coords.map { (try? evaluate($0, scope)) ?? .nan }
+    guard values.allSatisfy(\.isFinite) else { return nil }
+    var out = sources
+    var text = drag.parts
+    for (k, axis) in drag.axes.enumerated() {
+      switch axis {
+      case .literal?:
+        text[k] = JS.string(Double(String(format: "%.5e", values[k])) ?? values[k])
+      case .slider(let row)?:
+        if sources.indices.contains(row), let moved = settingSlider(row: row, to: values[k], in: out[row]) {
+          out[row] = moved
+        }
+      case nil:
+        break
+      }
+    }
+    out[index] = keepNote(sources[index], "\(found.lhs) = (\(text[0]), \(text[1]))")
     return out == sources ? nil : out
   }
 }

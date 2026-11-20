@@ -79,7 +79,7 @@ struct DocumentView: View {
   private var editor: some View {
     EquationEditor(
       document: $document,
-      status: model.status,
+      status: model.shown,
       slide: { [model] row, value in model.setSlider(row: row, to: value) },
       slid: { [model] in model.endGesture() },
       flip: { [model] row, toggle in model.flip(toggle, row: row) },

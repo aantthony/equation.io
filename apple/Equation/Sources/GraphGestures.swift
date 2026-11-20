@@ -1,3 +1,4 @@
+import EquationCore
 import EquationRender
 import MetalKit
 
@@ -94,11 +95,18 @@ import MetalKit
       pinch.delegate = self
       addGestureRecognizer(pinch)
       for touches in 1...2 {
-        let tap = UITapGestureRecognizer(target: self, action: #selector(tapped))
+        let tap = UITapGestureRecognizer(target: self, action: #selector(doubleTap))
         tap.numberOfTapsRequired = 2
         tap.numberOfTouchesRequired = touches
         addGestureRecognizer(tap)
       }
+      // One tap drops a seed on a vector field; the first of two does too,
+      // and the second lets go of them all, as the site's clicks do.
+      addGestureRecognizer(UITapGestureRecognizer(target: self, action: #selector(singleTap)))
+    }
+
+    @objc private func singleTap(_ gesture: UITapGestureRecognizer) {
+      tapped(at: gesture.location(in: self))
     }
 
     @objc private func panned(_ gesture: UIPanGestureRecognizer) {
@@ -140,7 +148,7 @@ import MetalKit
       gesture.scale = 1
     }
 
-    @objc private func tapped(_ gesture: UITapGestureRecognizer) {
+    @objc private func doubleTap(_ gesture: UITapGestureRecognizer) {
       doubleTapped(at: gesture.location(in: self), out: gesture.numberOfTouchesRequired == 2)
     }
 
@@ -161,6 +169,7 @@ import MetalKit
     ///   scroll x y dx dy [shift] a two-finger scroll
     ///   pinch x y factor         a pinch
     ///   tap x y [out]            a double click
+    ///   click x y                a click that goes nowhere (drops a seed on a vector field)
     ///   spin rate                Ask's move_view spin
     ///   hover x y                the pointer at rest there (`state` says what it reads)
     ///   zoom factor              the Zoom commands (0.5 in, 2 out), and wait for the glide
@@ -168,7 +177,8 @@ import MetalKit
     ///   at seconds               hold the clock at a time: a picture of that moment
     ///   set row | row | …        replace the document's rows (an edit, not a new graph)
     ///   slide row value          drag row's slider to a value (row from 0), and let go
-    ///   toggle row id            flip a row's display toggle (levels, sums, streamlines, arrows)
+    ///   toggle row id            flip a row's display toggle (levels, sums, streamlines, arrows,
+    ///                            certify, tensor, combK, combT)
     ///   undo                     the window's Undo, once
     ///   import path [path…]      give the window data files (CSV), as the importer or a drop does
     ///   save path                the document's bytes, as saving writes them, to a file
@@ -181,11 +191,13 @@ import MetalKit
     ///   ask name tool args…      one of Ask's tools, its answer as name.txt:
     ///                              get | check row | row | set row | row | view x0 x1 y0 y1 [seconds]
     ///                              | camera theta phi radius [seconds] | slider a to [seconds]
+    ///   stack path kb [raw] row | row …  read and draw rows from a thread with kb KB of stack (raw: by the
+    ///                            core's analyze, on that thread itself); path.txt says ok if it could
     ///   wait seconds
     ///   shot name                the frame, as name.png in the app's temporary directory
     ///   rows name                the document's rows, as name.txt there
     ///   state name               each panel's window or camera, as name.txt there, with
-    ///                            each row's status and toggles
+    ///                            its seeds and each row's status and toggles
     ///
     /// A name that is an absolute path is written there instead, which a
     /// build without the sandbox can do (`xcodebuild … ENABLE_APP_SANDBOX=NO`):
@@ -222,6 +234,8 @@ import MetalKit
             self.scrolled(at: CGPoint(x: n[0], y: n[1]), dx: n[2], dy: n[3], modified: step.last == "shift")
           case "pinch" where n.count >= 3:
             self.pinched(at: CGPoint(x: n[0], y: n[1]), by: n[2])
+          case "click" where n.count >= 2:
+            self.tapped(at: CGPoint(x: n[0], y: n[1]))
           case "tap" where n.count >= 2:
             self.doubleTapped(at: CGPoint(x: n[0], y: n[1]), out: step.last == "out")
           case "spin" where n.count >= 1:
@@ -297,6 +311,37 @@ import MetalKit
               ? URL(fileURLWithPath: "\(name).txt")
               : URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("\(name).txt")
             try? answer.write(to: url, atomically: true, encoding: .utf8)
+          case "stack" where step.count >= 4:
+            // Read rows on a thread with that little stack, as the app reads and draws them (or, with
+            // `raw`, by the core's analyze where it stands): it answers, or the app is gone.
+            let raw = step[3] == "raw"
+            let rows = step.dropFirst(raw ? 4 : 3).joined(separator: " ").split(separator: "|")
+              .map { $0.trimmingCharacters(in: .whitespaces) }
+            let name = step[1]
+            let thread = Thread {
+              var errors: [String] = []
+              if raw {
+                errors = analyze(rows).rows.compactMap(\.error)
+              } else {
+                let read = GraphAnalysis(
+                  rows: rows.enumerated().map { GraphRow(id: $0.offset, text: $0.element) }, theme: .light)
+                errors = read.status.compactMap(\.error)
+                let content = read.content
+                let views = content.panels.opening(width: 800, height: 600, dpr: 2)
+                let cameras = content.framing.map { $0.camera ?? $0.space?.opening ?? Camera3D() }
+                let drawn = DeepStack.run {
+                  content.frames(
+                    at: 0, width: 800, height: 600, dpr: 2, theme: .light, views: views, cameras: cameras, run: nil
+                  ).frames.count
+                }
+                errors.append("\(drawn) panels drawn")
+              }
+              try? "ok \(errors.joined(separator: " / "))".write(
+                to: URL(fileURLWithPath: "\(name).txt"), atomically: true, encoding: .utf8)
+            }
+            thread.stackSize = Int(n[1]) << 10
+            thread.start()
+            try? await Task.sleep(for: .seconds(1.5))
           case "wait" where n.count >= 1:
             try? await Task.sleep(for: .seconds(n[0]))
           case "shot":
@@ -311,9 +356,12 @@ import MetalKit
                 : "view(cx = \(state.view.cx), cy = \(state.view.cy), upp = \(state.view.upp))"
             }
             let pixels = self.viewport.pixels
-            let size = "size \(pixels.width) \(pixels.height) scale \(self.scale) drawn \(self.drawn)"
+            let stack = pthread_get_stacksize_np(pthread_self()) >> 10
+            let size =
+              "size \(pixels.width) \(pixels.height) scale \(self.scale) drawn \(self.drawn) stack \(stack) KB"
             let hover = "hover \(self.viewport.hover?.text ?? "-")"
-            let status = (self.model?.status ?? []).enumerated().map { k, row in
+            // (As the editor shows them: with what drawing the rows found.)
+            let status = (self.model?.shown ?? []).enumerated().map { k, row in
               let toggles = (row.toggles ?? []).map { "\($0.id)=\($0.on ? "on" : "off")" }.joined(separator: ",")
               let slider = row.slider.map { " slider \($0.min)..\($0.max) step \($0.step) at \($0.value)" } ?? ""
               let needs = row.needsFile.map { " | needs \($0)\(row.opensFile == true ? " [asks]" : "")" } ?? ""
@@ -321,7 +369,10 @@ import MetalKit
                 + "info \(row.info ?? "-") | toggles \(toggles.isEmpty ? "-" : toggles)\(slider)\(needs)"
             }
             let data = (self.model?.dataNotices() ?? []).map { "data \($0)" }
-            try? ([size, hover] + lines + status + data).joined(separator: "\n")
+            let seeds = self.viewport.states.enumerated().filter { !$0.element.seeds.isEmpty }.map { k, state in
+              "seeds \(k): " + state.seeds.map { "\($0.x),\($0.y)" }.joined(separator: " ")
+            }
+            try? ([size, hover] + lines + seeds + status + data).joined(separator: "\n")
               .write(to: file("txt"), atomically: true, encoding: .utf8)
           default:
             print("EQUATION_SCRIPT: can't read step \(step.joined(separator: " "))")

@@ -12,6 +12,19 @@ final class GraphModel {
   /// editor's id for the row. As on the site they are the view's, not the
   /// document's: nothing of them is in a row's text, a file or a link.
   var toggles: [Int: Set<String>] = [:]
+  /// What rows say once a frame has drawn them, by row: a certificate, a
+  /// geodesic's note, a readout that moves (`GraphContent.notes`). The
+  /// editor shows them over `status`; Ask reads `status` alone.
+  var notes: [Int: RowNote] = [:]
+  /// The rows' status as the editor shows it.
+  var shown: [RowStatus] {
+    guard !notes.isEmpty else { return status }
+    var out = status
+    for (row, note) in notes where row < out.count && out[row].error == nil {
+      if let error = note.error { out[row].error = error } else if let info = note.info { out[row].info = info }
+    }
+    return out
+  }
   /// The Metal view drawing the graph (MetalGraphView.swift).
   @ObservationIgnored weak var metal: MetalCanvas?
   /// The theme the graph is drawn in, which picks the rows' colors.
@@ -171,9 +184,18 @@ struct GraphAnalysis: Equatable {
 
   /// `files`: the document's data files, which its `open(…)` rows read. Nil
   /// for a reading that is to see none of them (Ask's: Chat.swift).
+  ///
+  /// Read with the stack a deep row needs (DeepStack.swift), wherever it is asked for.
   init(
     rows: [GraphRow], theme: GraphTheme, previous: [Int: Int] = [:], toggles on: [Int: Set<String>] = [:],
     files: DataFiles? = nil
+  ) {
+    self = DeepStack.run { GraphAnalysis(reading: rows, theme: theme, previous: previous, toggles: on, files: files) }
+  }
+
+  private init(
+    reading rows: [GraphRow], theme: GraphTheme, previous: [Int: Int], toggles on: [Int: Set<String>],
+    files: DataFiles?
   ) {
     let texts = rows.map(\.text)
     let analysis = analyze(texts, files: files)
@@ -203,6 +225,27 @@ struct GraphAnalysis: Equatable {
           row.gpu?.type == "vfield3d"
           ? [toggle("streamlines", "streamlines", "Fill space with short streamlines drifting along the field")] : []
         return lines + [toggle("arrows", "arrows", "Show a lattice of direction arrows")]
+      case "system", "complexSystem":
+        // (Whether its panel lets it is the panel's graph's to say: below.)
+        return [
+          toggle(
+            "certify", "certify search box",
+            "Prove roots and completeness in the bounded search box; unsupported functions remain unresolved")
+        ]
+      case "tfield2d":
+        // streamlines(M) asks for them in the text; nothing to toggle.
+        if case .tfield2d(_, true, _) = cpu { return [] }
+        return [
+          toggle(
+            "tensor", "streamlines", "Trace the major eigenvector of the symmetric part instead of drawing glyphs")
+        ]
+      case "pcurve":
+        // A curve in space: its combs (web/main.ts `makeCurveUI`).
+        guard case .pcurve(3, _, _, _, _) = cpu else { return [] }
+        return [
+          toggle("combK", "κ comb", "Curvature comb: tooth length κ, away from the center of curvature"),
+          toggle("combT", "τ comb", "Torsion comb: signed teeth along the binormal"),
+        ]
       default:
         return []
       }
@@ -214,6 +257,10 @@ struct GraphAnalysis: Equatable {
         case "levels": shown.levels.insert(k)
         case "sums": shown.sums.insert(k)
         case "streamlines": shown.streamlines.insert(k)
+        case "certify": shown.certified.insert(k)
+        case "tensor": shown.tensors.insert(k)
+        case "combK": shown.combK.insert(k)
+        case "combT": shown.combT.insert(k)
         default: shown.arrows.insert(k)
         }
       }
@@ -223,10 +270,14 @@ struct GraphAnalysis: Equatable {
     // An orbit that cannot be integrated says so on its row, as the site sets it when it draws.
     var orbitErrors: [Int: String] = [:]
     for panel in content.panels.panels { orbitErrors.merge(panel.graph.orbitErrors) { a, _ in a } }
-    // A 3D panel leaves its plane-only toggles out, and a 2D one a field's.
+    // A 3D panel leaves its plane-only toggles out, and a 2D one those of
+    // space; a system certifies where its panel's graph says it can.
+    let planar: Set<String> = ["levels", "sums", "certify", "tensor"]
     for (k, framing) in content.framing.enumerated() {
+      let graph = content.panels.panels[k].graph
       for row in content.panels.panels[k].rows {
-        offered[row].removeAll { ($0.id == "levels" || $0.id == "sums") == (framing.space != nil) }
+        offered[row].removeAll { planar.contains($0.id) == (framing.space != nil) }
+        offered[row].removeAll { $0.id == "certify" && !graph.canCertify(row: row) }
       }
     }
     // Syntax colors, as the site computes them (EquationCore `highlightRows`, lib/highlight.ts).
@@ -275,7 +326,7 @@ struct GraphView: View {
     model.slide = { [weak model] index, value in
       var lines = document.wrappedValue.rows.map(\.text)
       guard lines.indices.contains(index),
-        let moved = analyze(lines, files: document.wrappedValue.files)
+        let moved = analyzeDeep(lines, files: document.wrappedValue.files)
           .settingSlider(row: index, to: value, in: lines[index]), moved != lines[index]
       else { return }
       lines[index] = moved

@@ -389,7 +389,7 @@ public struct Document3D: Equatable, Sendable {
   public static func == (a: Document3D, b: Document3D) -> Bool {
     a.analysis == b.analysis && a.colors == b.colors && a.grid == b.grid && a.camera == b.camera && a.spin == b.spin
       && a.locked == b.locked && a.animated == b.animated && a.streamlines == b.streamlines && a.arrows == b.arrows
-      && a.combK == b.combK && a.combT == b.combT
+      && a.combK == b.combK && a.combT == b.combT && a.theme == b.theme
   }
 }
 
