@@ -175,3 +175,26 @@ func lowerSpaceFlow(_ expr: Expr, _ fields: [String: Expr]) throws -> Expr? {
   let rhs = velocity.map { Expr.bin(.sub, fields.isEmpty ? $0 : substVars($0, fields), .num(0)) }
   return .eq(.vec(["x'", "y'", "z'"].map { .var($0) }), .vec(solveVec(jac, rhs)))
 }
+
+/// Whether a row names three coordinates in a tuple on the left — a position
+/// in space, `(rho, theta, phi) = (2, pi/4, pi/3)` — with what the site says
+/// of one it cannot read (lib/coordinate.ts `coordinateRow`). Its
+/// coordinates are axes or fields, which classify writes in: it is then a
+/// system in x, y and z like any other.
+func isSpacePosition(_ names: [String], _ expr: Expr, _ fields: [String: Expr]) throws -> Bool {
+  guard names.count == 3, names.allSatisfy({ spaceVarNames.contains($0) || fields[$0] != nil }),
+    case .eq(_, let right) = expr
+  else { return false }
+  if Set(names).count != names.count {
+    throw LanguageError(
+      "(\(names.joined(separator: ", "))) repeats a coordinate — use distinct coordinates to determine "
+        + "a point or flow.")
+  }
+  guard case .vec(let items) = right else {
+    throw LanguageError("A vector equation needs components on both sides.")
+  }
+  if items.count != 3 {
+    throw LanguageError("Mismatched components: 3 on the left, \(items.count) on the right.")
+  }
+  return true
+}

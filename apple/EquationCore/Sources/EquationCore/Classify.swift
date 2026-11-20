@@ -294,6 +294,8 @@ func classify(_ lowered: Expr, defined: Set<String>, fields: [String: Expr]) thr
     let flow = written.contains { $0.hasSuffix("'") }
     if let spaceFlow = try lowerSpaceFlow(expr, fields) {
       expr = spaceFlow
+    } else if try isSpacePosition(written, expr, fields) {
+      // Three coordinates on the left: a system in space, below.
     } else if flow
       ? written != ["x'", "y'"] : written.allSatisfy({ spaceVarNames.contains($0) || fields[$0] != nil })
     {

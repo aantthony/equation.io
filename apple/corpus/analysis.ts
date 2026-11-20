@@ -366,6 +366,10 @@ const CASES: string[] = [
   '(x + u, y, z) = (1, 2, 3); (x - cos(2 pi u), y - sin(2 pi u), z - u) = (0, 0, 0); (x + z, y + z, x) = (u, v, 1)',
   'z = x^2 + y^2; y = x; (1, 2); (cos(u), sin(u)); x^2 + y^2 < 1; x y; (y, -x); 1 + 1; camera(0.5, 0.3, 9); grid(off)',
   'camera(-pi/3, 0.5, 9); z = x y; ---; y = x; camera(1, 1); ---; (1, 2, 3); view(x = -1..1)',
+  // Three coordinates named on the left: a position in space, or the curve it traces.
+  'rho = sqrt(x^2 + y^2 + z^2); theta = atan2(y, x); phi = acos(z/rho); (rho, theta, phi) = (2, pi/4, pi/3); (rho, theta, phi) = (2, 12 pi u, pi u)',
+  'r = sqrt(x^2 + y^2); theta = atan2(y, x); (r, theta, z) = (2.5, 6 pi u, 6 u - 3); (r, theta, z) = (1, 2); (r, r, z) = (1, 2, 3); (r, theta, z) = 2',
+  "(x, y, z) = (1, 2, 3); (z, y, x) = (u, u, u); a = 1; (x, y, z) = (a, t, 0); (x, y, z) = (u, v, 1); r = sqrt(x^2 + y^2); (r', theta', z') = (0, 1, 0.5)",
   // A surface coloured by its curvature, and curvature read at a point of it.
   'S = (u, v, u^2 - v^2); gaussian(S); meancurvature(S); gaussian(S, 0.5, 0.25); gaussian(S, (0.5, 0.25)); 2 gaussian(S)',
   'a = 2; S = (cos(2 pi u) sin(pi v), sin(2 pi u) sin(pi v), a cos(pi v) + t); gaussian(S); meancurvature(S, 0.3, a)',

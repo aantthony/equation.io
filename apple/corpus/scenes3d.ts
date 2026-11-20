@@ -45,6 +45,11 @@ const DOCUMENTS: Array<[text: string, time?: number]> = [
   ['a = 1; (x y, z) = (a, t); (atan2(y, x), z) = (1, 0); camera(0, 1, 8)', 0.25],
   ['(x + y + z, x - y, z) = (1, 0, 2); (x^2 + y^2 + z^2, x - y, z) = (4, 0, 1)'],
   ['(atan2(y, x), x^2 + y^2, z) = (1, 4, 0); (x - cos(2 pi u), y - sin(2 pi u), z - u) = (0, 0, 0)'],
+  // Positions in coordinates named on the left.
+  [
+    'rho = sqrt(x^2 + y^2 + z^2); theta = atan2(y, x); phi = acos(z/rho); (rho, theta, phi) = (2, pi/4, pi/3); ' +
+      '(rho, theta, phi) = (2, 12 pi u, pi u)',
+  ],
 ];
 
 const recorded = DOCUMENTS.map(([text, time = 0]) => {
