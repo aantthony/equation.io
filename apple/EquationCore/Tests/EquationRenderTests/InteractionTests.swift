@@ -1,4 +1,6 @@
+import CoreGraphics
 import Foundation
+import ImageIO
 import Testing
 
 @testable import EquationCore
@@ -198,5 +200,99 @@ import Testing
     #expect(splitPair("(1, 2, 3)") == nil)
     #expect(splitPair("x + 1") == nil)
     #expect(snapToPixel(1.23456, upp: 0.01) == 1.23 && snapToPixel(1234.5, upp: 5) == 1230)
+  }
+}
+
+/// An image's pixels as RGBA bytes.
+private func pixels(_ image: CGImage) -> [UInt8] {
+  var bytes = [UInt8](repeating: 0, count: image.width * image.height * 4)
+  bytes.withUnsafeMutableBytes { raw in
+    let ctx = CGContext(
+      data: raw.baseAddress, width: image.width, height: image.height, bitsPerComponent: 8,
+      bytesPerRow: image.width * 4, space: CGColorSpace(name: CGColorSpace.sRGB)!,
+      bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
+    ctx.draw(image, in: CGRect(x: 0, y: 0, width: image.width, height: image.height))
+  }
+  return bytes
+}
+
+/// The share of the pixels of columns `columns` two images differ in, by more than a few levels.
+private func difference(_ a: CGImage, _ b: CGImage, columns: Range<Int>) -> Double {
+  let (pa, pb) = (pixels(a), pixels(b))
+  var differing = 0
+  for y in 0..<a.height {
+    for x in columns {
+      let i = (y * a.width + x) * 4
+      if (0..<3).contains(where: { abs(Int(pa[i + $0]) - Int(pb[i + $0])) > 8 }) { differing += 1 }
+    }
+  }
+  return Double(differing) / Double(a.height * columns.count)
+}
+
+/// A frame of several panels: the app's picture of a split view.
+@Suite struct PanelFrames {
+  private func torus() throws -> Graph3D {
+    let url = try #require(Bundle.module.url(forResource: "torus", withExtension: "json", subdirectory: "Scenes/3D"))
+    return try Graph3D.decode(Data(contentsOf: url))
+  }
+
+  /// A 2D panel beside a 3D one is each renderer's own picture of its panel:
+  /// the 3D one's multisampled pass, copied into the frame, loses nothing.
+  @Test func aPlaneBesideASpaceIsEachOnesPicture() throws {
+    let metal = try #require(MetalContext())
+    let (width, height) = (400, 240)
+    let boxes = panelBoxes(analyze(["--- right"]).rows.compactMap(\.view), width: 400, height: 240)
+    #expect(boxes.map(\.w) == [200, 200])
+    let layers = Layers2D(curves: [Curve2D(field: "y - sin(x)", color: [0.8, 0.2, 0.2])])
+    let view = View2D.opening(width: 200, height: 240)
+    let graph = try torus()
+    let camera = graph.camera ?? Camera3D()
+    let renderer = FrameRenderer(metal)
+    renderer.helpers = graph.helpers
+    let panels = [
+      PanelFrame(box: boxes[0], content: .plane(view: view, layers: layers, overlay: nil)),
+      PanelFrame(box: boxes[1], content: .space(camera: camera, scene: graph.scene), env: graph.env ?? [:]),
+    ]
+    let frame = try #require(renderer.image(of: panels, width: width, height: height, dpr: 1, theme: .light))
+    #expect(renderer.space?.failures == 0)
+    // EQ_FRAME_PNG=/tmp/frame.png swift test --filter PanelFrames: the frame, to look at.
+    if let out = ProcessInfo.processInfo.environment["EQ_FRAME_PNG"] {
+      let dest = CGImageDestinationCreateWithURL(URL(fileURLWithPath: out) as CFURL, "public.png" as CFString, 1, nil)!
+      CGImageDestinationAddImage(dest, frame, nil)
+      CGImageDestinationFinalize(dest)
+    }
+    #expect(renderer.refineIn() == nil)
+
+    var plane = Scene2D(layers: layers, frame: Frame2D(vp: boxes[0].frame(in: 240)))
+    plane.view = view
+    let left = try #require(metal.image(of: plane, width: width, height: height, dpr: 1, theme: .light))
+    var space = graph
+    space.frame = Frame2D(vp: boxes[1].frame(in: 240))
+    let right = try #require(metal.image(of: space, width: width, height: height, dpr: 1, theme: .light))
+    // (The line where the panels meet is the frame's own.)
+    #expect(difference(frame, left, columns: 0..<198) < 0.002)
+    #expect(difference(frame, right, columns: 202..<400) < 0.002)
+    // And the halves are not one another's.
+    #expect(difference(frame, left, columns: 202..<400) > 0.02)
+  }
+
+  /// An inset is drawn over the panel it floats on, whichever renderer draws each.
+  @Test func anInsetCoversItsHost() throws {
+    let metal = try #require(MetalContext())
+    let boxes = panelBoxes(analyze(["--- inset top left 50%"]).rows.compactMap(\.view), width: 320, height: 240)
+    let graph = try torus()
+    let renderer = FrameRenderer(metal)
+    renderer.helpers = graph.helpers
+    let plane = PanelFrame.Content.plane(view: View2D(upp: 0.05), layers: Layers2D(), overlay: nil)
+    let space = PanelFrame.Content.space(camera: graph.camera ?? Camera3D(), scene: graph.scene)
+    for (host, inset) in [(plane, space), (space, plane)] {
+      let both = [PanelFrame(box: boxes[0], content: host), PanelFrame(box: boxes[1], content: inset)]
+      let image = try #require(renderer.image(of: both, width: 320, height: 240, dpr: 1, theme: .dark))
+      let alone = try #require(
+        renderer.image(of: [PanelFrame(box: boxes[0], content: host)], width: 320, height: 240, dpr: 1, theme: .dark))
+      // Inside the inset the host's picture is gone; outside it stands.
+      #expect(difference(image, alone, columns: 2..<158) > 0.05)
+      #expect(difference(image, alone, columns: 170..<320) < 0.002)
+    }
   }
 }
