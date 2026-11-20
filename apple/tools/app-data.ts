@@ -14,10 +14,9 @@
  *   pnpm app:data
  */
 import { mkdirSync, writeFileSync } from 'node:fs';
-import { KIND_MEANINGS, examplesIndex } from '../../lib/assistant-tools.ts';
+import { KIND_MEANINGS, builtinTable, examplesIndex } from '../../lib/assistant-tools.ts';
 import { type AssistantData, assistantData } from '../../lib/reference.ts';
 import { splitStatements } from '../../lib/statements.ts';
-import { builtinTable } from '../../lib/syntax-help.ts';
 import { readReference } from '../../scripts/reference.ts';
 import { EXAMPLES } from '../../web/examples.ts';
 
@@ -44,7 +43,7 @@ export function lookupData(): AssistantData {
 /**
  * What lib/assistant-tools.ts reads besides AssistantData:
  *
- * - `builtins`: the function table (lib/syntax-help.ts builtinTable), and its
+ * - `builtins`: the function table (lib/assistant-tools.ts builtinTable), and its
  *   names in the order localeCompare sorts them here, which search_functions
  *   breaks ties by: collation is the platform's, so the order is recorded
  *   rather than made again;

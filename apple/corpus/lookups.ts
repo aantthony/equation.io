@@ -10,6 +10,8 @@
 import { writeFileSync } from 'node:fs';
 import {
   KIND_MEANINGS,
+  builtinHelp,
+  builtinNames,
   functionDoc,
   kindExamples,
   listKinds,
@@ -17,7 +19,6 @@ import {
   shape,
 } from '../../lib/assistant-tools.ts';
 import { DIST_FAMILIES } from '../../lib/dist-families.ts';
-import { builtinHelp, builtinNames } from '../../lib/syntax-help.ts';
 import { languageData, lookupData } from '../tools/app-data.ts';
 
 const fixtures = new URL('../EquationCore/Tests/EquationAssistTests/Fixtures/', import.meta.url);

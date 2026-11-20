@@ -2,8 +2,10 @@ import { describe, expect, it } from 'vitest';
 import { EXAMPLES } from '../web/examples.ts';
 import { readReference } from '../scripts/reference.ts';
 import { analyzeRows } from './analysis.ts';
+import { FUNCTIONS } from './expr.ts';
 import {
   KIND_MEANINGS,
+  builtinHelp,
   checkRows,
   examplesIndex,
   functionDoc,
@@ -134,5 +136,12 @@ describe('shape', () => {
     const miss = shape(data, 'kidney bean');
     expect(miss).toMatch(/^No shape "kidney bean"\. Shapes: circle, /);
     expect(miss).toContain('torus');
+  });
+});
+
+describe('builtin help', () => {
+  it('documents every built-in function', () => {
+    const undocumented = [...FUNCTIONS].filter(name => builtinHelp(name)?.description === 'Built-in function');
+    expect(undocumented).toEqual([]);
   });
 });

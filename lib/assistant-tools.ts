@@ -18,7 +18,7 @@ import { type Analysis, type RowInfo, analyzeRows } from './analysis.ts';
 import { mvOfNode } from './clifford.ts';
 import type { CpuPlan } from './compiler.ts';
 import { type Definition, animatedConstNames, definitionDependencies } from './defs.ts';
-import { canonicalName, unaliased, writtenName } from './expr.ts';
+import { FUNCTIONS, builtinFn, canonicalName, unaliased, writtenName } from './expr.ts';
 import type { PublicKind } from './math-object.ts';
 import { publicKind } from './plot.ts';
 import { LOOKUP_HINT, type Variant } from './assistant-instructions.ts';
@@ -26,7 +26,90 @@ import type { AssistantData, LabelledRows } from './reference.ts';
 import { rowKind } from './row-kind.ts';
 import { sliderForm } from './slider.ts';
 import { splitStatements, stripNote } from './statements.ts';
-import { builtinHelp, builtinNames } from './syntax-help.ts';
+import { DIST_FAMILIES } from './dist-families.ts';
+import { builtinHelp as siteHelp, signatures as siteSignatures } from './syntax-help.ts';
+
+// MARK: built-in functions, as function_doc and search_functions describe them
+
+/**
+ * Signatures and descriptions for the functions the site's table
+ * (lib/syntax-help.ts) leaves at "Built-in function", and a fuller one for
+ * hull: what function_doc and search_functions answer with. They are Ask's
+ * alone, so the site's autocomplete is as it was.
+ */
+const ASK_SIGNATURES: Record<string, [string, string]> = {
+  asin: ['asin(x)', 'Inverse sine, in radians'],
+  acos: ['acos(x)', 'Inverse cosine, in radians'],
+  atan: ['atan(x)', 'Inverse tangent, in radians; atan2(y, x) for the angle of a point'],
+  sinh: ['sinh(x)', 'Hyperbolic sine'],
+  cosh: ['cosh(x)', 'Hyperbolic cosine'],
+  tanh: ['tanh(x)', 'Hyperbolic tangent'],
+  sech: ['sech(x)', 'Hyperbolic secant, 1/cosh(x)'],
+  coth: ['coth(x)', 'Hyperbolic cotangent, cosh(x)/sinh(x)'],
+  asinh: ['asinh(x)', 'Inverse hyperbolic sine'],
+  acosh: ['acosh(x)', 'Inverse hyperbolic cosine'],
+  atanh: ['atanh(x)', 'Inverse hyperbolic tangent'],
+  abs: ['abs(x) or |x|', "Absolute value; |P| is a point's length"],
+  exp: ['exp(x) or e^x', 'Exponential'],
+  floor: ['floor(x)', 'Largest whole number ≤ x'],
+  ceil: ['ceil(x)', 'Smallest whole number ≥ x'],
+  round: ['round(x)', 'Nearest whole number'],
+  sign: ['sign(x)', '−1, 0 or 1, the sign of x'],
+  fract: ['fract(x)', 'Fractional part, x − floor(x)'],
+  erf: ['erf(x)', 'Error function'],
+  gamma: ['gamma(x)', 'Gamma function: gamma(n) = (n − 1)! for whole n'],
+  factorial: ['factorial(n) or n!', 'Factorial; gamma(n + 1) between whole numbers'],
+  sinc: ['sinc(x)', 'sin(x)/x, and 1 at x = 0'],
+  re: ['re(w)', 'Real part of a complex number'],
+  im: ['im(w)', 'Imaginary part of a complex number'],
+  arg: ['arg(w)', 'Angle of a complex number, in (−π, π]'],
+  conj: ['conj(w)', 'Complex conjugate; of a quaternion or multivector, its conjugate'],
+  perp: ['perp(P)', 'A 2D vector turned 90° counterclockwise: perp((x, y)) = (−y, x)'],
+  unit: ['unit(P)', 'The vector P scaled to length 1'],
+  qjulia: [
+    'qjulia(C, s)',
+    'Quaternion Julia set of C, sliced at k = s; older links use it, new graphs write the orbit out',
+  ],
+  hull: [
+    'hull(A, B, C, …) or hull(P)',
+    'Convex hull of points or a point list: a filled polygon in 2D, a solid in 3D; hull(([0,1], [0,1], [0,1])) is the unit cube',
+  ],
+};
+
+/** Every name builtinHelp describes: the parser's functions and the call forms (P, view, Normal, …). */
+export function builtinNames(): string[] {
+  return [...new Set([...FUNCTIONS, ...Object.keys(siteSignatures)])];
+}
+
+/**
+ * A built-in function's signature and description, as Ask's lookups give
+ * them: the site's (lib/syntax-help.ts builtinHelp, with its case folding
+ * and its call forms), or Ask's own where it has one (ASK_SIGNATURES, all
+ * parser functions).
+ */
+export function builtinHelp(name: string, called = true): { signature: string; description: string } | null {
+  const help = siteHelp(name, called);
+  const own = ASK_SIGNATURES[builtinFn(name) ?? ''];
+  return help && own ? { signature: own[0], description: own[1] } : help;
+}
+
+/**
+ * What builtinHelp reads, as data, for a port that must answer as it does
+ * (the Apple app's lookups, apple/EquationCore EquationAssist): every name in
+ * builtinNames' order, the parser's functions, each signature and
+ * description by its key, and the distributions' names and aliases, lower
+ * case, with the family each spells (distFamily).
+ */
+export function builtinTable() {
+  return {
+    names: builtinNames(),
+    functions: [...FUNCTIONS],
+    signatures: { ...siteSignatures, ...ASK_SIGNATURES },
+    distributions: Object.fromEntries(
+      DIST_FAMILIES.flatMap(f => [f.name, ...f.aliases].map(n => [n.toLowerCase(), f.name])),
+    ),
+  };
+}
 
 // MARK: rows, as get_graph and check describe them
 

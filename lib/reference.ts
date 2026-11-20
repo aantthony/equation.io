@@ -40,7 +40,7 @@
  */
 import type { PublicKind } from './math-object.ts';
 import { splitStatements } from './statements.ts';
-import { builtinHelp, builtinNames } from './syntax-help.ts';
+import { builtinHelp, builtinNames } from './assistant-tools.ts';
 
 export interface ReferenceExample {
   name: string;

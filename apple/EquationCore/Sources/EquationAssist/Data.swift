@@ -70,7 +70,7 @@ struct LanguageData: Decodable, Sendable {
   /// Each kind's smallest form as rows (lib/statements.ts `splitStatements`).
   var forms: [String: [String]]
 
-  /// lib/syntax-help.ts `builtinTable`.
+  /// lib/assistant-tools.ts `builtinTable`.
   struct Table: Decodable, Sendable {
     /// Every name `builtinHelp` describes, in `builtinNames`' order.
     var names: [String]
@@ -85,7 +85,7 @@ struct LanguageData: Decodable, Sendable {
   }
 }
 
-/// The function table, read as lib/syntax-help.ts reads it.
+/// The function table, read as lib/assistant-tools.ts `builtinHelp` reads it.
 struct Builtins: Sendable {
   struct Help: Sendable {
     var signature: String

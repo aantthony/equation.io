@@ -2,8 +2,7 @@ import { emptyEnv } from './env.ts';
 import { describe, expect, it } from 'vitest';
 import { buildDefs, scanDefinition, type Definition } from './defs.ts';
 import { parseCsv } from './csv.ts';
-import { builtinHelp, syntaxHelp } from './syntax-help.ts';
-import { FUNCTIONS } from './expr.ts';
+import { syntaxHelp } from './syntax-help.ts';
 
 const defs = () =>
   buildDefs(
@@ -181,12 +180,5 @@ describe('contextual syntax help', () => {
     d.bind('a_12', { tag: 'fn', fn: { params: ['x'], body: { kind: 'num', value: 0 } } });
     expect(syntaxHelp('f₁(', 3, d).hint).toContain('f_1(x)'); // call hint via f₁(
     expect(syntaxHelp('a₁', 2, d).suggestions.map(s => s.name)).toEqual(['a_12']);
-  });
-});
-
-describe('builtin help', () => {
-  it('documents every built-in function', () => {
-    const undocumented = [...FUNCTIONS].filter(name => builtinHelp(name)?.description === 'Built-in function');
-    expect(undocumented).toEqual([]);
   });
 });

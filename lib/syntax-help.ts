@@ -41,7 +41,7 @@ export interface SyntaxHelp {
   hint?: string;
 }
 
-const signatures: Record<string, [string, string]> = {
+export const signatures: Record<string, [string, string]> = {
   view: [
     'view(x = lo..hi, y = lo..hi, ratio = 1)',
     'Frame the graph; ratio is pixels per y unit / pixels per x unit. A lattice panel is framed by its index names: view(i = -60..60, n = 0..80)',
@@ -50,39 +50,7 @@ const signatures: Record<string, [string, string]> = {
   sin: ['sin(x)', 'Sine; angles in radians'],
   cos: ['cos(x)', 'Cosine; angles in radians'],
   tan: ['tan(x)', 'Tangent; angles in radians'],
-  asin: ['asin(x)', 'Inverse sine, in radians'],
-  acos: ['acos(x)', 'Inverse cosine, in radians'],
-  atan: ['atan(x)', 'Inverse tangent, in radians; atan2(y, x) for the angle of a point'],
-  sinh: ['sinh(x)', 'Hyperbolic sine'],
-  cosh: ['cosh(x)', 'Hyperbolic cosine'],
-  tanh: ['tanh(x)', 'Hyperbolic tangent'],
-  sech: ['sech(x)', 'Hyperbolic secant, 1/cosh(x)'],
-  coth: ['coth(x)', 'Hyperbolic cotangent, cosh(x)/sinh(x)'],
-  asinh: ['asinh(x)', 'Inverse hyperbolic sine'],
-  acosh: ['acosh(x)', 'Inverse hyperbolic cosine'],
-  atanh: ['atanh(x)', 'Inverse hyperbolic tangent'],
   sqrt: ['sqrt(x)', 'Square root'],
-  abs: ['abs(x) or |x|', "Absolute value; |P| is a point's length"],
-  exp: ['exp(x) or e^x', 'Exponential'],
-  floor: ['floor(x)', 'Largest whole number ≤ x'],
-  ceil: ['ceil(x)', 'Smallest whole number ≥ x'],
-  round: ['round(x)', 'Nearest whole number'],
-  sign: ['sign(x)', '−1, 0 or 1, the sign of x'],
-  fract: ['fract(x)', 'Fractional part, x − floor(x)'],
-  erf: ['erf(x)', 'Error function'],
-  gamma: ['gamma(x)', 'Gamma function: gamma(n) = (n − 1)! for whole n'],
-  factorial: ['factorial(n) or n!', 'Factorial; gamma(n + 1) between whole numbers'],
-  sinc: ['sinc(x)', 'sin(x)/x, and 1 at x = 0'],
-  re: ['re(w)', 'Real part of a complex number'],
-  im: ['im(w)', 'Imaginary part of a complex number'],
-  arg: ['arg(w)', 'Angle of a complex number, in (−π, π]'],
-  conj: ['conj(w)', 'Complex conjugate; of a quaternion or multivector, its conjugate'],
-  perp: ['perp(P)', 'A 2D vector turned 90° counterclockwise: perp((x, y)) = (−y, x)'],
-  unit: ['unit(P)', 'The vector P scaled to length 1'],
-  qjulia: [
-    'qjulia(C, s)',
-    'Quaternion Julia set of C, sliced at k = s; older links use it, new graphs write the orbit out',
-  ],
   ln: ['ln(x)', 'Natural logarithm'],
   log: ['log(x)', 'Base-10 logarithm'],
   log2: ['log2(x)', 'Base-2 logarithm'],
@@ -154,10 +122,7 @@ const signatures: Record<string, [string, string]> = {
     'cross(A, B) or cross(n)',
     'Vector cross product; cross(n) alone is the rotation generator about n, as in e^(a cross(n)) v',
   ],
-  hull: [
-    'hull(A, B, C, …) or hull(P)',
-    'Convex hull of points or a point list: a filled polygon in 2D, a solid in 3D; hull(([0,1], [0,1], [0,1])) is the unit cube',
-  ],
+  hull: ['hull(A, B, C, …) or hull(P)', 'Convex hull of points or a point list: a filled polygon in 2D, a solid in 3D'],
   rotate: [
     'rotate(P, angle), rotate(P, angle, center), rotate(P, angle, axis) or rotate(X, M)',
     'Turn a point: about the origin or a center in 2D, about an axis in 3D; or move X by the motor M',
@@ -237,29 +202,6 @@ const signatures: Record<string, [string, string]> = {
   ],
   E: ['E(X)', 'Expected value of a random variable or of an expression in them: E(X Y) — exact over discrete ones'],
 };
-
-/** Every name builtinHelp describes: the parser's functions and the call forms (P, view, Normal, …). */
-export function builtinNames(): string[] {
-  return [...new Set([...FUNCTIONS, ...Object.keys(signatures)])];
-}
-
-/**
- * What builtinHelp reads, as data, for a port that must answer as it does
- * (the Apple app's lookups, apple/EquationCore EquationAssist): every name in
- * builtinNames' order, the parser's functions, each signature and
- * description by its key, and the distributions' names and aliases, lower
- * case, with the family each spells (distFamily).
- */
-export function builtinTable() {
-  return {
-    names: builtinNames(),
-    functions: [...FUNCTIONS],
-    signatures,
-    distributions: Object.fromEntries(
-      DIST_FAMILIES.flatMap(f => [f.name, ...f.aliases].map(n => [n.toLowerCase(), f.name])),
-    ),
-  };
-}
 
 /** A built-in function's signature and description, as autocomplete shows
  *  them; case folds as the parser folds it (`Sin` is sin). The call forms

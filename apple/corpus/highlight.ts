@@ -17,7 +17,7 @@ import { CONSTANTS, FUNCTIONS } from '../../lib/expr.ts';
 import { highlightSpans } from '../../lib/highlight.ts';
 import { DARK_PALETTE, LIGHT_PALETTE, assignColors, takesColor } from '../../lib/palette.ts';
 import { noteColor, noteStart, splitStatements } from '../../lib/statements.ts';
-import { builtinNames } from '../../lib/syntax-help.ts';
+import { builtinNames } from '../../lib/assistant-tools.ts';
 import { EXAMPLES } from '../../web/examples.ts';
 
 const fixtures = new URL('../EquationCore/Tests/EquationCoreTests/Fixtures/', import.meta.url);
