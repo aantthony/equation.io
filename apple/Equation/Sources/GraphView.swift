@@ -55,17 +55,16 @@ struct GraphAnalysis: Equatable {
   init(rows: [GraphRow], theme: GraphTheme, previous: [Int: Int] = [:]) {
     let texts = rows.map(\.text)
     let analysis = analyze(texts)
-    let colored = Graph2D.colors(analysis, ids: rows.map(\.id), previous: previous, theme: theme)
+    // (A `#hex` note's color is read from the rows as written.)
+    let colored = Graph2D.colors(
+      analysis, ids: rows.map(\.id), previous: previous, theme: theme, sources: texts)
     panels = GraphPanels(analysis, colors: colored.colors)
     slots = colored.slots
     // Syntax colors, as the site computes them (EquationCore `highlightRows`, lib/highlight.ts).
     let spans = highlightRows(texts, names: analysis.names)
     for (k, row) in analysis.rows.enumerated() {
-      var error = row.error ?? row.unsupported.map(Self.notDrawnYet)
-      // A camera(…) row the language reads, in a panel the app has no 3D scene for yet.
-      if error == nil, case .camera? = row.view, panels.panels[panels.panel(of: k)].space == nil {
-        error = Self.notDrawnYet("3D")
-      }
+      // (A camera(…) row in a panel with nothing in space frames nothing, as on the site.)
+      let error = row.error ?? row.unsupported.map(Self.notDrawnYet)
       status.append(
         RowStatus(
           color: colored.colors[k].map { [Double($0.x), Double($0.y), Double($0.z)] },

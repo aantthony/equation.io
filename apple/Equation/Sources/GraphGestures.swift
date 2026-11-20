@@ -215,7 +215,7 @@ import MetalKit
       let time = viewport.time
       guard
         let image = renderer.image(
-          of: viewport.frames(content, time: time, overlay: true), width: Int(viewport.pixels.width),
+          of: viewport.frames(content, time: time, overlay: true, theme: theme), width: Int(viewport.pixels.width),
           height: Int(viewport.pixels.height), dpr: viewport.scale, time: time, theme: theme),
         let out = CGImageDestinationCreateWithURL(url as CFURL, "public.png" as CFString, 1, nil)
       else { return }

@@ -486,7 +486,16 @@ public func analyze(_ sources: [String]) -> DocumentAnalysis {
       let exact = !plane(rawParsed)
       var rowOpts = ropts
       rowOpts.exactConditions = exact
-      var resolved = try Resolver(getFn: getFn, opts: rowOpts).resolve(rawParsed)
+      // gaussian(S) alone: S coloured by its curvature (SurfaceGeometry.swift).
+      let painted = curvaturePaint(rawParsed, fnNames) { arg in
+        if case .var(let name) = arg { return built.pointDims[name] == 2 }
+        // An expression of points, P + (0, 1): two components.
+        if case .vec = arg { return false }
+        if case .vec(let items)? = try? lowerGeom(arg, comps: comps) { return items.count == 2 }
+        return false
+      }
+      var resolved = try Resolver(getFn: getFn, opts: rowOpts).resolve(
+        painted.map { .call(PAINT_CALL, [$0, rawParsed]) } ?? rawParsed)
       if exact {
         // Over numbers a case is the tolerance form the evaluator runs.
         let cases = exactCases(resolved)
@@ -508,7 +517,12 @@ public func analyze(_ sources: [String]) -> DocumentAnalysis {
         if free.contains(where: { $0 == "u" || $0 == "v" }),
           !free.contains(where: ["x", "y", "z", "w"].contains)
         {
-          if case .vec = lowered {} else { throw Unsupported("the density of a row in u or v") }
+          // (tube(…), revolve(…) and a painted surface are whole-row forms, never a density.)
+          if case .vec = lowered {
+          } else if case .call(let form, _) = lowered, form == "tube" || form == "revolve" || form == PAINT_CALL {
+          } else {
+            throw Unsupported("the density of a row in u or v")
+          }
         }
       }
       var cls = try classify(lowered, defined: constNames, fields: fieldEnv)
@@ -533,12 +547,12 @@ public func analyze(_ sources: [String]) -> DocumentAnalysis {
     }
   }
 
-  // A named point in space draws a dot in a 3D scene, which is not ported;
-  // its components are constants like any others.
+  // A named point in space is a row that draws: the dot at its components.
   for i in 0..<count where blocked[i] == nil && rows[i].error == nil {
     guard let d = rows[i].definition, built.points.contains(d.name), built.pointDims[d.name] == 3 else { continue }
-    if pointComps(d.name, 3).allSatisfy(constNames.contains) {
-      rows[i].unsupported = notSupported("points in space")
+    let names = pointComps(d.name, 3)
+    if names.allSatisfy(constNames.contains) {
+      rows[i].classified = try? classify(.vec(names.map { .var($0) }), defined: constNames, fields: [:])
     }
   }
 

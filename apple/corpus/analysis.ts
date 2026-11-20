@@ -70,6 +70,8 @@ const PORTED = new Set([
 // Geometry (lib/geom.ts): figures and labels; matrices and tensors read out, and matrix fields.
 for (const type of ['polygon', 'label', 'tuple', 'tfield2d']) PORTED.add(type);
 for (const type of ['sequence', 'cobweb', 'bifurcation', 'automaton', 'lattice']) PORTED.add(type);
+// In space.
+for (const type of ['implicit3d', 'scalar3d', 'spacecurve', 'system', 'vfield3d', 'psurface']) PORTED.add(type);
 function slim(plan: { type: string } | undefined): unknown {
   if (!plan) return null;
   if (!PORTED.has(plan.type)) return { type: plan.type, omitted: true };
@@ -340,6 +342,41 @@ const CASES: string[] = [
   // What geometry leaves alone: multivectors, projective geometry.
   'A = (1, 2); B = (3, 4); (A, B); cross((0, 0, 1)); det(((1, 2), (3, 4))); ((1, 2), (3, 4)) (1, 1); join(A, B); meet(line(A, B), line(A, (0, 0)))',
   'A = (1, 2); rotate(A, quat(1, 0, 0, 0)); gp(A, A); A ⟑ A; distance(A, line(A, (0, 0))); outer(A, A); A ∧ A; transpose(((1, 2), (3, 4)))',
+  // In space: surfaces, clouds, curves and tubes, points, fields, intersections and systems.
+  'z = sin(x) cos(y); x^2 + y^2 + z^2 = 9; a = 2; z = a x y; x y z = 1; z^2 = x^2 + y^2; f(x, y) = x^2 - y^2; z = f(x, y)',
+  'z = z; x + z = z + x; z = x^2 + z; x = z; z = {x > 0: x, y}; z = abs(x) + floor(y); z = gamma(x); z < x; z; z + 1 > 0',
+  'r = sqrt(x^2 + y^2 + z^2); r = 2; r; 1/r; e^(-r^2); rho = sqrt(x^2 + y^2); z = rho; z = sin(rho - t)',
+  'x y z; sin(x) + z; a = 2; a z - x^2; z t; mod(z, 2); x^2 + y^2 + z^2 - 1; z = d/dx (x^2 y); d/dz (z^2 x)',
+  '(cos(2 pi u), sin(2 pi u), u); a = 3; (a u, u^2, t u); (u, u, floor(4 u)); (u, 0, gamma(u)); (u, 1, x); (v, v, v)',
+  '(u, v, u v); (cos(2 pi u) sin(pi v), sin(2 pi u) sin(pi v), cos(pi v)); a = 2; (a u, v, sin(t + u)); (u, v, mod(u, 0.3))',
+  '(u, v, x); (u, v); (u v, 1, 2); (u, v, floor(3 u) + gamma(v)); (u, v, {u > v: 1, 0}); (v, 1, 2)',
+  'tube((cos(2 pi u), sin(2 pi u), u)); tube(cos(u), sin(u), u/4, 0.3); a = 0.2; tube((u, u^2, u^3), a); tube((u, u, u), a t)',
+  'tube((1, 2, 3)); tube((u, u)); tube((u, u, u), -1); tube((u, u, u), x); tube((u, v, u)); tube(u, u, u, (1, 2)); tube()',
+  'C = (cos(u), sin(u), u); C; tube(C); 2 C; C + (0, 0, 1); 1 + tube((u, u, u)); tube(tube(u, u, u), 1, 2); y = tube(u, u, u)',
+  'revolve(sqrt(x)); revolve(y^2, y); revolve(sin(z) + 2, z); f(x) = x^2 + 1; revolve(f); revolve(f, y); revolve(2 f)',
+  'revolve(z, x); revolve(x, w); revolve(); revolve((1, 2)); revolve(x = 1); 1 + revolve(x); a = 2; revolve(a x); g(x, y) = x y',
+  'revolve(g); revolve(u); revolve(x, 2); revolve(sin(x) + t); h = revolve(x); y = revolve(x)',
+  '(1, 2, 3); a = 1; (a, t, a + t); A = (1, 2, 3); A; B = 2 A + (0, 0, 1); B; A - B; (A_x, A_y, A_z + 1); A_z; z = A_z',
+  'A = (1, 2, 3); B = (1, 2); A + B; A B; (A, 1); f(p) = p.x + p.z; f(A); g(a, b, c) = a b c; g(A); g(B)',
+  '(y, -x, z); (x, y, z); (0, 0, 1) + (x, 0, 0); a = 2; (a y, sin(t) x, z); (x, y, gamma(z)); (z, x); (x, y, u)',
+  "(x', y', z') = (y, -x, 1); (x', y', z') = (10 (y - x), x (28 - z) - y, x y - 8/3 z); (x', y', z') = (1, 2); (x', y', z') = 3",
+  '(x^2 + y^2 + z^2, z) = (4, 1); (x + y + z, x - y) = (1, 0); a = 1; (x y, z) = (a, t); (atan2(y, x), z) = (1, 0)',
+  '(x + y + z, x - y, z) = (1, 0, 2); (x^2 + y^2 + z^2, x - y, z) = (4, 0, 1); (x, y z) = (1, 2, 3); (x + z, y) = 1',
+  '(x + y + z) = (1); (x + z, y, 1) = (1, 2); (atan2(y, x), x^2 + y^2, z) = (1, 4, 0); (x + y, x - y) = (1, 0); (x + u, y) = (1, 2)',
+  '(x + u, y, z) = (1, 2, 3); (x - cos(2 pi u), y - sin(2 pi u), z - u) = (0, 0, 0); (x + z, y + z, x) = (u, v, 1)',
+  'z = x^2 + y^2; y = x; (1, 2); (cos(u), sin(u)); x^2 + y^2 < 1; x y; (y, -x); 1 + 1; camera(0.5, 0.3, 9); grid(off)',
+  'camera(-pi/3, 0.5, 9); z = x y; ---; y = x; camera(1, 1); ---; (1, 2, 3); view(x = -1..1)',
+  // Three coordinates named on the left: a position in space, or the curve it traces.
+  'rho = sqrt(x^2 + y^2 + z^2); theta = atan2(y, x); phi = acos(z/rho); (rho, theta, phi) = (2, pi/4, pi/3); (rho, theta, phi) = (2, 12 pi u, pi u)',
+  'r = sqrt(x^2 + y^2); theta = atan2(y, x); (r, theta, z) = (2.5, 6 pi u, 6 u - 3); (r, theta, z) = (1, 2); (r, r, z) = (1, 2, 3); (r, theta, z) = 2',
+  "(x, y, z) = (1, 2, 3); (z, y, x) = (u, u, u); a = 1; (x, y, z) = (a, t, 0); (x, y, z) = (u, v, 1); r = sqrt(x^2 + y^2); (r', theta', z') = (0, 1, 0.5)",
+  // A surface coloured by its curvature, and curvature read at a point of it.
+  'S = (u, v, u^2 - v^2); gaussian(S); meancurvature(S); gaussian(S, 0.5, 0.25); gaussian(S, (0.5, 0.25)); 2 gaussian(S)',
+  'a = 2; S = (cos(2 pi u) sin(pi v), sin(2 pi u) sin(pi v), a cos(pi v) + t); gaussian(S); meancurvature(S, 0.3, a)',
+  'f(a, b) = (a, b, a b); gaussian(f); gaussian(f, 1, 2); g(a) = a; gaussian(g); P = (1, 2); gaussian(P); gaussian(f, P)',
+  'S = (u, v, u v); gaussian(1, 2); gaussian(S, 1); gaussian((u, u, u)); gaussian(T); gaussian((u, v, x)); gaussian((1, 2))',
+  'gaussian((u, v, u v)); gaussian((u, v, u v), 0, 0); S = (u, v, floor(u) v); gaussian(S); gaussian(S, 1, 2, 3); gaussian(S, 1, 2, 3, 4)',
+  'k = u v; S = (u, v, k); gaussian(S); C = (u, u, u); gaussian(C); A = (1, 2, 3); meancurvature(A); gaussian(x) = x; gaussian(2)',
 ];
 
 /** Small documents written at random from the ported core's own words, so

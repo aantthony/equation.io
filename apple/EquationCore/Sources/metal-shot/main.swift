@@ -8,6 +8,7 @@ import UniformTypeIdentifiers
 // Renders a graph to a PNG with the app's Metal renderer, without the app.
 //
 //   swift run metal-shot --out a.png "y = sin(x)" "x^2 + y^2 = 9"
+//   swift run metal-shot --out a.png "z = sin(x) cos(y)" "camera(-pi/3, 0.5, 9)"   (rows in space: Shot3D.swift)
 //   swift run metal-shot --out a.png --scene scene.json     (a Scene2D, EquationRender/Scene2D.swift,
 //                                                            or a Graph3D, Scene3D.swift: see Shot3D.swift)
 //   swift run metal-shot --diff a.png b.png [--out diff.png]
@@ -142,6 +143,20 @@ if var graph = options["--scene"].flatMap(graph3D) {
   exit(0)
 }
 
+// Rows drawn in space (Shot3D.swift).
+let shotTime = options["--time"].flatMap(Double.init) ?? 0
+if options["--scene"] == nil,
+  let graph = spaceGraph(rest, theme: theme, time: shotTime, explain: flags.contains("--explain"))
+{
+  guard let metal = MetalContext() else { fail("No Metal device.") }
+  guard
+    let image = metal.image(
+      of: graph, width: Int(size[0] * scale), height: Int(size[1] * scale), dpr: scale, theme: theme)
+  else { fail("Couldn't draw.") }
+  save(image, out)
+  exit(0)
+}
+
 var scene: Scene2D
 if let path = options["--scene"] {
   do {
@@ -157,7 +172,7 @@ if let path = options["--scene"] {
       FileHandle.standardError.write(Data("not drawn: \(text): \(problem)\n".utf8))
     }
   }
-  let colors = Graph2D.colors(analysis, ids: Array(rest.indices), previous: [:], theme: theme).colors
+  let colors = Graph2D.colors(analysis, ids: Array(rest.indices), previous: [:], theme: theme, sources: rest).colors
   if flags.contains("--explain") {
     // What the language made of each row.
     for (k, row) in analysis.rows.enumerated() {

@@ -48,20 +48,28 @@ final class GraphViewport {
 
   /// The frame as it is at `time`: each panel's box, and what it shows
   /// there. `overlay` adds what the CPU evaluates for the 2D panels (the
-  /// points and curves drawn over the shader passes).
-  func frames(_ content: GraphPanels, time: Double, overlay: Bool) -> [PanelFrame] {
+  /// points and curves drawn over the shader passes), in `theme`'s colors.
+  func frames(_ content: GraphPanels, time: Double, overlay: Bool, theme: GraphTheme = .light) -> [PanelFrame] {
     let boxes = boxes(content)
     return content.panels.indices.compactMap { k -> PanelFrame? in
       guard k < states.count, k < boxes.count else { return nil }
       let panel = content.panels[k]
       if let space = panel.space {
+        let camera = states[k].camera
         return PanelFrame(
-          box: boxes[k], content: .space(camera: states[k].camera, scene: space.scene(at: time)),
+          box: boxes[k], content: .space(camera: camera, scene: space.scene(at: time, camera: camera)),
           env: space.environment(at: time), grid: panel.grid)
       }
+      // The window in the panel's pixels: what is drawn over it, and a
+      // lattice's cells, are worked out for what it shows.
+      let (view, width, height) = (states[k].view, boxes[k].w, boxes[k].h)
+      var layers = panel.plane.layers
+      let lattice = panel.plane.cells(at: time, view: view, width: width, height: height, dpr: scale)
+      if !lattice.cells.isEmpty { layers.cells = lattice.cells }
       var extras: Overlay2D?
       if overlay {
-        var drawn = panel.plane.overlay(at: time)
+        let bounds = Graph2D.Bounds(view: view, width: width, height: height)
+        var drawn = panel.plane.overlay(at: time, bounds: bounds, theme: theme)
         if let hot, panel.rows.contains(hot) {
           var env = panel.plane.environment(at: time)
           env["t"] = time
@@ -75,8 +83,8 @@ final class GraphViewport {
         extras = drawn
       }
       return PanelFrame(
-        box: boxes[k], content: .plane(view: states[k].view, layers: panel.plane.layers, overlay: extras),
-        env: panel.plane.environment(at: time), grid: panel.grid)
+        box: boxes[k], content: .plane(view: view, layers: layers, overlay: extras),
+        env: panel.plane.environment(at: time), grid: panel.grid, lattice: lattice.labels)
     }
   }
 }
@@ -96,7 +104,8 @@ struct MetalGraphView: View {
         // window or a camera that moves, as the viewport says it has.
         TimelineView(.animation(paused: !content.animated)) { timeline in
           Overlay(
-            frames: viewport.frames(content, time: timeline.date.timeIntervalSince(viewport.opened), overlay: true),
+            frames: viewport.frames(
+              content, time: timeline.date.timeIntervalSince(viewport.opened), overlay: true, theme: theme),
             scale: viewport.scale, theme: theme)
         }
         .allowsHitTesting(false)

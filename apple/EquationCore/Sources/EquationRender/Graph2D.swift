@@ -87,6 +87,9 @@ public struct Graph2D: Equatable, Sendable {
         var seed = 0.5
         if case .bifurcation(_, _, let a0Name)? = row.cpu { seed = Self.seed(a0Name, analysis.env) }
         bifs.append(Bif2D(field: field, color: color, params: gpu.params, uniforms: ["uSeed": seed]))
+      case .implicit3d, .scalar3d, .vfield3d, .psurface:
+        // Drawn in space (Document3D).
+        break
       }
     }
     // A vector field's streamlines flow whether or not it reads t.
@@ -213,9 +216,11 @@ public struct Graph2D: Equatable, Sendable {
 extension Graph2D {
   /// Which rows take a palette color, and the slot each takes (lib/palette.ts):
   /// `previous` is each row's slot so far, by the editor's id for it, so a
-  /// row keeps its color as others come and go. A `#hex` note picks its own.
+  /// row keeps its color as others come and go. A `#hex` note picks its own:
+  /// it is read from `sources`, the rows as written (the analysis keeps a
+  /// row's text without its note).
   public static func colors<ID: Hashable>(
-    _ analysis: DocumentAnalysis, ids: [ID], previous: [ID: Int], theme: GraphTheme
+    _ analysis: DocumentAnalysis, ids: [ID], previous: [ID: Int], theme: GraphTheme, sources: [String]? = nil
   ) -> (colors: [RGB?], slots: [ID: Int]) {
     let takes = analysis.rows.map { row -> Bool in
       // The language does not say whether a row it cannot read yet takes a
@@ -233,7 +238,8 @@ extension Graph2D {
     for (k, row) in analysis.rows.enumerated() {
       let slot = k < index.count ? index[k] : -1
       if slot >= 0, k < ids.count { slots[ids[k]] = slot }
-      colors.append(noteColor(row.text) ?? (slot >= 0 ? theme.palette[slot] : nil))
+      let written = sources.flatMap { k < $0.count ? $0[k] : nil } ?? row.text
+      colors.append(noteColor(written) ?? (slot >= 0 ? theme.palette[slot] : nil))
     }
     return (colors, slots)
   }
