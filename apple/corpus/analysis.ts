@@ -55,6 +55,9 @@ import { LEFTOVER_CASES, recordData } from './cases-leftovers.ts';
 import { SAMPLED_CASES } from './cases-sampled.ts';
 import * as planeMap from '../../lib/plane-map.ts';
 import { PLANE_CASES, recordPlanes } from './cases-planes.ts';
+import { DATA_CASES, generated } from './cases-data.ts';
+import { parseCsv, type Table } from '../../lib/csv.ts';
+import { shortHash } from '../../lib/hash.ts';
 
 const fixtures = new URL('../EquationCore/Tests/EquationCoreTests/Fixtures/', import.meta.url);
 
@@ -1087,9 +1090,21 @@ function randomListDocs(count: number): string[] {
   return out;
 }
 
+/** A data file a document's rows may open: its bytes as text, or how many rows `generated` writes. */
+interface DocFile {
+  name: string;
+  hash: string;
+  content?: string;
+  generate?: number;
+}
+
 interface Doc {
   name: string;
   rows: string[];
+  /** The files on the device (web/filestore.ts); absent for a document with no data rows. */
+  files?: DocFile[];
+  /** Read as a shared link is, with no device files at all (the worker's reading). */
+  link?: boolean;
 }
 
 const docs: Doc[] = [];
@@ -1106,6 +1121,39 @@ LEFTOVER_CASES.forEach((text, k) => docs.push({ name: `case leftover ${k + 1}`, 
 INTERVAL_CASES.forEach((text, k) => docs.push({ name: `case intervals ${k + 1}`, rows: splitStatements(text) }));
 SAMPLED_CASES.forEach((text, k) => docs.push({ name: `case sampled ${k + 1}`, rows: splitStatements(text) }));
 PLANE_CASES.forEach((text, k) => docs.push({ name: `case planes ${k + 1}`, rows: splitStatements(text) }));
+// Data files: each document on the device that has its files, and as a link opened elsewhere.
+const sha256 = (text: string) => createHash('sha256').update(new TextEncoder().encode(text)).digest('hex');
+const dataTables = new Map<string, Table>();
+DATA_CASES.forEach(({ files, rows }, k) => {
+  const held = files.map(file => {
+    const content = file.content ?? generated(file.generate!);
+    const hash = sha256(content);
+    if (!dataTables.has(hash)) dataTables.set(hash, parseCsv(content));
+    return { name: file.name, hash, content: file.content, generate: file.generate };
+  });
+  const written = rows.replace(/\{([^}]+)\}/g, (_, name: string) => shortHash(held.find(f => f.name === name)!.hash));
+  docs.push({ name: `case data ${k + 1}`, rows: splitStatements(written), files: held });
+  docs.push({ name: `case data ${k + 1} (link)`, rows: splitStatements(written), files: held, link: true });
+});
+/** web/filestore.ts `lookup`: a pinned row by its hash's prefix, an unpinned one by name (the newest). */
+const tableSource = (files: DocFile[]) => (ref: { file: string; hash: string }) => {
+  const hit = ref.hash ? files.find(f => f.hash.startsWith(ref.hash)) : files.filter(f => f.name === ref.file).at(-1);
+  return hit ? dataTables.get(hit.hash)! : null;
+};
+/** web/session.ts CLOUD_3D_MAX and cloudPoints, and the row error web/main.ts recompileAll sets with them
+ *  (those modules need a browser). */
+const CLOUD_3D_MAX = 10_000;
+function cloudError(plot: import('../../lib/compiler.ts').CpuPlan | undefined): string | undefined {
+  if (!plot || (plot.type !== 'dscatter' && plot.type !== 'plist') || plot.dim !== 3) return undefined;
+  const points = plot.type === 'dscatter' ? plot.coords[0].length : plot.pts.length;
+  if (points <= CLOUD_3D_MAX) return undefined;
+  return (
+    `A 3D cloud draws at most ${CLOUD_3D_MAX} points;` +
+    ` that is ${points}.` +
+    ' Filter it first, or plot two of the columns.'
+  );
+}
+
 randomDocs(Number(process.env.RANDOM_DOCS ?? 600)).forEach((text, k) =>
   docs.push({ name: `case random ${k + 1}`, rows: splitStatements(text) }),
 );
@@ -1113,13 +1161,15 @@ randomListDocs(Number(process.env.RANDOM_LIST_DOCS ?? 400)).forEach((text, k) =>
   docs.push({ name: `case random list ${k + 1}`, rows: splitStatements(text) }),
 );
 
-const recorded = docs.map(({ name, rows }) => {
-  const analysis = analyzeRows(rows);
+const recorded = docs.map(({ name, rows, files, link }) => {
+  const analysis = analyzeRows(rows, files && !link ? { tables: tableSource(files) } : {});
   const fns = new Set(analysis.defs.fns.keys());
   const sumBound = analysis.document.sumBoundConsts;
   return {
     name,
     rows,
+    files: files ?? null,
+    link: !!link,
     env: analysis.constEnv,
     gridFields: recordGridFields(analysis),
     states: recordStates(analysis),
@@ -1160,11 +1210,11 @@ const recorded = docs.map(({ name, rows }) => {
         comment: !!row.comment,
         def: def ? { kind: def.kind, name: def.name } : null,
         view: row.view ?? null,
-        error: row.error ?? null,
+        error: row.error ?? cloudError(row.cpu) ?? null,
         info: row.info ?? null,
         dist: row.dist ?? null,
         dataLocal: row.dataLocal ?? null,
-        kind: row.error ? null : (rowKind(row, analysis.defs) ?? null),
+        kind: row.error || cloudError(row.cpu) ? null : (rowKind(row, analysis.defs) ?? null),
         slider: slider ?? null,
         moved: moved ?? null,
         takesColor: takesColor({

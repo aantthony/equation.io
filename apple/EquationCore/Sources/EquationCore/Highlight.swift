@@ -310,6 +310,9 @@ func boundNames(_ document: PreparedDocument) -> BoundNames {
   names.values.formUnion(built.vecStates.keys)
   names.values.formUnion(built.lists.keys)
   names.values.formUnion(built.intervals.keys)
+  // A data file, a cut of one, and a name whose file is elsewhere (lib/defs.ts `tables`, `missingData`).
+  names.values.formUnion(built.tables.keys)
+  names.values.formUnion(built.missingData.keys)
   names.functions.formUnion(built.fns.keys)
   // The sequences of the rows the port reads (lib/defs.ts `defs.sequences`).
   for (k, scan) in document.seqScans.enumerated() where document.blocked[k] == nil {
@@ -391,7 +394,7 @@ private func scanBoundNames(_ texts: [[UInt16]], rows: Set<Int>, into names: ino
     case .constant(let name, _, let draw):
       names.values.insert(name)
       if vector && !draw { names.values.formUnion(pointComps(name, dim)) }
-    case .table(let name):
+    case .table(let name, _, _):
       names.values.insert(name)
     case .regression: break
     case .initial(let name, _):

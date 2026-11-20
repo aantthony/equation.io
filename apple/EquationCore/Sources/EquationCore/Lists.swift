@@ -783,6 +783,14 @@ private func dropUndefined(_ p: Low, _ ctx: Ctx) throws -> Low {
   try dropUndefined([p], ctx)[0]
 }
 
+/// Lower a filter's condition and decide it, for a caller that filters
+/// something other than a list — `adults = person[person.age >= 18]` cuts a
+/// whole data file (Tables.swift). Nil when the condition is not a comparison
+/// over a list (`lowerMask`).
+func lowerMask(_ cond: Expr, _ getList: @escaping GetList, _ opts: ResolveOpts) throws -> [Bool]? {
+  try maskValues(try lowerCond(cond, Ctx(getList: getList, opts: opts)), opts)
+}
+
 /// Decide a mask, element by element (`maskValues`). A filter has to settle
 /// at lowering time, so conditions read constants and sliders but not t.
 private func maskValues(_ mask: Low, _ opts: ResolveOpts) throws -> [Bool]? {

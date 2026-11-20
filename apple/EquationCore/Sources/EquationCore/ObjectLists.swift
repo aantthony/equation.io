@@ -80,13 +80,14 @@ private func pointColumn(_ defs: BuiltDefs, _ name: String, _ axis: String) thro
   return Low(.list(column), namedAxes(name, points.own), none: points.none)
 }
 
-/// Resolve a name to list elements: a named list, or a coordinate of a named
-/// list of points (lib/defs.ts `listGetter`). Data files are not ported, so
-/// no name is a column; nor is a matrix read as the list of its rows
-/// (lib/object-lists.ts `rowsAsPoints`), which says so.
+/// Resolve a name to list elements: a named list, a data column written
+/// `table.column` (Tables.swift), or a coordinate of a named list of points
+/// (lib/defs.ts `listGetter`). A matrix read as the list of its rows
+/// (lib/object-lists.ts `rowsAsPoints`) is not ported, which says so.
 func listGetter(_ defs: BuiltDefs) -> GetList {
   { name in
     if let hit = defs.lists[name] { return hit }
+    if let column = try tableColumn(defs, name) { return column }
     if defs.mats.has(name) { throw Unsupported("a matrix read as a list of its rows") }
     let u = Array(name.utf16)
     guard let dot = u.firstIndex(of: unit(".")), dot > 0 else { return nil }
@@ -127,19 +128,22 @@ func tensorGetter(_ defs: BuiltDefs) -> GetTensor {
 /// `listNamesOf`): a list, a matrix or a tensor, or a dotted path whose head
 /// is one.
 func isListName(_ defs: BuiltDefs, _ n: String) -> Bool {
-  func listed(_ name: String) -> Bool { defs.lists.has(name) || defs.mats.has(name) || defs.tensors.has(name) }
+  func listed(_ name: String) -> Bool {
+    defs.lists.has(name) || defs.mats.has(name) || defs.tensors.has(name) || defs.tables.has(name)
+      || defs.missingData[name]?.list == true
+  }
   return listed(n) || listed(dottedHead(n))
 }
 
 /// Whether this side of a comparison is still a list by the time the
 /// comparison sees it, asked of the shape alone (lib/defs.ts `staysList`).
-private func staysList(_ e: Expr, _ defs: BuiltDefs) -> Bool {
+func staysList(_ e: Expr, _ defs: BuiltDefs) -> Bool {
   switch e {
   case .var(let name):
-    if defs.lists.has(name) { return true }
-    // `P.x` of a point list, or of the rows of a matrix.
+    if defs.lists.has(name) || defs.missingData[name]?.list == true { return true }
+    // A column of a data file; `P.x` of a point list, or of the rows of a matrix.
     let head = dottedHead(name)
-    return head != name && (defs.lists.has(head) || defs.mats.has(head))
+    return head != name && (defs.tables.has(head) || defs.lists.has(head) || defs.mats.has(head))
   case .list, .data, .text: return true
   case .neg(let a): return staysList(a, defs)
   case .bin(_, let a, let b, _): return staysList(a, defs) || staysList(b, defs)
@@ -157,12 +161,19 @@ private func staysList(_ e: Expr, _ defs: BuiltDefs) -> Bool {
 /// What is wrong with the index in `L[idx]`, judged by shape alone — or nil
 /// (lib/defs.ts `indexIssue`): a comparison that decides the same answer for
 /// every element is not a filter, whatever it mentions.
-func indexIssue(_ idx: Expr, _ defs: BuiltDefs) -> String? {
+func indexIssue(_ idx: Expr, _ defs: BuiltDefs, _ target: Expr? = nil) -> String? {
+  if let inside = wholePlotOverList(idx, defs) { return "Lists cannot appear inside \(inside)(…)." }
   let operands: [Expr]
   switch idx {
   case .ineq: operands = ineqComparisons(idx).flatMap { [$0.l, $0.r] }
   case .eqtest(_, let a, let b): operands = [a, b]
-  default: return nil
+  default:
+    // A column is a multiset whether or not its file is here, so picking by
+    // position is refused on every device alike.
+    guard case .var(let name)? = target, dottedHead(name) != name, defs.tables.has(dottedHead(name)) else {
+      return nil
+    }
+    return orderMessage(name, idx, false)
   }
   return operands.contains { staysList($0, defs) }
     ? nil

@@ -18,6 +18,7 @@ func parseFit(
 private func draftNameTaken(_ defs: BuiltDefs, _ n: String) -> Bool {
   defs.consts.has(n) || defs.fns.has(n) || defs.fields.has(n) || defs.complexes.has(n) || defs.conditions.has(n)
     || defs.states.has(n) || defs.points.contains(n) || defs.mats.has(n) || defs.tensors.has(n) || defs.lists.has(n)
+    || defs.tables.has(n) || defs.missingData.has(n)
 }
 
 /// Fit a parsed `observed ~ model` row against the definitions above it.
@@ -25,7 +26,7 @@ private func draftNameTaken(_ defs: BuiltDefs, _ n: String) -> Bool {
 /// some definition row of the document owns, above or below.
 func fitRow(
   _ source: (lhs: Expr, rhs: Expr), _ defs: BuiltDefs, _ numEnv: [String: Double], getFn: @escaping GetFn,
-  opts: ResolveOpts, isRow: (String) -> Bool, stateNames: Set<String>
+  opts: ResolveOpts, isRow: (String) -> Bool, stateNames: Set<String>, parameters fitted: inout [String]
 ) throws -> FitResult {
   let lhs = try Resolver(getFn: getFn, opts: opts).resolve(source.lhs)
   let rhs = try Resolver(getFn: getFn, opts: opts).resolve(source.rhs)
@@ -39,6 +40,8 @@ func fitRow(
   let parameters = rhsVars.list.filter { n in
     nameable(n) && !isRow(n) && !draftNameTaken(defs, n) && !n.utf16.contains(unit("."))
   }
+  // (The caller's too: a fit whose data is elsewhere still claims them.)
+  fitted = parameters
   if parameters.isEmpty {
     throw LanguageError("Regression needs an unbound coefficient, like Y ~ m X + b. Defined constants stay fixed.")
   }

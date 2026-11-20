@@ -183,7 +183,7 @@ import Testing
     #expect(scanDefinition("T₀ = 3") == .constant(name: "T_0", rhs: " 3"))
     #expect(scanDefinition("T_{c} = 300") == .constant(name: "T_c", rhs: " 300"))
     #expect(scanDefinition("p ∈ A") == .constant(name: "p", rhs: "A", draw: true))
-    #expect(scanDefinition("p = open(\"a.csv\")") == .table(name: "p"))
+    #expect(scanDefinition("p = open(\"a.csv\")") == .table(name: "p", file: "a.csv", hash: ""))
     for text in ["y = x", "y' = x - y", "a == 2", "sin(x) = 1", "e = 2", "x^2 + y^2 = 1", "u_a = 1", "a ="] {
       #expect(scanDefinition(text) == nil, "\(text)")
     }

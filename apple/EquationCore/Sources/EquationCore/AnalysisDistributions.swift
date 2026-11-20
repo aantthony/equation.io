@@ -79,6 +79,8 @@ func buildRandomVariables(_ scan: RandomScan, _ built: BuiltDefs, _ raw: [Defini
       built.consts.has(name) || built.fields.has(name) || built.conditions.has(name) || built.fns.has(name)
         || built.points.contains(name) || built.complexes.has(name) || built.mats.has(name)
         || built.tensors.has(name) || built.lists.has(name) || built.multivectors.has(name)
+        // (A data file, and a name whose file is elsewhere: it still claims its name.)
+        || built.tables.has(name) || built.missingData.has(name)
     })
 }
 

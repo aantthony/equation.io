@@ -12,6 +12,10 @@
 /// word for word, and is what a row reports.
 public struct LanguageError: Error, Equatable, Sendable {
   public var message: String
+  /// The row needs a data file this device does not have (lib/defs.ts
+  /// `MissingDataError`, which is an `Error` too; Tables.swift): to the row
+  /// not a mistake but a file to supply.
+  public var missingData = false
 
   public init(_ message: String) { self.message = message }
 }
