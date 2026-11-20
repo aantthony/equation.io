@@ -60,6 +60,12 @@ import Testing
     #expect(grid.values[8..<12].map { $0.isNaN ? -1 : $0 } == [-1, 1, 2, -1])
   }
 
+  @Test func namedPointsDrawAfterEveryRow() {
+    let overlay = Self.graph2D(["A = (1, 2)", "(3, 4)", "B = (5, 6)", "(7, 8)"]).overlay(at: 0)
+    #expect(overlay.points.map(\.x) == [3, 7, 1, 5])
+    #expect(overlay.points.map(\.label) == [nil, nil, "A", "B"])
+  }
+
   @Test func aTrailInSpaceIsWhatTheRunSaw() {
     let rows = ["trail((cos(t), sin(t), t))", "z = 0", "trail((t, 1))"]
     let analysis = analyze(rows)

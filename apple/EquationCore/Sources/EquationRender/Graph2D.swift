@@ -169,6 +169,7 @@ public struct Graph2D: Equatable, Sendable {
     var env = environment(at: time, run: run)
     env["t"] = time
     var overlay = Overlay2D()
+    var named: [(row: Int, point: Overlay2D.Point)] = []
     for (index, row) in analysis.rows.enumerated() {
       guard row.error == nil, row.unsupported == nil, index < colors.count, let color = colors[index]
       else { continue }
@@ -177,11 +178,12 @@ public struct Graph2D: Equatable, Sendable {
       let mark = markOverlay(overlay)
       defer { carry(&overlay, row, since: mark, bounds: bounds) }
       // A named point (`A = (1, 2)`) has no plan of its own: its components
-      // are the constants A_x and A_y, and it is drawn with its name.
+      // are the constants A_x and A_y, and it is drawn with its name, after
+      // every row's plot (below).
       if row.cpu == nil, let name = row.definition?.name, let x = env["\(name)_x"], let y = env["\(name)_y"],
         env["\(name)_z"] == nil, x.isFinite, y.isFinite
       {
-        overlay.points.append(.init(x: x, y: y, color: css, label: writtenName(name)))
+        named.append((index, .init(x: x, y: y, color: css, label: writtenName(name))))
         continue
       }
       guard let cpu = row.cpu else { continue }
@@ -237,6 +239,13 @@ public struct Graph2D: Equatable, Sendable {
       default:
         break
       }
+    }
+    // Named points draw over what the rows drew, in their rows' order
+    // (web/scene.ts `renderFrame`, after its loop over the rows).
+    for (index, point) in named {
+      let mark = markOverlay(overlay)
+      overlay.points.append(point)
+      carry(&overlay, analysis.rows[index], since: mark, bounds: bounds)
     }
     return overlay
   }
