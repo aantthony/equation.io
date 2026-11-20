@@ -42,6 +42,8 @@ public struct RowAnalysis: Equatable, Sendable {
   public var takesColor = false
   /// The row's kind as the site's tools name it (lib/row-kind.ts).
   public var kind: String?
+  /// Set for probability rows: `X ~ …`, `P(…)`, `E(…)`.
+  public var dist: RowDistribution?
   /// Set for plot rows that classified.
   public var classified: Classified?
   public var cpu: CpuPlan?
@@ -66,6 +68,9 @@ public struct DocumentAnalysis: Equatable, Sendable {
   /// The names the document binds, which the highlighter colors rows by
   /// (`highlightRows(_:names:)`).
   public var names: BoundNames
+  /// The document's random variables, the anonymous ones of its expression
+  /// rows among them: what a density, pmf, prob or expect plan's `rv` names.
+  public var random = RVSystem()
   /// The document's own functions (a slider's `clamp` is not one of these).
   var userFns: Set<String>
   /// Each constant's expression, in the order the rows define them.
@@ -142,15 +147,6 @@ func usesIndex(_ u: Units, _ index: String) -> Bool {
   return false
 }
 
-/// `^\s*name\s*\(…\)\s*$`
-private func isWholeCall(_ text: String, _ name: String) -> Bool {
-  var s = RowScanner(text)
-  s.space()
-  guard s.eat(word: name) else { return false }
-  s.space()
-  return s.peek == unit("(") && jsTrimEnd(s.u[...]).last == unit(")")
-}
-
 /// `^\s*ds\s*(?:\^\s*2|²)\s*=`: a panel's metric row.
 private func isMetricRow(_ text: String) -> Bool {
   var s = RowScanner(text)
@@ -207,6 +203,8 @@ struct PreparedDocument {
   /// Rows that define a name a row above already has.
   var duplicates: [Int] = []
   var built = BuiltDefs()
+  /// The `~` rows and the rows derived from them (AnalysisDistributions.swift).
+  var random = RandomRows()
 }
 
 func prepareDocument(_ sources: [String]) -> PreparedDocument {
@@ -223,11 +221,17 @@ func prepareDocument(_ sources: [String]) -> PreparedDocument {
   var poison: Set<String> = []
   var tildeNames: Set<String> = []
   var scanned: [Definition?] = Array(repeating: nil, count: count)
+  // Random-variable rows (`X ~ …`, and `Y = X^2` referencing one) resolve
+  // outside the definition system.
+  var random = RandomRows(texts) { texts[$0].hasPrefix("#") || seqScans[$0] != nil }
   for (i, text) in texts.enumerated() where !text.isEmpty {
     if text.hasPrefix("#") {
       document.comments.insert(i)
+    } else if random.declares[i] != nil {
+      continue
     } else if text.contains("~") {
-      blocked[i] = "random variables and regressions (~)"
+      // A fit runs over lists; any other `~` is not a row the port reads.
+      blocked[i] = random.regressions.contains(i) ? "regressions (~ over lists)" : "this use of ~"
       // A fit defines its coefficients too: every name in the row is its.
       tildeNames.formUnion(writtenNames(text))
     } else if let scan = seqScans[i] {
@@ -241,6 +245,7 @@ func prepareDocument(_ sources: [String]) -> PreparedDocument {
     }
   }
   poison.formUnion(tildeNames)
+  tildeNames.formUnion(random.scan.names)
 
   // Pass 1: definitions. The first row to define a name owns it.
   var raw: [Definition] = []
@@ -266,7 +271,7 @@ func prepareDocument(_ sources: [String]) -> PreparedDocument {
       for i in 0..<count where blocked[i] == nil && !document.comments.contains(i) {
         guard let name = writtenNames(texts[i]).first(where: { touches($0, poison) }) else { continue }
         blocked[i] = "it uses \(name), which is not supported yet"
-        if let d = scanned[i], poison.insert(d.name).inserted { grew = true }
+        if let defined = scanned[i]?.name ?? random.declares[i], poison.insert(defined).inserted { grew = true }
         if let scan = seqScans[i], poison.insert(scan.name).inserted { grew = true }
       }
     }
@@ -280,8 +285,19 @@ func prepareDocument(_ sources: [String]) -> PreparedDocument {
       poison.insert(d.name)
       found = true
     }
+    if found { continue }
+    // The random variables' declarations, which read the definitions; one
+    // the port cannot read takes its name out of reach too.
+    random.built = buildRandomVariables(
+      random.scan, built, raw, documentNames: Set(raw.map(\.name)).union(tildeNames))
+    for (i, what) in random.built.unsupported where blocked[i] == nil {
+      blocked[i] = what
+      if let name = random.declares[i] { poison.insert(name) }
+      found = true
+    }
     if !found { break }
   }
+  document.random = random
   document.scanned = scanned
   document.blocked = blocked
   document.tildeNames = tildeNames
@@ -403,6 +419,32 @@ public func analyze(_ sources: [String]) -> DocumentAnalysis {
     }
   }
 
+  // Random variables next, so P(…) and bare-expression rows can reference
+  // them regardless of row order.
+  let random = document.random
+  var distributions = DistributionRows(
+    rvs: RVSystem(random.built.declarations), rvNames: random.built.names, constNames: constNames,
+    constEnv: constEnv, moving: animated,
+    parse: { body in
+      try Resolver(getFn: getFn, opts: ropts).resolve(
+        try parseExpr(body, userFns: fnNames, listNames: listNames, valueNames: valueNames))
+    },
+    lower: {
+      try lowerObjects($0, comps: comps, mats: { built.mats[$0] }, tensors: { name, _ in built.tensors[name] })
+    },
+    userDefined: {
+      constNames.contains($0) || built.fns[$0] != nil || built.mats.has($0) || built.tensors.has($0)
+    })
+  for (i, name) in random.built.rowRV where blocked[i] == nil {
+    do {
+      try distributions.declarationRow(&rows[i], name, error: random.built.errors[i])
+    } catch let error as Unsupported {
+      rows[i].unsupported = notSupported(error.what)
+    } catch {
+      rows[i].error = errorMessage(error)
+    }
+  }
+
   var seenViewKinds: Set<String> = []
   var viewsUnknown = false
   var panel = 0
@@ -414,6 +456,7 @@ public func analyze(_ sources: [String]) -> DocumentAnalysis {
       if viewHead(text) != nil { viewsUnknown = true }
       continue
     }
+    if random.declares[i] != nil { continue }
     if rows[i].definition != nil || rows[i].comment || rows[i].error != nil || text.isEmpty { continue }
     do {
       if scanOpenHead(text) != nil { throw Unsupported("data files") }
@@ -448,11 +491,10 @@ public func analyze(_ sources: [String]) -> DocumentAnalysis {
       }
       // `P(…)` shades an area under a declared density — unless the user
       // has defined P themselves. With no random variable there is none.
-      for letter in ["P", "E"] where isWholeCall(text, letter) && !constNames.contains(letter) {
-        if built.fns[letter] != nil { continue }
-        if !tildeNames.isEmpty { throw Unsupported("probabilities and expectations") }
-        throw LanguageError("Define a random variable first, e.g. X ~ Normal(0, 1).")
-      }
+      if try distributions.probabilityRow(&rows[i], text, index: i) { continue }
+      // `E(…)` is the mean of an expression in random variables — unless the
+      // user has defined E themselves.
+      if try distributions.expectationRow(&rows[i], text, index: i) { continue }
       if let seq = document.seqScans[i], seq.lattice {
         // A seed row draws nothing of its own; the rule row carries it.
         rows[i].classified = try classifyAutomatonRow(
@@ -504,27 +546,15 @@ public func analyze(_ sources: [String]) -> DocumentAnalysis {
         }
         resolved = cases
       }
+      // A bare expression in random variables plots that derived density; a
+      // real row in u and v alone is one too, drawn as the density of its values.
+      // (A surface painted by its curvature is a picture, whatever u and v it reads.)
+      if try distributions.expressionRow(&rows[i], resolved, painted: painted != nil, text: text, index: i) {
+        continue
+      }
       // Expand point arithmetic: a point name A becomes (A_x, A_y).
       let lowered = try lowerObjects(
         resolved, comps: comps, mats: { built.mats[$0] }, tensors: { name, _ in built.tensors[name] })
-      // A real row in u and v alone does not depend on the screen, so the
-      // site draws the density of its values, as a random variable's.
-      switch resolved {
-      case .eq, .ineq: break
-      case _ where usesComplex(resolved): break
-      default:
-        let free = freeVars(resolved).list.filter { !constNames.contains($0) }
-        if free.contains(where: { $0 == "u" || $0 == "v" }),
-          !free.contains(where: ["x", "y", "z", "w"].contains)
-        {
-          // (tube(…), revolve(…) and a painted surface are whole-row forms, never a density.)
-          if case .vec = lowered {
-          } else if case .call(let form, _) = lowered, form == "tube" || form == "revolve" || form == PAINT_CALL {
-          } else {
-            throw Unsupported("the density of a row in u or v")
-          }
-        }
-      }
       var cls = try classify(lowered, defined: constNames, fields: fieldEnv)
       rows[i].info = curveHint(cls.object, text)
       // `e = 0.6` parsed with e already a number; only the text still says e.
@@ -638,6 +668,8 @@ public func analyze(_ sources: [String]) -> DocumentAnalysis {
 
   // What each row shows beside its text.
   let userFns = Set(built.fns.keys)
+  // A whole-number parameter of a discrete law (the n of Binomial(n, p)) steps in whole numbers.
+  let wholeParams = distributions.rvs.wholeParamNames()
   for i in 0..<count {
     var row = rows[i]
     defer { rows[i] = row }
@@ -662,6 +694,8 @@ public func analyze(_ sources: [String]) -> DocumentAnalysis {
         case .grid: "grid (what draws behind its panel's plots)"
         default: "viewport (\(view.kind))"
         }
+    } else if let dist = row.dist {
+      row.kind = distributionKind(dist, row.cpu)
     } else if let cls = row.classified {
       row.kind = cls.object.publicKind
     }
@@ -694,15 +728,17 @@ public func analyze(_ sources: [String]) -> DocumentAnalysis {
       }
       // Whole-number sliders step one at a time; otherwise a round step
       // (1, 2 or 5 × 10^k), so round values sit on it.
-      // (A slider that is a Σ/Π bound, or the index a term is read at, steps so too.)
-      let whole = form.whole || boundConsts.names.contains(name)
+      // (A slider that is a Σ/Π bound, or the index a term is read at, steps so too; and a
+      // whole-number parameter of a discrete law.)
+      let whole = form.whole || boundConsts.names.contains(name) || wholeParams.contains(name)
       row.slider = Slider(min: lo, max: hi, step: whole ? 1 : niceSpacing((hi - lo) / 400, 1).major, value: value)
     }
   }
   // The constants once more: a recurrence's chain of terms is among them now.
   let env = (try? evaluateFrame(built, time: 0)) ?? constEnv
   return DocumentAnalysis(
-    rows: rows, env: env, animated: animatedConstNames(built), names: boundNames(document), userFns: userFns,
+    rows: rows, env: env, animated: animatedConstNames(built), names: boundNames(document),
+    random: distributions.rvs, userFns: userFns,
     constNames: built.consts.keys,
     constExprs: built.consts.entries.map(\.value))
 }
