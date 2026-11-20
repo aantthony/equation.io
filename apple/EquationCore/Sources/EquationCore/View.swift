@@ -14,10 +14,10 @@ public enum ViewSpec: Equatable, Sendable {
   /// unit over pixels per x unit; `locked` pins the window.
   ///
   /// A lattice view names its index axes instead of x and y,
-  /// `view(i = -60..60, n = 0..80)`: `axes` is [across, down] as written (the
-  /// second empty when only one is), and y is the down range negated, since
-  /// row n + 1 sits below row n.
-  case view(x: [Double]?, y: [Double]?, ratio: Double?, locked: Bool, axes: [String]? = nil)
+  /// `view(i = -60..60, n = 0..80)` (the row's `viewAxes`): x is then the
+  /// range across and y the range down negated, since row n + 1 sits below
+  /// row n.
+  case view(x: [Double]?, y: [Double]?, ratio: Double?, locked: Bool)
   /// Orbit angles in radians; `spin` in radians per second.
   case camera(theta: Double, phi: Double, radius: Double?, target: [Double]?, spin: Double?, locked: Bool)
   /// A `---` divider: where the new panel goes (`place` nil splits along the
@@ -281,6 +281,14 @@ private func mentionsWord(_ text: String, _ word: String) -> Bool {
 /// rows fall through to the expression parser); throws a row-friendly error
 /// when it is one but malformed. `env` supplies constant values at t = 0.
 func parseViewRow(_ text: String, _ env: [String: Double]) throws -> ViewSpec? {
+  var axes: [String]?
+  return try parseViewRow(text, env, latticeAxes: &axes)
+}
+
+/// `latticeAxes` comes back as the index axes a lattice view names, [across,
+/// down] as written (the second empty when it names only one): the site's
+/// `View2DSpec.axes`.
+func parseViewRow(_ text: String, _ env: [String: Double], latticeAxes: inout [String]?) throws -> ViewSpec? {
   if let split = try parseDividerRow(text) { return split }
   if let body = wholeCallBody(text, "grid") {
     let args = body.split(separator: ",", omittingEmptySubsequences: false).map { jsTrimmed(String($0)) }
@@ -362,7 +370,6 @@ func parseViewRow(_ text: String, _ env: [String: Double]) throws -> ViewSpec? {
       // Any other letter names an index axis: the view is a lattice.
       if axis == "x" { x = [lo, hi] } else if axis == "y" { y = [lo, hi] } else { lattice.append((axis, [lo, hi])) }
     }
-    var axes: [String]?
     if !lattice.isEmpty {
       if x != nil || y != nil || lattice.count > 2 {
         throw LanguageError(
@@ -372,16 +379,16 @@ func parseViewRow(_ text: String, _ env: [String: Double]) throws -> ViewSpec? {
       if lattice.count == 1 {
         // One axis, as a panel sharing the other writes it: taken as across
         // here, and turned down by orientLattice when that is its axis.
-        axes = [lattice[0].axis, ""]
+        latticeAxes = [lattice[0].axis, ""]
         x = lattice[0].range
       } else {
-        axes = [lattice[0].axis, lattice[1].axis]
+        latticeAxes = [lattice[0].axis, lattice[1].axis]
         x = lattice[0].range
         y = [-lattice[1].range[1], -lattice[1].range[0]]
       }
     }
     if x == nil && y == nil { throw LanguageError(usage) }
-    return .view(x: x, y: y, ratio: ratio, locked: locked, axes: axes)
+    return .view(x: x, y: y, ratio: ratio, locked: locked)
   }
   let usage = "Expected camera(theta, phi, radius?, (x, y, z)?, spin = rate?, locked?) — angles in radians."
   // spin = … is named and comes last, so the positional arguments keep their meaning.

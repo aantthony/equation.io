@@ -26,6 +26,9 @@ public struct RowAnalysis: Equatable, Sendable {
   public var definition: Definition?
   /// Set for viewport rows: `view(…)`, `camera(…)`, `grid(…)`, and `---`.
   public var view: ViewSpec?
+  /// A lattice view's index axes, `view(i = -60..60, n = 0..80)`: [across,
+  /// down] as written (the second empty when it names only one).
+  public var viewAxes: [String]?
   /// The error the site reports for the row.
   public var error: String?
   /// Why the app cannot show the row yet: the site draws it, the port does
@@ -418,7 +421,8 @@ public func analyze(_ sources: [String]) -> DocumentAnalysis {
       let head = viewHead(text)
       if isDividerRow(text) || (head != nil && !fnNames.contains(head!)) {
         if viewsUnknown && !isDividerRow(text) { throw Unsupported("a view row after one that is not supported") }
-        if let view = try parseViewRow(text, boundVals) {
+        var latticeAxes: [String]?
+        if let view = try parseViewRow(text, boundVals, latticeAxes: &latticeAxes) {
           // Each panel frames itself: a divider starts a fresh set.
           if case .split = view {
             panel += 1
@@ -432,6 +436,7 @@ public func analyze(_ sources: [String]) -> DocumentAnalysis {
           }
           seenViewKinds.insert(view.kind)
           rows[i].view = view
+          rows[i].viewAxes = latticeAxes
           continue
         }
       }
@@ -578,12 +583,13 @@ public func analyze(_ sources: [String]) -> DocumentAnalysis {
       default: break
       }
       if rows[i].unsupported != nil, !rows[i].comment { unknown.insert(panelAt) }
-      if case .view(_, _, _, _, let axes?)? = rows[i].view {
+      if case .view? = rows[i].view, let axes = rows[i].viewAxes {
         indexViews.append((i, panelAt, axes.filter { !$0.isEmpty }))
       }
     }
     for (i, at, axes) in indexViews where !axes.allSatisfy(latticeAxes[at].contains) {
       rows[i].view = nil
+      rows[i].viewAxes = nil
       if unknown.contains(at) {
         rows[i].unsupported = notSupported("a lattice view of a panel with a row that is not supported yet")
       } else {

@@ -116,7 +116,7 @@ extension Graph2D {
     let rows = analysis.rows.filter { $0.error == nil && $0.unsupported == nil }
     var written: [String]?
     for row in rows {
-      if case .view(_, _, _, _, let axes?)? = row.view {
+      if case .view? = row.view, let axes = row.viewAxes {
         written = axes
         break
       }
