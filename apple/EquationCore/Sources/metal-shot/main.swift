@@ -8,7 +8,8 @@ import UniformTypeIdentifiers
 // Renders a graph to a PNG with the app's Metal renderer, without the app.
 //
 //   swift run metal-shot --out a.png "y = sin(x)" "x^2 + y^2 = 9"
-//   swift run metal-shot --out a.png --scene scene.json     (a Scene2D, EquationRender/Scene2D.swift)
+//   swift run metal-shot --out a.png --scene scene.json     (a Scene2D, EquationRender/Scene2D.swift,
+//                                                            or a Graph3D, Scene3D.swift: see Shot3D.swift)
 //   swift run metal-shot --diff a.png b.png [--out diff.png]
 //
 //   --size 800x600   the frame in points (default 800x600)
@@ -127,6 +128,18 @@ let size = (options["--size"] ?? "800x600").split(separator: "x").compactMap { D
 guard size.count == 2 else { fail("--size is like 800x600.") }
 let scale = Double(options["--scale"] ?? "2") ?? 2
 let theme = flags.contains("--dark") ? GraphTheme.dark : .light
+
+// A 3D scene (Shot3D.swift).
+if var graph = options["--scene"].flatMap(graph3D) {
+  if let time = options["--time"].flatMap(Double.init) { graph.time = time }
+  guard let metal = MetalContext() else { fail("No Metal device.") }
+  guard
+    let image = metal.image(
+      of: graph, width: Int(size[0] * scale), height: Int(size[1] * scale), dpr: scale, theme: theme)
+  else { fail("Couldn't draw.") }
+  save(image, out)
+  exit(0)
+}
 
 var scene: Scene2D
 if let path = options["--scene"] {
