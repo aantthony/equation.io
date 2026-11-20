@@ -5,9 +5,8 @@
 /// coloured by it (lib/analysis.ts `curvaturePaint`, lib/plot.ts
 /// `paintedSurface`).
 ///
-/// Not ported: a surface over intervals (`u = interval(0, 2pi)`), the
-/// surface of a panel's on(…) row (`gaussian(x, y)`), geodesics, and the
-/// rest of lib/surface-geometry.ts.
+/// Not ported: the surface of a panel's on(…) row (`gaussian(x, y)`),
+/// geodesics, and the rest of lib/surface-geometry.ts.
 
 /// `[paint](S, f)`: the surface S coloured by f, a scalar in the same u and
 /// v — gaussian(S) alone on a row, which classify unwraps (lib/geom.ts).
@@ -54,15 +53,20 @@ func meanCurvatureOf(_ r: [Expr], _ d: (Expr, String) throws -> Expr) throws -> 
 extension Resolver {
   /// What a surface operator acts on, as its components in u and v: a
   /// tuple, a named surface (S = (u, v, u v)) or a function of two
-  /// parameters, called at u and v (`surfaceOperand`).
-  func surfaceOperand(_ name: String, _ arg: Expr) throws -> [Expr] {
+  /// parameters, called at u and v (`surfaceOperand`). A surface over
+  /// intervals (`u = interval(0, 2pi)` above) is read over their values,
+  /// written as u and v; `over` holds them, to put back where the result is a
+  /// function on the surface.
+  func surfaceOperand(_ name: String, _ arg: Expr) throws -> (items: [Expr], over: (u: Expr?, v: Expr?)) {
     let usage = "\(name) takes a parametric surface in u and v, like \(name)(S) with S = (u, v, u^2 - v^2)."
-    // Port: a surface over the intervals of u and v is read at their values.
-    if opts.interval("u") != nil || opts.interval("v") != nil { throw Unsupported("interval(…)") }
+    // Port: where an interval is not read (Interval.swift), neither are u's and v's.
+    let uInterval = opts.interval("u")
+    let vInterval = opts.interval("v")
+    if uInterval != nil || vInterval != nil, !opts.intervals { throw Unsupported("interval(…)") }
     var r = arg
     if case .var(let fname) = arg, let fn = try getFn(fname) {
       if fn.params.count != 2 { throw LanguageError(usage) }
-      r = substVars(fn.body, [fn.params[0]: .var("u"), fn.params[1]: .var("v")])
+      r = substVars(fn.body, [fn.params[0]: uInterval ?? .var("u"), fn.params[1]: vInterval ?? .var("v")])
     }
     r = try lowerGeom(r, comps: opts.comps)
     r = throughFields(r, over: ["u", "v", "x", "y", "z"])
@@ -70,13 +74,27 @@ extension Resolver {
       throw LanguageError(
         "\(name): \(written) is not a surface — define one first, like \(written) = (u, v, u^2 - v^2).")
     }
+    let (uKey, vKey) = (uInterval.map(exprKey), vInterval.map(exprKey))
+    let hidden = intervalsIn(r)
+    if !hidden.isEmpty, !opts.intervals { throw Unsupported("interval(…)") }
+    var over: (u: Expr?, v: Expr?) = (nil, nil)
+    for h in hidden {
+      if h.key == uKey {
+        over.u = h.node
+      } else if h.key == vKey {
+        over.v = h.node
+      } else {
+        throw LanguageError("\(name) reads a surface over u and v; this one sweeps another interval. \(usage)")
+      }
+    }
+    if !hidden.isEmpty { r = replaceIntervals(r) { .var($0.key == uKey ? "u" : "v") } }
     guard case .vec(let items) = r, items.count == 3 else { throw LanguageError(usage) }
     let vars = freeVars(r)
     if !vars.contains("u") || !vars.contains("v") {
       throw LanguageError("\(name) needs a surface, which moves with both u and v. \(usage)")
     }
     if vars.contains(where: spaceVarNames.contains) { throw LanguageError(usage) }
-    return items
+    return (items, over)
   }
 
   /// A point's two coordinates from a surface operator's trailing arguments:
@@ -116,12 +134,15 @@ extension Resolver {
         "\(name)(x, y) reads the surface of its panel's on(…) row, and this panel has none: write \(name)(S) "
           + "with S = (u, v, u^2 - v^2).")
     }
-    let r = try surfaceOperand(name, args[0])
+    let (r, over) = try surfaceOperand(name, args[0])
     let point = args.count > 1 ? try pointArgs(name, Array(args.dropFirst()), example) : nil
     func d(_ e: Expr, _ v: String) throws -> Expr { try applyDiff(e, v, 1) }
     let field = name == "gaussian" ? try gaussianOf(r, d) : try meanCurvatureOf(r, d)
     if let point { return substVars(field, ["u": point.0, "v": point.1]) }
-    return field
+    var back: [String: Expr] = [:]
+    if let u = over.u { back["u"] = u }
+    if let v = over.v { back["v"] = v }
+    return back.isEmpty ? field : substVars(field, back)
   }
 }
 
@@ -142,7 +163,21 @@ func curvaturePaint(_ e: Expr, _ fnNames: Set<String>, isPoint: (Expr) -> Bool) 
 func paintedSurface(_ args: [Expr], defined: Set<String>, fields: [String: Expr]) throws -> Classified {
   let usage = "gaussian(S) and meancurvature(S) alone on a row colour one parametric surface S in u and v."
   guard args.count >= 2 else { throw LanguageError(usage) }
-  let (surface, paint) = (args[0], args[1])
+  var (surface, paint) = (args[0], args[1])
+  // Both are written in u and v, or in the intervals u and v were defined
+  // as, which are swept here as classify sweeps them, the same interval to
+  // the same parameter in both.
+  let both = Expr.vec([surface, paint])
+  let hidden = intervalsIn(both)
+  if !hidden.isEmpty {
+    let used = freeVars(both)
+    let free = ["u", "v"].filter { !used.contains($0) }
+    if hidden.count > free.count { throw LanguageError(usage) }
+    var slot: [String: String] = [:]
+    for (k, h) in hidden.enumerated() { slot[h.key] = free[k] }
+    surface = replaceIntervals(surface) { sweep($0, slot[$0.key]!) }
+    paint = replaceIntervals(paint) { sweep($0, slot[$0.key]!) }
+  }
   if case .list = paint { throw LanguageError(usage) }
   if case .list = surface { throw LanguageError(usage) }
   let cls = try classify(surface, defined: defined, fields: fields)

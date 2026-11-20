@@ -625,6 +625,8 @@ private func wholeRowForm(_ e: Expr, _ rvNames: Set<String>) throws {
 func checkDerived(_ e: Expr, _ rvNames: Set<String>, _ constNames: Set<String>) throws {
   switch e {
   case .eq, .ineq, .vec, .list: throw LanguageError("A random variable must be a single value.")
+  // (A list literal as the resolver marks it: Expr.swift, "List identity".)
+  case .call(LIST_ID, _), .call(LIST_ORIGIN, _): throw LanguageError("A random variable must be a single value.")
   default: break
   }
   try wholeRowForm(e, rvNames)

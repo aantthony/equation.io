@@ -127,12 +127,16 @@ struct DistributionRows {
   /// How a variable's row draws (lib/dist.ts `variableRow`, lib/analysis.ts
   /// `classifyVariable`): a pmf as stems when it is built on discrete bases
   /// alone; the exact density `y = pdf(x)`, classified for the shader, when
-  /// its law is a closed-form pdf; else a density drawn on the CPU.
-  private func classifyVariable(_ row: inout RowAnalysis, _ name: String) throws {
+  /// its law is a closed-form pdf; else a density drawn on the CPU. `mass`
+  /// scales the curve from a probability to the measure of the row's
+  /// intervals (see `uniformDraws`).
+  private func classifyVariable(_ row: inout RowAnalysis, _ name: String, mass: Expr? = nil) throws {
     let discrete = rvs.isDiscreteVar(name)
     if !discrete, let exact = rvs.exactDist(name) {
       row.dist = .density
-      row.classified = try classify(try densityExpr(exact), defined: constNames, fields: [:])
+      var density = try densityExpr(exact)
+      if let mass, case .eq(let l, let r) = density { density = .eq(l, .bin(.mul, mass, r)) }
+      row.classified = try classify(density, defined: constNames, fields: [:])
       return
     }
     // Port: the site draws any other continuous variable too, by
@@ -145,8 +149,8 @@ struct DistributionRows {
     let ps = rvs.paramsOf(name)
     row.dist = discrete ? .pmf : .density
     row.classified = Classified(
-      object: .distribution(form: discrete ? .pmf : .density, rv: name), animated: ps.contains("t"), needs3D: false,
-      params: ps.list.filter { $0 != "t" })
+      object: .distribution(form: discrete ? .pmf : .density, rv: name, mass: mass), animated: ps.contains("t"),
+      needs3D: false, params: ps.list.filter { $0 != "t" })
     // A derived pmf row reads out as in the app: exact μ, σ.
     if discrete, case .derived? = rvs.get(name) {
       do {
@@ -265,15 +269,35 @@ struct DistributionRows {
 
   // MARK: Expression rows
 
+  /// The operator of a row that is curvature(C) or torsion(C) along the curve
+  /// (no point given), bare or with a number (1/curvature(C)) — unless the
+  /// document defines its own (lib/analysis.ts `alongCurve`).
+  static func alongCurve(_ e: Expr, _ fnNames: Set<String>) -> String? {
+    func bare(_ c: Expr) -> String? {
+      guard case .call(let name, let args) = c, name == "curvature" || name == "torsion", args.count == 1,
+        !fnNames.contains(name)
+      else { return nil }
+      return name
+    }
+    if case .bin(_, let a, let b, _) = e {
+      if case .num = a, let name = bare(b) { return name }
+      if case .num = b, let name = bare(a) { return name }
+      return nil
+    }
+    return bare(e)
+  }
+
   /// u and v in a real row with no x, y or z, as independent Uniform(0, 1)
   /// base variables under internal names — or nil when the row is not one,
   /// or cannot be a random variable (a tuple, a complex path), which leaves
   /// the row to classify, where u and v trace curves (lib/analysis.ts
   /// `uniformDraws`).
   ///
-  /// Port: a continuous interval is a uniform draw over its bounds too, with
-  /// the density drawn times its length; intervals are not ported.
-  private func uniformDraws(_ e: Expr, id: String) -> (expr: Expr, bases: [RV])? {
+  /// A continuous interval (Interval.swift) is a uniform draw over its bounds.
+  /// Its multiplicity is length, not probability (docs/multisets.md §5), so
+  /// the density is drawn times `mass`, the product of the intervals'
+  /// lengths: interval(0, 10) stands at height 1, as u does.
+  private func uniformDraws(_ e: Expr, id: String) -> (expr: Expr, bases: [RV], mass: Expr?)? {
     switch e {
     case .eq, .ineq: return nil
     default: break
@@ -281,7 +305,10 @@ struct DistributionRows {
     if usesComplex(e) { return nil }
     let free = freeVars(e).list.filter { !constNames.contains($0) }
     let params = free.filter { $0 == "u" || $0 == "v" }
-    if params.isEmpty || free.contains(where: { ["x", "y", "z", "w"].contains($0) }) { return nil }
+    let hidden = intervalsIn(e)
+    if (params.isEmpty && hidden.isEmpty) || free.contains(where: { ["x", "y", "z", "w"].contains($0) }) {
+      return nil
+    }
     // Numbers have a density; a point does not. Which one the row is depends
     // on its value, not its spelling: only the lowered row says so. A row
     // that does not lower is not one the density path can draw either.
@@ -299,21 +326,48 @@ struct DistributionRows {
       bases.append(.base(name: "@\(p)\(id)", dist: uniform))
       names[p] = .var("@\(p)\(id)")
     }
-    let expr = substVars(e, names)
+    var drawn: [String: String] = [:]
+    for (k, h) in hidden.enumerated() {
+      drawn[h.key] = "@iv\(k)\(id)"
+      bases.append(.base(name: "@iv\(k)\(id)", dist: BaseDist(kind: .uniform, args: [h.lo, h.hi])))
+    }
+    let expr = replaceIntervals(substVars(e, names)) { .var(drawn[$0.key]!) }
     guard (try? checkDerived(expr, rvNames.union(bases.map(\.name)), constNames)) != nil else { return nil }
-    return (expr, bases)
+    var mass: Expr?
+    for length in hidden.map(lengthOf) {
+      guard let m = mass else {
+        mass = length
+        continue
+      }
+      if case .num(let a) = m, case .num(let b) = length { mass = .num(a * b) } else { mass = .bin(.mul, m, length) }
+    }
+    // Unit length (u, v, interval(0, 1)) leaves the probability as it is.
+    if case .num(1)? = mass { mass = nil }
+    return (expr, bases, mass)
   }
 
   /// A bare expression in random variables plots that derived density; so
   /// does a real row in u and v alone, which does not depend on the screen
   /// and is drawn as its values (docs/multisets.md §5). `resolved` is the
   /// row as resolved, before lowering. False when the row is not one.
+  /// `along`: the operator of a row that is curvature(C) or torsion(C) along
+  /// its curve (`alongCurve`).
   mutating func expressionRow(
-    _ row: inout RowAnalysis, _ resolved: Expr, painted: Bool, text: String, index: Int
+    _ row: inout RowAnalysis, _ resolved: Expr, painted: Bool, text: String, index: Int, along: String? = nil
   ) throws -> Bool {
     var parsed = resolved
     var known = rvNames
+    var mass: Expr?
     if !painted, let draws = uniformDraws(parsed, id: "\(index)") {
+      // curvature(C) is κ along the curve, a number per u — which as such a
+      // row (or 1/curvature(C)) would draw the density of its values. Say
+      // how to show it.
+      if let along {
+        throw LanguageError(
+          "\(along)(C) is a function of u along the curve: plot it with (u, \(along)(C)), or read it at a point "
+            + "with \(along)(C, 0.25).")
+      }
+      mass = draws.mass
       for base in draws.bases {
         try rvs.addAnonymous(base)
         known.insert(base.name)
@@ -329,7 +383,7 @@ struct DistributionRows {
     try checkDerived(parsed, known, constNames)
     let name = "@\(index)"
     try rvs.addAnonymous(.derived(name: name, expr: parsed))
-    try classifyVariable(&row, name)
+    try classifyVariable(&row, name, mass: mass)
     return true
   }
 }

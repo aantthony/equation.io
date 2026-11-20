@@ -63,7 +63,7 @@ func checkTubeRadius(_ r: Expr, _ vars: inout NameSet) throws {
   case .vec, .list, .eq, .ineq: single = false
   default: break
   }
-  if !single { throw LanguageError("The tube radius must be a single real number.") }
+  if !single || hasInterval(r) { throw LanguageError("The tube radius must be a single real number.") }
   // The radius was split off before the root-only check, so whole-expression
   // forms hiding inside it need their own rejection.
   if let form = nestedSpecial(r) { throw LanguageError("\(form)(…) must be the whole expression.") }

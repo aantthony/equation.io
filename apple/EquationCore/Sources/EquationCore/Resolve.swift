@@ -71,7 +71,7 @@ struct ResolveOpts {
   var getList: GetList?
   var indexIssue: ((_ index: Expr, _ target: Expr) -> String?)?
   /// A name defined as an interval (Interval.swift), and whether one may be
-  /// written here: in a Fourier signal, or as a definition's whole value.
+  /// read here: in a row's own expression, a definition or a Fourier signal.
   var interval: (String) -> Expr? = { _ in nil }
   var intervals = false
 }
@@ -360,6 +360,8 @@ struct Resolver {
       return try resolveReduction(name, rawArgs[0])
     }
     if let fn = try getFn(name) {
+      // Port: a body holding an interval, called where one is not read (Interval.swift).
+      if !opts.intervals, hasInterval(fn.body) { throw Unsupported("interval(…)") }
       let n = fn.params.count
       // A function's arguments are as written when they fill its parameters:
       // only a mismatch spreads tuples, f((a, b)) ≡ f(a, b).

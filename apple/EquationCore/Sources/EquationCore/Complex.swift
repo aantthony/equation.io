@@ -370,6 +370,8 @@ public func inferScalarType(_ e: Expr, _ env: [String: ScalarType] = [:]) throws
     let b = try inferScalarType(rhs, env)
     return a == .complex || b == .complex ? .complex : .real
   case .call(let name, let args):
+    // (A list literal as the resolver marks it is the list: Expr.swift, "List identity".)
+    if name == LIST_ID || name == LIST_ORIGIN, let list = args.last { return try inferScalarType(list, env) }
     var types: [ScalarType] = []
     for a in args { types.append(try inferScalarType(a, env)) }
     return try inferCallType(name, types)

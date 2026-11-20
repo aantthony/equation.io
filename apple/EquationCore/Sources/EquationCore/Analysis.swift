@@ -626,6 +626,8 @@ public func analyze(_ sources: [String]) -> DocumentAnalysis {
       let exact = !plane(rawParsed)
       var rowOpts = ropts
       rowOpts.exactConditions = exact
+      // (A row's own expression may read an interval: Interval.swift.)
+      rowOpts.intervals = true
       // Port: on a panel drawn on a surface, gaussian(x, y) reads that surface.
       if panelSurfaces[panel] != nil, readsPanelCurvature(rawParsed, fnNames) {
         throw Unsupported("the curvature of a panel's surface")
@@ -658,7 +660,10 @@ public func analyze(_ sources: [String]) -> DocumentAnalysis {
       // A bare expression in random variables plots that derived density; a
       // real row in u and v alone is one too, drawn as the density of its values.
       // (A surface painted by its curvature is a picture, whatever u and v it reads.)
-      if try distributions.expressionRow(&rows[i], resolved, painted: painted != nil, text: text, index: i) {
+      if try distributions.expressionRow(
+        &rows[i], resolved, painted: painted != nil, text: text, index: i,
+        along: DistributionRows.alongCurve(rawParsed, fnNames))
+      {
         continue
       }
       // Expand point arithmetic: a point name A becomes (A_x, A_y).
@@ -679,6 +684,8 @@ public func analyze(_ sources: [String]) -> DocumentAnalysis {
       // A panel on a surface paints or carries its 2D rows onto it; a row
       // in space draws as it would in any 3D panel.
       if panelSurfaces[panel] != nil, !cls.needs3D { cls = try classifyOnSurface(cls) }
+      // A solid whose shape reads sliders is checked for folds at their values.
+      if let solid = cls.solid { try checkFolds(solid, ropts.consts) }
       rows[i].info = curveHint(cls.object, text)
       // `e = 0.6` parsed with e already a number; only the text still says e.
       // `i = [0..9]` is a family of such claims, one per member.

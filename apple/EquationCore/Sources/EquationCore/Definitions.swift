@@ -14,7 +14,10 @@
 /// - `M = ((1, 2), (3, 4))` names a matrix, expanded where it is used.
 /// - `L = [1, 2, 3]`, `T = (1, 2, 3, 4)` and `p ∈ L` name lists (Lists.swift).
 ///
-/// Data files, lists, intervals and multivectors are not ported (states are
+/// - a name for an interval, or for anything built from one, is the hidden parameter every row
+///   using it shares (Interval.swift); u and v take one as the range they run over.
+///
+/// Data files, lists and multivectors are not ported (states are
 /// in States.swift): their rows are reported as not supported yet, and so is
 /// every row that names one.
 public enum Definition: Equatable, Sendable {
@@ -705,6 +708,8 @@ func buildDefs(_ raw: [Definition], skip: Set<String>, sequences: [SeqScan] = []
     var scope = options()
     scope.documentNames = scope.documentNames!.union(params)
     scope.params = Set(params)
+    // (A body may hold an interval; a parameter shadows a named one, in `namedInterval`.)
+    scope.intervals = true
     // A parameter shadows a complex constant of the same name.
     scope.complex = { params.contains($0) ? nil : defs.complexes[$0] }
     // (And a named multivector, and a built-in unit vector: f(e_x) = e_x^2 squares its argument.)
@@ -803,16 +808,20 @@ func buildDefs(_ raw: [Definition], skip: Set<String>, sequences: [SeqScan] = []
         // (A list of starting values is a family of runs: StateFamilies.swift.)
         states.inits[name] = try Resolver(getFn: getFn, opts: opts).resolve(try parse(d))
       case .constant(let name, _, let draw):
-        // (`s = interval(0, 1)`, or another name for one: the one place an interval is written.)
+        // (A value may hold an interval: Interval.swift.)
         var valueOpts = options()
-        let source = try parse(d)
-        valueOpts.intervals = !paramVars.contains(name) && writesInterval(source, defs)
-        let resolved = try Resolver(getFn: getFn, opts: valueOpts).resolve(source)
+        valueOpts.intervals = true
+        let resolved = try Resolver(getFn: getFn, opts: valueOpts).resolve(try parse(d))
         defs.conditions[name] = nil
         // u and v take only an interval: the range they run over.
-        if paramVars.contains(name) { throw Unsupported("intervals") }
-        // `r = interval(1, 2)`: not a number but a hidden parameter, which
-        // every row using the name shares.
+        if paramVars.contains(name) {
+          guard case .call(INTERVAL, _) = resolved else {
+            throw LanguageError(
+              "\(name) can only be defined as an interval, the range it runs over: \(name) = interval(0, 2pi).")
+          }
+        }
+        // `r = interval(1, 2)`, or anything built from one: not a number but a
+        // hidden parameter, which every row using the name shares.
         if hasInterval(resolved) {
           if draw { throw LanguageError("\(name) ∈ … draws from a list; that is an interval.") }
           defs.intervals[name] = resolved

@@ -26,6 +26,8 @@ public struct GpuGrid: Equatable, Sendable {
 public enum CpuPlan: Equatable, Sendable {
   case implicit2d(residual: Expr, equation: Expr, levels: CpuGrid?)
   case ineq2d(constraints: [Constraint])
+  /// The region a family over an interval sweeps: each residual in x, y and u ∈ [0, 1].
+  case projected2d(relation: ProjectedRelation, constraints: [Constraint])
   case scalar2d(expr: Expr)
   case point(dim: Int, coords: [Expr])
   /// A curve in u, with its first three derivatives in u where it has them
@@ -107,6 +109,7 @@ public enum CpuPlan: Equatable, Sendable {
     switch self {
     case .implicit2d: "implicit2d"
     case .ineq2d: "ineq2d"
+    case .projected2d: "projected2d"
     case .scalar2d: "scalar2d"
     case .point: "point"
     case .pcurve: "pcurve"
@@ -176,6 +179,10 @@ public struct GpuPlan: Equatable, Sendable {
     case implicit2d(field: String, levels: GpuGrid?)
     /// Where `field` is negative; `edges` are the boundaries that belong to it.
     case ineq2d(field: String, edges: [String])
+    /// A family over an interval: `field` is F(x, y, u), negative where the
+    /// relation holds (`ineq`) or zero on the member's curve (`eq`); `slope`
+    /// is ∂F/∂u where it has a derivative.
+    case projected2d(relation: ProjectedRelation, field: String, slope: String?)
     case scalar2d(field: String)
     case vfield2d(fx: String, fy: String)
     /// A complex field, a vec2 in floats x, y and t.
@@ -208,6 +215,7 @@ public struct GpuPlan: Equatable, Sendable {
     case .none: "none"
     case .implicit2d: "implicit2d"
     case .ineq2d: "ineq2d"
+    case .projected2d: "projected2d"
     case .scalar2d: "scalar2d"
     case .vfield2d: "vfield2d"
     case .complexField(let form, _): form.planType
@@ -266,6 +274,10 @@ public func compileCpu(_ classified: Classified) throws -> CpuPlan {
     return .ineq2d(constraints: try constraints.map { Constraint(residual: try real($0.residual), strict: $0.strict) })
   case .regionParametric(let coordinates):
     return .pregion(comps: try coordinates.map(real))
+  case .regionProjected(let relation, let constraints):
+    return .projected2d(
+      relation: relation,
+      constraints: try constraints.map { Constraint(residual: try real($0.residual), strict: $0.strict) })
   case .scalarField(let expr):
     return .scalar2d(expr: try real(expr))
   case .vectorField(let components):
@@ -395,6 +407,14 @@ public func compileGpu(_ classified: Classified) throws -> GpuPlan {
     // In a 3D scene a planar region lies in z = 0, drawn like any surface.
     let p = try parametricGLSL(coordinates + [.num(0)], sub)
     return plan(.psurface(comps: p.comps, du: p.du, dv: p.dv, paint: nil))
+  case .regionProjected(let relation, let constraints):
+    let residuals = constraints.map(\.residual)
+    let fields = try residuals.map(scalar)
+    let field = fields.dropFirst().reduce(fields[0]) { "max(\($0), \($1))" }
+    // (Without a derivative the shader estimates the slope from neighbouring samples.)
+    var slope: String?
+    if relation == .eq, let du = try? diff(residuals[0], "u") { slope = try? scalar(du) }
+    return plan(.projected2d(relation: relation, field: field, slope: slope))
   case .scalarField(let expr):
     return plan(.scalar2d(field: try scalar(expr)))
   case .vectorField(let components) where components.count == 3:

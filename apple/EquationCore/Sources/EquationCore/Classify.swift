@@ -22,6 +22,10 @@ public indirect enum MathObject: Equatable, Sendable {
   /// A pair in u and v: the region it fills as both run from 0 to 1 (the
   /// site's region of form `parametric`).
   case regionParametric(coordinates: [Expr])
+  /// The region a family over an interval sweeps (ClassifyIntervals.swift;
+  /// the site's region of form `projected`): the points where some u in
+  /// [0, 1] makes the residual vanish (`eq`), or every constraint negative.
+  case regionProjected(relation: ProjectedRelation, constraints: [Constraint])
   case scalarField(expr: Expr)
   case vectorField(components: [Expr])
   case point(coordinates: [Expr])
@@ -122,6 +126,7 @@ public indirect enum MathObject: Equatable, Sendable {
     case .curveGraph, .curveImplicit: "implicit2d"
     case .region: "ineq2d"
     case .regionParametric: "pregion"
+    case .regionProjected: "projected2d"
     case .scalarField: "scalar2d"
     case .vectorField(let components): components.count == 3 ? "vfield3d" : "vfield2d"
     case .point: "point"
@@ -185,6 +190,9 @@ public struct Classified: Equatable, Sendable {
   /// A plane of projective geometry, a x + b y + c z + d = 0: an implicit
   /// surface drawn translucent, as a plane.
   public var plane: [Expr]? = nil
+  /// The members are the faces of one solid over three parameters, drawn
+  /// opaque so only its outside shows: its map (ClassifyIntervals.swift).
+  public var solid: SolidMap? = nil
 }
 
 /// The message for a row that tries to define t, which is animation time.
@@ -378,6 +386,14 @@ func classify(_ lowered: Expr, defined: Set<String>, fields: [String: Expr]) thr
     }
     throw LanguageError(unknownVariable(v))
   }
+  // Continuous intervals: a family in x and y, a solid, or parameters swept as u and v are.
+  let hidden = intervalsIn(expr)
+  if let swept = try classifyIntervals(
+    &expr, &vars, hidden: hidden, special: special, tube: tube != nil, params: params, defined: defined,
+    fields: fields)
+  {
+    return swept
+  }
   let animated = vars.contains("t")
   let hasParam = vars.contains("u") || vars.contains("v")
   let hasSpace = vars.contains("x") || vars.contains("y") || vars.contains("z")
@@ -490,8 +506,11 @@ func classify(_ lowered: Expr, defined: Set<String>, fields: [String: Expr]) thr
   if complexPath { return done(try classifyComplexPath(expr)) }
   if hasParam && !paramSystem {
     throw LanguageError(
-      "u and v trace a curve or surface in a tuple, like (cos(u), sin(u)) or (u, v, u v); "
-        + "to set the range one runs over, define it as an interval: u = interval(0, 2pi)."
+      !hidden.isEmpty
+        ? "An interval traces a curve or region in a tuple, like (r cos(2 pi u), r sin(2 pi u)); "
+          + "a number alone draws its density."
+        : "u and v trace a curve or surface in a tuple, like (cos(u), sin(u)) or (u, v, u v); "
+          + "to set the range one runs over, define it as an interval: u = interval(0, 2pi)."
     )
   }
 

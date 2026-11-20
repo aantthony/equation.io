@@ -6,10 +6,16 @@ import Synchronization
 /// name (`s = interval(0, 1)`) is the same node; each literal gets its own
 /// identity, so two literals are separate.
 ///
-/// Port: what reads an interval here is Fourier analysis, whose signal is
-/// read over one (FourierRows.swift). Rows that sweep or draw from an
-/// interval (lib/plot.ts, lib/measure.ts) are not ported: an interval
-/// anywhere else is reported as not supported (`ResolveOpts.intervals`).
+/// Nothing evaluates the node. Before a row draws, classify
+/// (ClassifyIntervals.swift) or the density path (AnalysisDistributions.swift)
+/// replaces it: by a sampling parameter swept over [0, 1] (`lo + (hi - lo) u`),
+/// or by a uniform random variable.
+///
+/// Port: an interval is read where a row's own expression is (and in the
+/// definitions and functions it names), in a reduction and in a Fourier
+/// signal. Anywhere else the resolver reaches one (`P(…)`, `E(…)`, a
+/// sequence, a state, an orbit) it is reported as not supported
+/// (`ResolveOpts.intervals`).
 
 struct HiddenInterval {
   /// The node itself, as it appears in the row.
@@ -91,12 +97,19 @@ func replaceIntervals(_ e: Expr, _ by: (HiddenInterval) -> Expr) -> Expr {
   return walk(e)
 }
 
-/// Whether a definition's value, as parsed, is an interval written whole:
-/// `interval(a, b)`, or the name of one above.
-func writesInterval(_ parsed: Expr, _ defs: BuiltDefs) -> Bool {
-  switch parsed {
-  case .call("interval", _): true
-  case .var(let name): defs.intervals.has(name)
-  default: false
-  }
+/// The interval's length, hi − lo: its measure (`lengthOf`).
+func lengthOf(_ h: HiddenInterval) -> Expr {
+  if case .num(let lo) = h.lo, case .num(let hi) = h.hi { return .num(hi - lo) }
+  return .bin(.sub, h.hi, h.lo)
+}
+
+/// `lo + (hi - lo) p`: the interval swept by a parameter p over [0, 1] —
+/// folded for number bounds, so interval(0, 1) is p itself (`sweep`).
+func sweep(_ h: HiddenInterval, _ p: String) -> Expr {
+  let length = lengthOf(h)
+  let param = Expr.var(p)
+  var scaled = Expr.bin(.mul, length, param)
+  if case .num(1) = length { scaled = param }
+  if case .num(0) = h.lo { return scaled }
+  return .bin(.add, h.lo, scaled)
 }
