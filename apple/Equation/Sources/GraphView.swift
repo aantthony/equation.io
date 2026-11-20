@@ -18,12 +18,16 @@ final class GraphModel {
   @ObservationIgnored var slots: [Int: Int] = [:]
   /// Writes a slider's new value into its row (GraphView sets this).
   @ObservationIgnored var slide: (Int, Double) -> Void = { _, _ in }
+  /// The document's rows as they are now, and the way the graph rewrites
+  /// them: a dragged point, a moved window's view(…) row (GraphView sets these).
+  @ObservationIgnored var rows: () -> [String] = { [] }
+  @ObservationIgnored var edit: ([String]) -> Void = { _ in }
 
   func setSlider(row index: Int, to value: Double) {
     slide(index, value)
   }
 
-  /// Glide the zoom about the graph's center: below 1 zooms in, above 1 out.
+  /// Glide the zoom of the panel last touched, about its center: below 1 zooms in, above 1 out.
   func zoom(by factor: Double) {
     metal?.glideZoom(by: factor)
   }
@@ -36,10 +40,10 @@ final class GraphModel {
 }
 
 /// What the app makes of a document's rows: each row's status for the
-/// editor, and what to draw (EquationCore `analyze`, EquationRender `Graph2D`).
+/// editor, and what to draw in each panel (EquationCore `analyze`, GraphPanels.swift).
 struct GraphAnalysis: Equatable {
   var status: [RowStatus] = []
-  var graph: Graph2D
+  var panels: GraphPanels
   /// Each row's palette slot, by its id.
   var slots: [Int: Int]
 
@@ -52,19 +56,15 @@ struct GraphAnalysis: Equatable {
     let texts = rows.map(\.text)
     let analysis = analyze(texts)
     let colored = Graph2D.colors(analysis, ids: rows.map(\.id), previous: previous, theme: theme)
-    graph = Graph2D(analysis, colors: colored.colors)
+    panels = GraphPanels(analysis, colors: colored.colors)
     slots = colored.slots
     // Syntax colors, as the site computes them (EquationCore `highlightRows`, lib/highlight.ts).
     let spans = highlightRows(texts, names: analysis.names)
     for (k, row) in analysis.rows.enumerated() {
       var error = row.error ?? row.unsupported.map(Self.notDrawnYet)
-      if error == nil {
-        // Rows the language reads and the app has nowhere to show yet.
-        switch row.view {
-        case .split?: error = Self.notDrawnYet("split views")
-        case .camera?: error = Self.notDrawnYet("3D")
-        default: break
-        }
+      // A camera(…) row the language reads, in a panel the app has no 3D scene for yet.
+      if error == nil, case .camera? = row.view, panels.panels[panels.panel(of: k)].space == nil {
+        error = Self.notDrawnYet("3D")
       }
       status.append(
         RowStatus(
@@ -87,7 +87,7 @@ struct GraphView: View {
     let theme = colorScheme == .dark ? GraphTheme.dark : .light
     let analysis = GraphAnalysis(rows: document.rows, theme: theme, previous: model.slots)
     let _ = connect(analysis, theme)
-    MetalGraphView(graph: analysis.graph, theme: theme, generation: document.generation, model: model)
+    MetalGraphView(content: analysis.panels, theme: theme, generation: document.generation, model: model)
       .onChange(of: analysis.status, initial: true) { _, status in model.status = status }
   }
 
@@ -97,6 +97,8 @@ struct GraphView: View {
     model.theme = theme
     model.slots = analysis.slots
     let document = $document
+    model.rows = { document.wrappedValue.rows.map(\.text) }
+    model.edit = { lines in document.wrappedValue.setLines(lines) }
     model.slide = { index, value in
       var lines = document.wrappedValue.rows.map(\.text)
       guard lines.indices.contains(index),

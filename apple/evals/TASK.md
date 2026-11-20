@@ -5,8 +5,8 @@
 You're working in the equation.io repo (a graphing calculator: TypeScript language
 core in `lib/`, web renderer in `web/`, Cloudflare Worker in `worker/`). On the local
 branch `swift-core` there is a native Apple app in `apple/` (SwiftUI, iOS/macOS 27):
-- `apple/Equation`: the app. The web renderer runs in a WKWebView (`web/native-app.ts`
-  is its bridge).
+- `apple/Equation`: the app. The graph is drawn in Metal (`apple/EquationCore`'s `EquationRender`),
+  from rows the Swift port of the language analyzes; no web view.
 - `apple/EquationCore`: a Swift port of the parser, held to the TypeScript by a
   recorded corpus (`pnpm swift:test`).
 
@@ -24,8 +24,8 @@ The app has an AI feature, "Ask" (`apple/Equation/Sources/Chat.swift`):
   (`lib/voice-agent.ts` `INSTRUCTIONS`).
 - **Tools:** the voice prototype's. `get_graph` and `set_graph` return each row's
   status and meaning, from `voiceGraph()` in `web/main.ts`; plus `move_view`,
-  `animate_slider`, `read_syntax`. They're called through the bridge
-  (`GraphBridge.ask` in `apple/Equation/Sources/GraphView.swift`).
+  `animate_slider`, `read_syntax`. In the app they act on the open graph
+  (`GraphAccess` in `apple/Equation/Sources/Chat.swift`).
 - **Syntax lookup:** `read_syntax` is a keyword search (`lib/syntax-search.ts`) over
   `web/public/llms.txt`, a 113 KB, about 28K-token single file. It's capped at 4
   entries / 2,500 characters for the 8K model.
@@ -91,7 +91,7 @@ Build an eval suite and runner, e.g. in `apple/evals/`:
 Replace the single keyword search with:
 - **`check(rows)`:** analyze proposed rows without changing the graph. Return each
   row's kind, meaning, value, error and warning. Built on the same analyzer;
-  expose it on the renderer bridge (`web/native-app.ts`) for the app.
+  the app answers it from the Swift port of the analyzer (`GraphAccess.check`).
 - **`search_functions(query)` and `function_doc(name)`:** from the function
   signatures in `lib/syntax-help.ts` (about 90; extend them to cover the language's
   builtins, `FUNCTIONS` in `lib/expr.ts`).

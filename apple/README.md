@@ -40,6 +40,27 @@ Debug builds open straight onto a graph, skipping the document browser, with
 SIMCTL_CHILD_EQUATION_SCRATCH='y = sin(a x); a = 2' xcrun simctl launch booted io.equation.app
 ```
 
+## The graph view
+
+`GraphPanels.swift` makes a document the panels the view shows (one, and one
+more for each `---` row); `MetalCanvas.swift` draws them in one frame
+(`EquationRender`'s `FrameRenderer`: 3D panels in a multisampled pass of
+their own, copied in among the 2D ones) and moves their windows and cameras;
+`GraphGestures.swift` hands it the platform's events. A window, a camera or
+a point moved by hand rewrites its row, as on the site.
+
+The language's port doesn't build 3D scenes yet, so a 3D panel's scene is a
+fixture in debug builds: with `EQUATION_SCENE3D` set (a `Graph3D`'s JSON, the
+path of one, or `demo`), the panel with a `camera(…)` row is 3D, or the first.
+`EQUATION_SCRIPT` plays gestures and takes pictures without a hand or a
+screen (the steps are listed in `GraphGestures.swift`):
+
+```sh
+open -n Equation.app --env EQUATION_SCENE3D=demo \
+  --env EQUATION_SCRATCH='camera(-1, 0.5, 12); --- right 40%; y = sin(x)' \
+  --env EQUATION_SCRIPT='drag 300 400 400 440; wait 1; shot orbit; rows after'
+```
+
 ## The renderer
 
 `EquationRender` keeps the site's shaders as the site writes them. They are

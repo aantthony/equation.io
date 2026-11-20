@@ -5,7 +5,8 @@ import FoundationModels
 // (Chat.swift) and the eval runner (apple/evals/Runner.swift) both compile
 // this file, so the evals measure exactly what the app asks.
 
-/// What the renderer reports about each row (web/native-app.ts `NativeRowStatus`).
+/// What the editor shows of each row, as the analysis has it (`GraphAnalysis`,
+/// in GraphView.swift; in the evals, the service's word for the same).
 struct RowStatus: Decodable, Equatable {
   /// 0–1 RGB, or nil when the row draws nothing in a color of its own.
   var color: [Double]?
@@ -135,10 +136,10 @@ enum ChatModel {
 
 // MARK: - The graph, as the chat's tools see it
 
-/// What the chat's tools do to a graph: in the app, the renderer
-/// (GraphAccess, in Chat.swift); in the evals (apple/evals), a service
-/// running the same analyzer. Each answers as the renderer's bridge
-/// does, with JSON text.
+/// What the chat's tools do to a graph: in the app, the open document and
+/// its Metal view (GraphAccess, in Chat.swift); in the evals (apple/evals),
+/// a service running the site's analyzer. Each answers with JSON text, as
+/// the site's voice tools do (web/voice.ts).
 @MainActor protocol GraphTools: AnyObject, Sendable {
   /// The voice prototype's get_graph: every row's status and meaning, and the window or camera.
   func graph() async -> String
