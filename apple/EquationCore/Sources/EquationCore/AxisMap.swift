@@ -13,10 +13,6 @@
 /// peeling the map one step at a time (exp ↔ ln, 10^ ↔ log, affine, powers),
 /// which covers the log, log-log, sqrt and symlog (sinh) axes; a map it cannot
 /// peel is an error rather than a guess.
-///
-/// Not ported: Σ and Π in a map (lib/defs.ts `expandMapSums` writes them out;
-/// sums are not ported, so such a map is not supported), and a tensor field's
-/// Jacobian (`tensorJacobian`: tensor fields are not ported).
 public struct AxisMap: Equatable, Sendable {
   public enum Axis: String, Sendable {
     case x, y
@@ -47,15 +43,16 @@ public struct AxisMap: Equatable, Sendable {
 }
 
 /// A panel's maps: x and y each on their own, or both at once through a
-/// plane map (lib/plane-map.ts), which a view row never mixes with them. The
-/// plane map is not ported: a view with one is not supported.
+/// plane map (PlaneMap.swift), which a view row never mixes with them.
 public struct AxisMaps: Equatable, Sendable {
   public var x: AxisMap?
   public var y: AxisMap?
+  public var plane: PlaneMap?
 
-  public init(x: AxisMap? = nil, y: AxisMap? = nil) {
+  public init(x: AxisMap? = nil, y: AxisMap? = nil, plane: PlaneMap? = nil) {
     self.x = x
     self.y = y
+    self.plane = plane
   }
 
   public subscript(axis: AxisMap.Axis) -> AxisMap? { axis == .x ? x : y }
@@ -112,16 +109,6 @@ private func solveFor(_ f: Expr, _ s: String, _ target: Expr) -> Expr? {
   }
 }
 
-/// Whether a map's expression writes a Σ or Π anywhere, which
-/// `expandMapSums` would write out term by term.
-private func hasSum(_ e: Expr) -> Bool {
-  switch e {
-  case .call(let name, _) where name == "sum" || name == "prod" || name == "int": return true
-  case .var(let name) where name == "sum" || name == "prod" || name == "int": return true
-  default: return childrenOf(e).contains(where: hasSum)
-  }
-}
-
 /// Parse the right side of `x = 10^X` in a view row (`parseAxisMap`). `env`
 /// has the sliders' values: one the map names is read at its value, so the
 /// map is plain numbers from here on. `documentNames` are the names the
@@ -130,16 +117,18 @@ public func parseAxisMap(
   _ axis: AxisMap.Axis, _ src: String, env: [String: Double] = [:], documentNames: Set<String> = [],
   valueNames: Set<String> = []
 ) throws -> AxisMap {
+  var doc = MapDoc()
+  (doc.documentNames, doc.valueNames) = (documentNames, valueNames)
+  return try parseAxisMap(axis, src, env: env, doc: doc)
+}
+
+func parseAxisMap(_ axis: AxisMap.Axis, _ src: String, env: [String: Double], doc: MapDoc) throws -> AxisMap {
   let screen = axis.screen
   let text = jsTrimmed(src)
   let usage =
     "An axis map writes \(axis.rawValue) in terms of the screen's \(screen), like \(axis.rawValue) = 10^\(screen)."
-  guard var forward = try? parseExpr(src, valueNames: valueNames) else { throw LanguageError(usage) }
-  if hasSum(forward) { throw Unsupported("sums in a view's map") }
-  // A bare function name (`cos X`) would otherwise read as a name with no value (`expandMapSums`).
-  for v in freeVars(forward).list where builtinFn(v) == v && env[v] == nil && !documentNames.contains(v) {
-    throw LanguageError("\(v) is a function — write it with parentheses, e.g. \(v)(\(screen)).")
-  }
+  guard var forward = try? parseExpr(src, valueNames: doc.valueNames) else { throw LanguageError(usage) }
+  forward = try expandMapSums(forward, [screen], env, doc)
   let free = freeVars(forward).list.filter { $0 != "pi" && $0 != "e" }
   guard free.contains(screen) else { throw LanguageError(usage) }
   // A slider (`x = b^X`) is read at its value, so the map is plain numbers
@@ -293,6 +282,7 @@ let unmappedMessage =
 /// else has x and y replaced by the map (`mapRowExpr`). With `flow`, the row
 /// is a velocity in x and y.
 func mapRowExpr(_ e: Expr, _ maps: AxisMaps, flow: Bool = false) throws -> Expr {
+  if let plane = maps.plane { return try mapPlaneExpr(e, plane, flow: flow) }
   var env: [String: Expr] = [:]
   for map in [maps.x, maps.y] {
     if let map { env[map.axis.rawValue] = forwardIn(map) }
@@ -331,54 +321,91 @@ func mapRowExpr(_ e: Expr, _ maps: AxisMaps, flow: Bool = false) throws -> Expr 
   return substVars(e, env)
 }
 
+/// Why a plane-mapped panel draws no histogram.
+private let planeBarsMessage =
+  "This panel's view(…) maps (x, y) together, which bends the line y = 0 that histogram bars stand on: "
+  + "draw it in a panel without one."
+
+/// Why a mapped panel refuses an object axisMapping has no way to draw (`unmappedReason`).
+func unmappedReason(_ object: MathObject, _ maps: AxisMaps) -> String {
+  if maps.plane != nil, case .histogram = object { return planeBarsMessage }
+  return unmappedMessage
+}
+
+/// The maps' Jacobian ∂(x, y)/∂(X, Y), row-major, with the screen
+/// coordinates called x and y, as a mapped tensor field carries it:
+/// diag(gₓ'(x), gᵧ'(y)) for axes mapped one by one (`tensorJacobian`).
+func tensorJacobian(_ maps: AxisMaps) -> [Expr] {
+  if let plane = maps.plane { return planeIn(plane).jacobian }
+  return [maps.x.map(slopeIn) ?? .num(1), .num(0), .num(0), maps.y.map(slopeIn) ?? .num(1)]
+}
+
 /// A classified row as its mapped panel draws it (lib/analysis.ts, where a
 /// row is classified): what places points is left as it is, to be carried
 /// when drawn; what is drawn per pixel is classified again from the row
-/// rewritten in screen coordinates. `lowered` is the row as `plain` was
+/// rewritten in screen coordinates. `low` is the row as `plain` was
 /// classified from it.
 func classifyMapped(
-  _ plain: Classified, _ lowered: Expr, _ maps: AxisMaps, defined: Set<String>, fields: [String: Expr]
+  _ plain: Classified, _ low: Low, _ maps: AxisMaps, defined: Set<String>, fields: [String: Expr]
 ) throws -> Classified {
-  guard let how = plain.needs3D ? AxisMapping.refused : axisMapping(plain.object) else {
-    throw Unsupported("this kind of row on mapped axes")
-  }
-  switch how {
-  case .refused: throw LanguageError(unmappedMessage)
-  case .place, .none: return plain
+  var out = plain
+  switch plain.needs3D ? AxisMapping.refused : axisMapping(plain.object, maps) {
+  case .refused: throw LanguageError(unmappedReason(plain.object, maps))
+  case .place, .none: break
   case .substitute:
     var flow = false
     if case .vectorField = plain.object { flow = true }
-    let mapped = try mapRowExpr(try inlineFields(lowered, fields), maps, flow: flow)
-    return try classify(mapped, defined: defined, fields: fields)
+    // A coordinate flow is lowered to (x', y') first, so the map carries its
+    // velocities like any other flow.
+    var mapped = low
+    mapped.e = try mapRowExpr(try inlineFields(try lowerCoordinateFlow(low.e, fields), fields), maps, flow: flow)
+    out = try classifyRow(mapped, defined: defined, fields: fields)
   }
+  // A matrix is read at the screen point, and carried onto the screen by
+  // the maps' Jacobian as it is drawn.
+  if case .tensorField = out.object { out.jacobian = tensorJacobian(maps) }
+  return out
 }
 
 /// How a mapped panel draws an object (`AxisMapping`):
 ///
 /// - `substitute`: drawn per pixel from x and y (graphs, implicit curves,
-///   regions, fields), so the row is rewritten by `mapRowExpr` and the shader
-///   sees screen coordinates;
-/// - `place`: it puts things at positions (points, parametric curves,
-///   figures, labels, trails), so it
-///   is computed in x and y as anywhere else and each position it produces
-///   is carried to the screen by the inverse (EquationRender `mapOverlay`);
-/// - `none`: nothing drawn, or drawn by its own rule (a value, a note);
-/// - `refused`: the site says it cannot draw the object there.
+///   regions, fields), or solved for (real systems), so the row is rewritten
+///   by `mapRowExpr` and the shader or solver sees screen coordinates; a
+///   tensor field is read there too, and carried by the maps' slopes
+///   (`tensorJacobian`);
+/// - `place`: it puts things at positions (points, parametric curves and
+///   regions, figures, point lists, labels, histogram bars, a complex
+///   system's roots), so it is computed in x and y as anywhere else and each
+///   position it produces is carried to the screen by the inverse
+///   (EquationRender `mapOverlay`);
+/// - `none`: nothing drawn, or drawn by its own rule (a value, whose integral
+///   is shaded on the screen by IntShade.swift `shadeRuns`; a note);
+/// - `refused`: what is left (families, sequences, complex fields, 3D), which
+///   the site refuses rather than draw in the wrong place (its `null`).
 public enum AxisMapping: Sendable {
   case substitute, place, none, refused
 }
 
-/// `axisMapping`, for the kinds the port classifies. A kind that joins
-/// `MathObject` without a case here is not supported on a mapped panel
-/// (nil), rather than drawn in the wrong place.
-public func axisMapping(_ object: MathObject) -> AxisMapping? {
+/// `axisMapping`: how a panel with `maps` draws `object`.
+public func axisMapping(_ object: MathObject, _ maps: AxisMaps? = nil) -> AxisMapping {
+  // Bars stand on y = 0, which a plane map bends into a curve.
+  if maps?.plane != nil, case .histogram = object { return .refused }
   switch object {
-  case .value, .note, .tuple: return AxisMapping.none
-  case .curveGraph, .curveImplicit, .region, .scalarField: return .substitute
-  case .curveParametric, .point, .trail, .label: return .place
+  case .value, .note, .tuple, .tuples, .blades, .flat: return AxisMapping.none
+  case .colorField, .curveGraph, .curveImplicit, .region, .scalarField, .tensorField: return .substitute
+  case .curveParametric, .complexPath, .regionParametric, .histogram: return .place
+  case .point, .complexPoint, .trail, .label: return .place
+  // Its residuals rewritten like a curve's, the solver searches the window
+  // in screen coordinates, evenly, and its solutions are there. A complex
+  // system solves in w, which no rewrite of x and y reaches, so it solves
+  // in x and y and its roots are placed.
+  case .system: return .substitute
+  case .complexSystem: return .place
   case .figure(_, let dimension, _, _): return dimension == 2 ? .place : .refused
   // Rewritten with the map's slope (`mapRowExpr`): a 2D flow only.
   case .vectorField(let components): return components.count == 2 ? .substitute : .refused
-  default: return nil
+  case .list(.points(2, _)), .list(.scatter(2, _)): return .place
+  default: return .refused
   }
 }

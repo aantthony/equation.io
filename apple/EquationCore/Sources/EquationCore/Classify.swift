@@ -193,6 +193,10 @@ public struct Classified: Equatable, Sendable {
   /// The members are the faces of one solid over three parameters, drawn
   /// opaque so only its outside shows: its map (ClassifyIntervals.swift).
   public var solid: SolidMap? = nil
+  /// On mapped axes, the maps' Jacobian ∂(x, y)/∂(X, Y), row-major, which
+  /// carries a matrix field onto the screen (AxisMap.swift `tensorJacobian`;
+  /// the site keeps it on the tensor field).
+  public var jacobian: [Expr]? = nil
 }
 
 /// The message for a row that tries to define t, which is animation time.

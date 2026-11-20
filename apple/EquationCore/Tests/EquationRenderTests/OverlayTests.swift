@@ -304,20 +304,13 @@ private struct Reference: Decodable {
     #expect(later.bars == reference.unmapped.bars)
   }
 
-  /// A plane map's inverse is a parameter (lib/plane-map.ts is not ported): mapOverlay hands it every list.
-  @Test func aPlaneInverseCarriesEveryList() {
-    struct Shift: PlaneInverse {
-      func all(_ x: Double, _ y: Double) -> [ScreenPoint] { [(x + 10, y), (x + 20, y)] }
-      func first(_ x: Double, _ y: Double) -> ScreenPoint { (x + 10, y) }
-      func triangles(_ tris: [Double]) -> [Double] { tris.map { $0 + 1 } }
-      func lines(count: Int, vertex: (Int) -> ScreenPoint, closed: Bool, segment: Segment) -> [[Double]] {
-        [(0..<count).flatMap { [vertex($0).0 + 10, vertex($0).1] }, [0, 0, .nan, .nan]]
-      }
-      func shapes(count: Int, vertex: (Int) -> ScreenPoint, segment: Segment) -> [PlaneShape] {
-        [PlaneShape(pts: [0, 0, 1, 0, 1, 1], closed: true, stroke: false), PlaneShape(pts: [0, 0, 1, 1], closed: false)]
-      }
-    }
+  /// A plane map carries every list through its way back (lib/plane-map.ts): here a shift, and a turn.
+  @Test func aPlaneMapCarriesEveryList() throws {
     let blue: CSSColor = "rgb(45, 112, 179)"
+    func near(_ a: [Double], _ b: [Double]) -> Bool {
+      a.count == b.count && zip(a, b).allSatisfy { abs($0 - $1) < 1e-6 }
+    }
+    let shift = AxisMaps(plane: try parsePlaneMap("(X - 10, Y)"))
     var overlay = Overlay2D(
       points: [.init(x: 1, y: 2, color: blue)],
       clouds: [.init(xs: [1, 2], ys: [3, 4], color: blue)],
@@ -327,16 +320,30 @@ private struct Reference: Decodable {
       ],
       regions: [.init(tris: [0, 0, 1, 0, 0, 1], fill: blue)],
       texts: [.init(x: 1, y: 2, text: "a", color: blue)])
-    mapOverlay(&overlay, mark: markOverlay(Overlay2D()), maps: AxisMaps(), plane: Shift())
-    #expect(overlay.points.map(\.x) == [11, 21])
-    #expect(overlay.clouds?[0].xs == [11, 12])
-    #expect(overlay.regions?[0].tris == [1, 1, 2, 1, 1, 2])
-    #expect(overlay.texts?[0].x == 11)
-    // The line, on each copy the window shows; a piece that was cut no longer closes. Then the shape's pieces.
-    #expect(overlay.polylines.count == 4)
-    #expect(overlay.polylines[0].pts == [10, 0, 11, 1, 12, 0] && overlay.polylines[0].closed == true)
-    #expect(overlay.polylines[1].noStroke == true && overlay.polylines[1].fill == blue)
-    #expect(overlay.polylines[2].closed == false && overlay.polylines[2].fill == nil)
-    #expect(overlay.polylines[3].closed == false && overlay.polylines[3].pts.count == 4)
+    let box = ScreenBox(lo: [0, -5], hi: [20, 5])
+    mapOverlay(&overlay, mark: markOverlay(Overlay2D()), maps: shift, box: box)
+    #expect(near(overlay.points.map(\.x), [11]))
+    #expect(near(overlay.clouds?[0].xs ?? [], [11, 12]))
+    #expect(near(overlay.regions?[0].tris ?? [], [10, 0, 11, 0, 10, 1]))
+    #expect(near([overlay.texts?[0].x ?? .nan], [11]))
+    #expect(overlay.polylines.count == 2)
+    // The line goes round to where it started; the shape is still one to fill.
+    #expect(near(overlay.polylines[0].pts, [10, 0, 11, 1, 12, 0, 10, 0]))
+    #expect(near(overlay.polylines[1].pts, [10, 0, 11, 1, 12, 0]))
+    #expect(overlay.polylines[1].closed == true && overlay.polylines[1].fill == blue)
+
+    // The polar screen two turns wide shows a point twice, and a line on both copies.
+    let polar = AxisMaps(plane: try parsePlaneMap("(Y cos(X), Y sin(X))"))
+    var twice = Overlay2D(points: [.init(x: 0, y: 2, color: blue)], polylines: [.init(pts: [1, 1, 1, 2], color: blue)])
+    let wide = ScreenBox(lo: [0, 0.5], hi: [4 * Double.pi, 4])
+    mapOverlay(&twice, mark: markOverlay(Overlay2D()), maps: polar, box: wide)
+    // (And once more just past the window's edge, where a search still looks.)
+    #expect(near(twice.points.map(\.x).sorted(), [Double.pi / 2, 5 * Double.pi / 2, 9 * Double.pi / 2]))
+    #expect(twice.points.allSatisfy { abs($0.y - 2) < 1e-6 })
+    #expect(twice.polylines.count == 3)
+    // Without a window there is no way back, and nothing is drawn in the wrong place.
+    var lost = Overlay2D(points: [.init(x: 0, y: 2, color: blue)])
+    mapOverlay(&lost, mark: markOverlay(Overlay2D()), maps: polar)
+    #expect(lost.points.isEmpty)
   }
 }

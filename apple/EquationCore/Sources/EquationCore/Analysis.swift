@@ -448,9 +448,13 @@ public func analyze(_ sources: [String]) -> DocumentAnalysis {
   sequences.defineConstant = { built.consts[$0] = $1 }
   sequences.setValue = { boundVals[$0] = $1 }
 
-  // Each panel's rows are read with its view's maps and its surface, which
-  // are not ported where they map (x, y) together: such a panel is left alone.
+  // Each panel's rows are read with its view's maps and its surface; a panel
+  // whose view the port cannot read is left alone.
   var panelBlocked: Set<Int> = []
+  // A map's Σ bounds are told the document's functions and lists, to refuse them.
+  var viewDoc = MapDoc()
+  (viewDoc.boundConsts, viewDoc.isList, viewDoc.getList, viewDoc.fnNames) =
+    (ropts.boundConsts, ropts.isList, ropts.getList, fnNames)
   // Each panel's axis maps, from its view(…) row wherever in the panel it sits (AxisMap.swift).
   var panelMaps: [Int: AxisMaps] = [:]
   // And the surface a panel's rows are drawn on (SurfaceMap.swift).
@@ -462,7 +466,8 @@ public func analyze(_ sources: [String]) -> DocumentAnalysis {
         at += 1
       } else if let head = viewHead(text), head == "view" || head == "on", !fnNames.contains(head) {
         do {
-          let spec = try parseViewRow(text, boundVals, documentNames: documentNames, valueNames: valueNames)
+          let spec = try parseViewRow(
+            text, boundVals, documentNames: documentNames, valueNames: valueNames, mapDoc: viewDoc)
           if case .mappedView(_, _, _, _, let maps)? = spec, panelMaps[at] == nil { panelMaps[at] = maps }
           if case .surface(let surface)? = spec, panelSurfaces[at] == nil { panelSurfaces[at] = surface }
         } catch is Unsupported {
@@ -524,7 +529,8 @@ public func analyze(_ sources: [String]) -> DocumentAnalysis {
         if viewsUnknown && !isDividerRow(text) { throw Unsupported("a view row after one that is not supported") }
         var latticeAxes: [String]?
         if let view = try parseViewRow(
-          text, boundVals, documentNames: documentNames, valueNames: valueNames, latticeAxes: &latticeAxes)
+          text, boundVals, documentNames: documentNames, valueNames: valueNames, mapDoc: viewDoc,
+          latticeAxes: &latticeAxes)
         {
           // Each panel frames itself: a divider starts a fresh set.
           if case .split = view {
@@ -562,7 +568,7 @@ public func analyze(_ sources: [String]) -> DocumentAnalysis {
         }
       }
       if panelBlocked.contains(panel) {
-        throw Unsupported("a panel with (x, y) mapped together or a surface")
+        throw Unsupported("a panel whose view or surface is not supported")
       }
       // `P(…)` shades an area under a declared density — unless the user
       // has defined P themselves. With no random variable there is none.
@@ -672,14 +678,16 @@ public func analyze(_ sources: [String]) -> DocumentAnalysis {
       let lowered = low.e
       var cls = try classifyRow(low, defined: constNames, fields: fieldEnv)
       // A value row that is one definite integral also carries the area it shades.
-      if case .value(let expr, _) = cls.object, let integral,
+      // (An integral's area stands on y = 0, which a plane map bends into a
+      // curve: there it is a readout only.)
+      if case .value(let expr, _) = cls.object, let integral, panelMaps[panel]?.plane == nil,
         let shade = lowerShade(integral, lower: { try lowerObjects($0, built, rowOpts).e }, known: constNames)
       {
         cls.object = .value(expr: expr, shade: shade)
       }
       // A mapped panel draws per-pixel rows in its screen coordinates (AxisMap.swift).
       if let maps = panelMaps[panel] {
-        cls = try classifyMapped(cls, lowered, maps, defined: constNames, fields: fieldEnv)
+        cls = try classifyMapped(cls, low, maps, defined: constNames, fields: fieldEnv)
       }
       // A panel on a surface paints or carries its 2D rows onto it; a row
       // in space draws as it would in any 3D panel.

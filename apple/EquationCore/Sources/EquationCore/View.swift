@@ -7,8 +7,6 @@
 /// grammar; the pieces between top-level commas are ordinary scalar
 /// expressions, so `pi` and defined constants work.
 ///
-/// Not ported: a view that maps both axes at once (`(x, y) = …`), a
-/// lattice view's index axes, and `on(…)` surfaces.
 public enum ViewSpec: Equatable, Sendable {
   /// [lo, hi] of each axis given (at least one is); `ratio` is pixels per y
   /// unit over pixels per x unit; `locked` pins the window.
@@ -20,7 +18,9 @@ public enum ViewSpec: Equatable, Sendable {
   case view(x: [Double]?, y: [Double]?, ratio: Double?, locked: Bool)
   /// A view that maps an axis, `view(x = 1..1000, x = 10^X)`: x is 10^X, X
   /// the panel's linear screen coordinate (AxisMap.swift). Here x and y hold
-  /// the window in screen units — the row writes it in x units.
+  /// the window in screen units — the row writes it in x units. Or both at
+  /// once, `view((x, y) = (Y cos(X), Y sin(X)), X = -pi..pi, Y = 0..4)`
+  /// (`maps.plane`, PlaneMap.swift): the window is the screen's, X and Y.
   case mappedView(x: [Double]?, y: [Double]?, ratio: Double?, locked: Bool, maps: AxisMaps)
   /// Orbit angles in radians; `spin` in radians per second.
   case camera(theta: Double, phi: Double, radius: Double?, target: [Double]?, spin: Double?, locked: Bool)
@@ -290,26 +290,72 @@ private func mentionsWord(_ text: String, _ word: String) -> Bool {
   return false
 }
 
+/// `^\(\s*x\s*,\s*y\s*\)\s*=\s*([\s\S]+)$`: the right side of a plane map.
+private func planeArg(_ arg: String) -> String? {
+  var s = RowScanner(arg)
+  guard s.eat("(") else { return nil }
+  for (name, close) in [("x", ","), ("y", ")")] as [(Unicode.Scalar, Unicode.Scalar)] {
+    s.space()
+    guard s.eat(name) else { return nil }
+    s.space()
+    guard s.eat(close) else { return nil }
+  }
+  s.space()
+  guard s.eat("=") else { return nil }
+  s.space()
+  return s.atEnd ? nil : String(s.u[s.i...])
+}
+
+/// A view row with a plane map: its window is the screen's, X and Y (`planeView`).
+private func planeView(
+  x: [Double]?, y: [Double]?, ratio: Double?, locked: Bool, maps: AxisMaps,
+  _ ranges: [(axis: String, range: [Double])]
+) throws -> ViewSpec {
+  if maps.x != nil || maps.y != nil {
+    throw LanguageError(
+      "A view maps (x, y) together or x and y one at a time, not both: drop the x = … or y = … map.")
+  }
+  if x != nil || y != nil {
+    throw LanguageError(
+      "With (x, y) mapped, the window is the screen’s, which x and y need not frame: give X = lo..hi, Y = lo..hi.")
+  }
+  var (x, y) = (x, y)
+  for (axis, range) in ranges {
+    if axis != "X" && axis != "Y" {
+      throw LanguageError("A view mapping (x, y) is framed by X and Y, not \(axis).")
+    }
+    if axis == "X" { x = range } else { y = range }
+  }
+  // A map alone frames the screen around its origin.
+  if x == nil && y == nil { (x, y) = ([-5, 5], [-5, 5]) }
+  return .mappedView(x: x, y: y, ratio: ratio, locked: locked, maps: AxisMaps(plane: maps.plane))
+}
+
 /// Parse a viewport row. Returns nil when the text is not one (so ordinary
 /// rows fall through to the expression parser); throws a row-friendly error
 /// when it is one but malformed. `env` supplies constant values at t = 0.
 func parseViewRow(
-  _ text: String, _ env: [String: Double], documentNames: Set<String> = [], valueNames: Set<String> = []
+  _ text: String, _ env: [String: Double], documentNames: Set<String> = [], valueNames: Set<String> = [],
+  mapDoc: MapDoc = MapDoc()
 ) throws -> ViewSpec? {
   var axes: [String]?
   return try parseViewRow(
-    text, env, documentNames: documentNames, valueNames: valueNames, latticeAxes: &axes)
+    text, env, documentNames: documentNames, valueNames: valueNames, mapDoc: mapDoc, latticeAxes: &axes)
 }
 
 /// `latticeAxes` comes back as the index axes a lattice view names, [across,
 /// down] as written (the second empty when it names only one): the site's
 /// `View2DSpec.axes`.
 /// `documentNames` are the names the document defines, which a map's bare
-/// function name may be one of.
+/// function name may be one of; `mapDoc` what a map's Σ bounds need of the
+/// document besides (MapSums.swift).
 func parseViewRow(
   _ text: String, _ env: [String: Double], documentNames: Set<String> = [], valueNames: Set<String> = [],
-  latticeAxes: inout [String]?
+  mapDoc: MapDoc = MapDoc(), latticeAxes: inout [String]?
 ) throws -> ViewSpec? {
+  // The row's maps write out their sums under one limit, as a row's tuple does.
+  var doc = mapDoc
+  (doc.documentNames, doc.valueNames, doc.budget) = (documentNames, valueNames, ResolveCtx())
   if let split = try parseDividerRow(text) { return split }
   if let body = wholeCallBody(text, "grid") {
     let args = body.split(separator: ",", omittingEmptySubsequences: false).map { jsTrimmed(String($0)) }
@@ -330,7 +376,7 @@ func parseViewRow(
   } else if let body = wholeCallBody(text, "camera") {
     (head, inner) = ("camera", body)
   } else if let body = wholeCallBody(text, "on") {
-    return try parseSurfaceRow(body, env, documentNames: documentNames, valueNames: valueNames)
+    return try parseSurfaceRow(body, env, doc)
   } else {
     return nil
   }
@@ -349,22 +395,10 @@ func parseViewRow(
     var maps = AxisMaps()
     for arg in args {
       // `(x, y) = (Y cos X, Y sin X)`: both coordinates from the screen at once.
-      var plane = RowScanner(arg)
-      if plane.eat("(") {
-        plane.space()
-        if plane.eat("x") {
-          plane.space()
-          if plane.eat(",") {
-            plane.space()
-            if plane.eat("y") {
-              plane.space()
-              if plane.eat(")") {
-                plane.space()
-                if plane.eat("=") { throw Unsupported("a view that maps (x, y) together") }
-              }
-            }
-          }
-        }
+      if let plane = planeArg(arg) {
+        if maps.plane != nil { throw LanguageError("view(...) maps (x, y) twice.") }
+        maps.plane = try parsePlaneMap(plane, env: env, doc: doc)
+        continue
       }
       guard let named = namedArg(arg) else { throw LanguageError(usage) }
       let axis = named.name
@@ -379,8 +413,7 @@ func parseViewRow(
       // `x = 10^X`: no range, and the screen's X, so a map from the screen to x.
       if range == nil, let mapped = AxisMap.Axis(rawValue: axis), mentionsWord(named.value, mapped.screen) {
         if maps[mapped] != nil { throw LanguageError("view(...) maps \(axis) twice.") }
-        let map = try parseAxisMap(
-          mapped, named.value, env: env, documentNames: documentNames, valueNames: valueNames)
+        let map = try parseAxisMap(mapped, named.value, env: env, doc: doc)
         if mapped == .x { maps.x = map } else { maps.y = map }
         continue
       }
@@ -395,6 +428,9 @@ func parseViewRow(
       }
       // Any other letter names an index axis: the view is a lattice.
       if axis == "x" { x = [lo, hi] } else if axis == "y" { y = [lo, hi] } else { lattice.append((axis, [lo, hi])) }
+    }
+    if maps.plane != nil {
+      return try planeView(x: x, y: y, ratio: ratio, locked: locked, maps: maps, lattice)
     }
     if !lattice.isEmpty {
       if x != nil || y != nil || lattice.count > 2 {
@@ -473,11 +509,8 @@ func parseViewRow(
 
 /// `on((X, Y, Z) = (…), x = lo..hi, y = lo..hi)`: the surface the panel's 2D
 /// rows are drawn on (lib/view.ts `parseSurfaceRow`).
-private func parseSurfaceRow(
-  _ inner: String, _ env: [String: Double], documentNames: Set<String>, valueNames: Set<String>
-) throws
-  -> ViewSpec
-{
+private func parseSurfaceRow(_ inner: String, _ env: [String: Double], _ doc: MapDoc) throws -> ViewSpec {
+  let valueNames = doc.valueNames
   let args = splitArgs(inner)
   // The camera frames the panel: lock it there.
   if args.contains(where: { $0.lowercased() == "locked" }) {
@@ -519,6 +552,5 @@ private func parseSurfaceRow(
     ranges[axis] = [lo, hi]
   }
   guard let src, let x = ranges["x"], let y = ranges["y"] else { throw LanguageError(usage) }
-  return .surface(
-    try parseSurfaceMap(src, x: x, y: y, env: env, documentNames: documentNames, valueNames: valueNames))
+  return .surface(try parseSurfaceMap(src, x: x, y: y, env: env, doc: doc))
 }

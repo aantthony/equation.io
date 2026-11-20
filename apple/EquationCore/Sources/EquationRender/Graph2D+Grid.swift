@@ -61,13 +61,23 @@ extension Graph2D {
   /// a window `view` of a frame `width` × `height` pixels, or nil for the
   /// Cartesian grid. Coordinate fields are written in x and y, not a mapped
   /// panel's screen coordinates: a panel with its axes mapped grids at their
-  /// ticks instead.
+  /// ticks instead, and one with a plane map draws them through it, x and y
+  /// too.
   public func gridSpecs(at time: Double, view: View2D, width: Double, height: Double) -> [GridSpec]? {
-    guard grid == .on, maps == nil else { return nil }
-    let families = gridFamilies
-    if families.isEmpty { return nil }
+    guard grid == .on, maps == nil || maps?.plane != nil else { return nil }
     var env = environment(at: time)
     env["t"] = time
+    if let plane = maps?.plane {
+      let fields = planeGridFields(plane)
+      if fields.isEmpty { return nil }
+      return fields.map { f in
+        let sp = levelSpacing(f.cpu, view: view, width: width, height: height, env: env)
+        return GridSpec(
+          glsl: f.gpu.glsl, gradGlsl: f.gpu.gradGlsl, params: f.gpu.params, major: sp.major, minor: sp.minor)
+      }
+    }
+    let families = gridFamilies
+    if families.isEmpty { return nil }
     return families.map { family in
       switch family {
       case .x:

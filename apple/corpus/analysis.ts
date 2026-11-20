@@ -52,6 +52,8 @@ import { INTERVAL_CASES } from './cases-intervals.ts';
 import { PANEL_CASES, recordGridFields, recordStates } from './cases-panels.ts';
 import { SURFACE_CASES } from './cases-surfaces.ts';
 import { LEFTOVER_CASES, recordData } from './cases-leftovers.ts';
+import * as planeMap from '../../lib/plane-map.ts';
+import { PLANE_CASES, recordPlanes } from './cases-planes.ts';
 
 const fixtures = new URL('../EquationCore/Tests/EquationCoreTests/Fixtures/', import.meta.url);
 
@@ -1091,6 +1093,7 @@ SURFACE_CASES.forEach((text, k) => docs.push({ name: `case surfaces ${k + 1}`, r
 DEFINE_CASES.forEach((text, k) => docs.push({ name: `case define ${k + 1}`, rows: splitStatements(text) }));
 LEFTOVER_CASES.forEach((text, k) => docs.push({ name: `case leftover ${k + 1}`, rows: splitStatements(text) }));
 INTERVAL_CASES.forEach((text, k) => docs.push({ name: `case intervals ${k + 1}`, rows: splitStatements(text) }));
+PLANE_CASES.forEach((text, k) => docs.push({ name: `case planes ${k + 1}`, rows: splitStatements(text) }));
 randomDocs(Number(process.env.RANDOM_DOCS ?? 600)).forEach((text, k) =>
   docs.push({ name: `case random ${k + 1}`, rows: splitStatements(text) }),
 );
@@ -1170,6 +1173,7 @@ writeFileSync(
   new URL('data.json', fixtures),
   JSON.stringify(recordData(bytes => createHash('sha256').update(bytes).digest('hex'))) + '\n',
 );
+writeFileSync(new URL('planes.json', fixtures), JSON.stringify(recordPlanes(planeMap), replacer) + '\n');
 const rowCount = recorded.reduce((n, d) => n + d.rows.length, 0);
 console.log(`${recorded.length} documents (${EXAMPLES.flatMap(c => c[1]).length} examples), ${rowCount} rows`);
 

@@ -81,6 +81,8 @@ public func formatViewRow(
 /// digits (on a log axis 0.00001 is a real bound, not float dust beside
 /// 100000), with the map after the ranges. A lattice's axes are written by
 /// name, the one down negated, in the order the row had them (`written`).
+/// With (x, y) mapped together the window is the screen's, written as it is
+/// held: `view((x, y) = …, X = lo..hi, Y = lo..hi)`.
 public func formatViewRow(
   _ view: View2D, width: Double, height: Double, sharedX: Bool = false, sharedY: Bool = false, locked: Bool = false,
   maps: AxisMaps?, lattice axes: [String]? = nil, written: [String]? = nil
@@ -88,6 +90,14 @@ public func formatViewRow(
   guard width > 0, height > 0, !(sharedX && sharedY) else { return nil }
   let hw = width / 2 * view.upp
   let hh = height / 2 * view.uppY
+  if let plane = maps?.plane {
+    var parts = ["(x, y) = \(plane.text)"]
+    if !sharedX { parts.append("X = \(formatRange(view.cx - hw, view.cx + hw))") }
+    if !sharedY { parts.append("Y = \(formatRange(view.cy - hh, view.cy + hh))") }
+    if !sharedX, !sharedY, let ratio = view.ratio, ratio != 1 { parts.append("ratio = \(formatRowNumber(ratio))") }
+    if locked { parts.append("locked") }
+    return "view(\(parts.joined(separator: ", ")))"
+  }
   let lattice = axes.flatMap { $0.count == 2 ? $0 : nil }
   let (across, down) = (lattice?[0] ?? "x", lattice?[1] ?? "y")
   func range(_ map: AxisMap?, _ lo: Double, _ hi: Double) -> String {
