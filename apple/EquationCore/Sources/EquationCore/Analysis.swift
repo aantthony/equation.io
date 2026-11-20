@@ -621,8 +621,10 @@ public func analyze(_ sources: [String]) -> DocumentAnalysis {
         if case .vec(let items)? = try? lowerGeom(arg, comps: comps) { return items.count == 2 }
         return false
       }
-      var resolved = try Resolver(getFn: getFn, opts: rowOpts).resolve(
+      // (With the ∫ the row consists of, if it is exactly one: Integrals.swift.)
+      let (resolvedRow, integral) = try Resolver(getFn: getFn, opts: rowOpts).resolveRow(
         painted.map { .call(PAINT_CALL, [$0, rawParsed]) } ?? rawParsed)
+      var resolved = resolvedRow
       memberNotes[i] = perMemberNote(resolved, ropts.isList)
       if exact {
         // Over numbers a case is the tolerance form the evaluator runs; one
@@ -647,6 +649,12 @@ public func analyze(_ sources: [String]) -> DocumentAnalysis {
       let low = try lowerObjects(resolved, built, rowOpts)
       let lowered = low.e
       var cls = try classifyRow(low, defined: constNames, fields: fieldEnv)
+      // A value row that is one definite integral also carries the area it shades.
+      if case .value(let expr, _) = cls.object, let integral,
+        let shade = lowerShade(integral, lower: { try lowerObjects($0, built, rowOpts).e }, known: constNames)
+      {
+        cls.object = .value(expr: expr, shade: shade)
+      }
       // A mapped panel draws per-pixel rows in its screen coordinates (AxisMap.swift).
       if let maps = panelMaps[panel] {
         cls = try classifyMapped(cls, lowered, maps, defined: constNames, fields: fieldEnv)
@@ -826,7 +834,7 @@ public func analyze(_ sources: [String]) -> DocumentAnalysis {
     // usually a curve being typed.
     var draws = true
     switch row.cpu {
-    case .note, .value: draws = false
+    case .note, .value(_, nil): draws = false
     default: break
     }
     row.takesColor =

@@ -110,7 +110,7 @@ import Testing
   }
 
   @Test func whatIsNotPortedSaysSo() {
-    let rows = ["p = open(\"a.csv\")", "(x, y) = (1, 2)", "s_{n+1} = push(s_n, n)", "int[0..1] x dx", "(u, v)"]
+    let rows = ["p = open(\"a.csv\")", "(x, y) = (1, 2)", "s_{n+1} = push(s_n, n)", "(u, v)"]
     for text in rows {
       let row = analyze([text]).rows[0]
       #expect(row.unsupported != nil, "\(text)")
@@ -356,8 +356,10 @@ import Testing
         d2: try optional("d2"), d3: try optional("d3"))
     case "vfield2d": return .vfield2d(comps: try exprs("comps"))
     case "value":
-      if o["shade"] != nil { throw FixtureError(description: "an integral's shaded area") }
-      return .value(expr: try expr("expr"))
+      let shade = try (o["shade"] as? [String: Any]).map { s in
+        IntShade(body: try decode(s["body"]!), v: s["v"] as! String, lo: try decode(s["lo"]!), hi: try decode(s["hi"]!))
+      }
+      return .value(expr: try expr("expr"), shade: shade)
     case "label":
       return .label(dim: (o["dim"] as! NSNumber).intValue, coords: try exprs("coords"), text: o["text"] as! String)
     case "polygon":

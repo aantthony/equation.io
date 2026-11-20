@@ -270,7 +270,6 @@ struct Resolver {
       if let value = try namedInterval(name) { return value }
       if let value = opts.complex(name) { return value }
       // What the port cannot write in yet, by the names that ask for it.
-      if name == "int" { throw Unsupported("integrals") }
       if name == "grad" || name == "div" || name == "curl" || name == "laplacian" {
         throw Unsupported("vector calculus")
       }

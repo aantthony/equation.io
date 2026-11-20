@@ -771,8 +771,7 @@ extension Resolver {
 
   /// `count`, `total`, `mean`, … of one argument (lib/measure.ts
   /// `reduceOverSet`): over a list it lowers later, as the call it is. Over
-  /// x, u or a filter it is an integral against a measure, which is not
-  /// ported.
+  /// x, u or a filter it is an integral against a measure (Measure.swift).
   func resolveReduction(_ name: String, _ raw: Expr) throws -> Expr {
     /// `{c1, c2: f}` (or `{c1, c2}`, f = 1): conditions each written without
     /// a value, then the value — or nil for any other piecewise.
@@ -831,11 +830,11 @@ extension Resolver {
       if case .var(let name) = e, opts.isList(name) { return true }
       return childrenOf(e).contains(where: hasList)
     }
-    let continuous = whole.contains { e in
-      freeVars(e).contains { ["x", "y", "z", "u", "v"].contains($0) && opts.params?.contains($0) != true }
-    }
-    if continuous && !whole.contains(where: hasList) {
-      throw Unsupported("\(name)(…) over a continuous set")
+    // Over x, u or a filter of them: an integral against a measure (Measure.swift).
+    let continuous = continuousNames(whole)
+    if !continuous.isEmpty && !whole.contains(where: hasList) {
+      return try reduceContinuous(
+        name, conds: conds, value: value, lone: !filtered && !conds.isEmpty && name != "count", names: continuous)
     }
     if barePiecewise(raw) != nil { arg = try resolve(raw) }
     // A tuple literal spreads into arguments, as legacyCallArgs does.

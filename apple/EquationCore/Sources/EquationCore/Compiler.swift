@@ -32,7 +32,7 @@ public enum CpuPlan: Equatable, Sendable {
   /// (the renderer takes finite differences otherwise).
   case pcurve(dim: Int, comps: [Expr], d1: [Expr]?, d2: [Expr]?, d3: [Expr]?)
   case vfield2d(comps: [Expr])
-  case value(expr: Expr)
+  case value(expr: Expr, shade: IntShade? = nil)
   case label(dim: Int, coords: [Expr], text: String)
   /// A figure: `pts` flat, or with `over` one vertex template run over the
   /// columns. `arrow`: a head at the last vertex; `hull`: the convex hull of
@@ -280,8 +280,8 @@ public func compileCpu(_ classified: Classified) throws -> CpuPlan {
   case .complexPath(let expr):
     let (re, im) = try splitWithin(expr, "path", "sample")
     return pcurve([re, im])
-  case .value(let expr):
-    return .value(expr: try real(expr))
+  case .value(let expr, let shade):
+    return .value(expr: try real(expr), shade: shade)
   case .label(let coordinates, let text):
     return .label(dim: coordinates.count, coords: try coordinates.map(real), text: text)
   case .figure(let form, let dimension, let vertices, let over):
@@ -484,7 +484,7 @@ private func comparisonReadout(
 /// One readout per source row, or nil for a plan that has none.
 public func plotReadout(_ plan: CpuPlan, _ env: [String: Double]) throws -> String? {
   switch plan {
-  case .value(let expr):
+  case .value(let expr, _):
     return valueReadout(try evaluate(expr, env))
   case .note(let expr, let variable, let constant, let identity):
     return try comparisonReadout(expr, variable: variable, constant: constant, identity: identity, env)

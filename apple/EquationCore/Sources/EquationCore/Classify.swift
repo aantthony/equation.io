@@ -24,7 +24,7 @@ public indirect enum MathObject: Equatable, Sendable {
   case point(coordinates: [Expr])
   /// A pair in u: the curve it traces as u runs from 0 to 1.
   case curveParametric(coordinates: [Expr])
-  case value(expr: Expr)
+  case value(expr: Expr, shade: IntShade? = nil)
   /// `label(point, "text")`: text anchored at a point.
   case label(coordinates: [Expr], text: String)
   /// A segment, polyline, vector, polygon, square or hull: its vertices,

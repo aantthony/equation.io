@@ -167,6 +167,23 @@ func drawnDifferences(_ plan: CpuPlan?, _ want: Any?, _ analysis: DocumentAnalys
         try rvs.curve(shade.rv, env)?.shadePolygon(
           lo: try shade.bounds.lo.map { try evaluate($0, env) }, hi: try shade.bounds.hi.map { try evaluate($0, env) })
       }, same: samePoints)
+  case .value(_, let shade?):
+    // The area a definite integral's row shades (IntShade.swift), through the same window.
+    if shadeNames(shade) != want["names"] as? [String] { out.append("drawn names: got \(shadeNames(shade))") }
+    func sameRun(_ run: ShadeRun, _ theirs: [String: Any]) -> Bool {
+      run.sign == (theirs["sign"] as! NSNumber).intValue && run.clipLo == theirs["clipLo"] as! Bool
+        && run.clipHi == theirs["clipHi"] as! Bool && samePoints(run.pts, theirs["pts"]!)
+    }
+    check("shaded runs", want["runs"], { shadeRuns(shade, env, window.lo, window.hi) }) { runs, theirs in
+      guard let theirs = theirs as? [[String: Any]], theirs.count == runs.count else { return false }
+      return zip(runs, theirs).allSatisfy(sameRun)
+    }
+    check(
+      "shaded paths", want["paths"], { shadeRuns(shade, env, window.lo, window.hi).map { runPaths($0, -1.5, 2.5) } }
+    ) { paths, theirs in
+      guard let theirs = theirs as? [[String: Any]], theirs.count == paths.count else { return false }
+      return zip(paths, theirs).allSatisfy { samePoints($0.fill, $1["fill"]!) && samePoints($0.stroke, $1["stroke"]!) }
+    }
   case .expect(let rv):
     check("marker", want["mark"], { try rvs.markerHeight(rv, env) }) { mark, theirs in
       guard let theirs = theirs as? [String: Any] else { return false }
