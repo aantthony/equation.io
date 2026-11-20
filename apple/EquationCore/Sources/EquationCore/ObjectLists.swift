@@ -661,7 +661,15 @@ func lowerObjects(_ e: Expr, _ defs: BuiltDefs, _ opts: ResolveOpts, named: Bool
               return settledNode(low)
             })
         }
-        if listLiteral(node) != nil || settledList(node) != nil { return node }
+        // A list written out that is no value as it stands — [sort(M), 2 sort(M)]
+        // with t among M's members — holds the lists to expand: its items
+        // are visited as any node's children are, and the copy is a new
+        // list, but for its origin (lib/expr.ts `mapChildren`, case 'list').
+        if let literal = listLiteral(node) {
+          let items = try literal.items.map(within)
+          return literal.origin ? .call(name, [args[0], .list(items)]) : .list(items)
+        }
+        if settledList(node) != nil { return node }
         return .call(name, try args.map { try visitNode($0, false) })
       case .bin(let op, let a, let b, let glyph):
         return .bin(op, try visitNode(a, asMatrix || op == .mul), try within(b), glyph: glyph)
@@ -728,7 +736,7 @@ func lowerObjects(_ e: Expr, _ defs: BuiltDefs, _ opts: ResolveOpts, named: Bool
         let list = lists[Int(which)]
         return list.items[at(list, k)]
       }
-      if listLiteral(node) != nil || settledList(node) != nil { return node }
+      if settledList(node) != nil { return node }
       return mapChildren(node) { instantiate($0, k) }
     }
     var objects = outside || continuous(source) || lists.contains { $0.items.contains(where: continuous) }

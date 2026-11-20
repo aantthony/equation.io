@@ -645,7 +645,8 @@ const CASES: string[] = [
  *  one another (or fail to), then rows of every shape over them. Seeded, so
  *  the corpus is the same every run. */
 function randomDocs(count: number): string[] {
-  let seed = 0x2f6e2b1;
+  // (RANDOM_SEED and RANDOM_DOCS widen the search when hunting for a difference.)
+  let seed = Number(process.env.RANDOM_SEED ?? 0x2f6e2b1);
   const random = (): number => {
     seed = (Math.imul(seed, 1664525) + 1013904223) | 0;
     return (seed >>> 0) / 4294967296;
@@ -1169,7 +1170,9 @@ randomListDocs(Number(process.env.RANDOM_LIST_DOCS ?? 400)).forEach((text, k) =>
   docs.push({ name: `case random list ${k + 1}`, rows: splitStatements(text) }),
 );
 
-const recorded = docs.map(({ name, rows, files, link }) => {
+// (RANDOM_ONLY records the random documents alone: a wide search is tens of thousands of them.)
+const recording = process.env.RANDOM_ONLY ? docs.filter(d => d.name.startsWith('case random')) : docs;
+const recorded = recording.map(({ name, rows, files, link }) => {
   const analysis = analyzeRows(rows, files && !link ? { tables: tableSource(files) } : {});
   const fns = new Set(analysis.defs.fns.keys());
   const sumBound = analysis.document.sumBoundConsts;

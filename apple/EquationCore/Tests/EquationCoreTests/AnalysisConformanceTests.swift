@@ -240,7 +240,10 @@ import Testing
         }
       // (JSON has no -0: a lattice view's down range from 0 is [-80, -0] on the site too.)
       let spelled = String(describing: Optional(mine)).replacingOccurrences(of: " -0.0]", with: " 0.0]")
-      check("view spec", spelled, String(describing: wanted))
+      // (A bound read from a constant comes through each side's libm: tan(e) is an ulp apart.)
+      if !sameButForRounding(spelled, String(describing: wanted)) {
+        check("view spec", spelled, String(describing: wanted))
+      }
       check("view axes", got.viewAxes, view["axes"] as? [String])
     }
     // Classification and plans.

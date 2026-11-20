@@ -656,7 +656,10 @@ private func analyzeRows(_ sources: [String], _ document: PreparedDocument) -> D
     func plane(_ e: Expr) -> Bool { freeVars(e).contains(where: ["x", "y", "z"].contains) }
     let exact = graphArgs != nil || !plane(rawParsed)
     var rowOpts = ropts
-    rowOpts.exactConditions = exact
+    // (The resolver's alone: list lowering reads the row's options without it,
+    // and keeps an equality case between points an equation.)
+    var resolveOpts = ropts
+    resolveOpts.exactConditions = exact
     // On a panel drawn on a surface, gaussian(x, y) reads that surface.
     rowOpts.surface = panelSurfaces[panel]?.embed
     // gaussian(S) alone: S coloured by its curvature (SurfaceGeometry.swift).
@@ -668,7 +671,8 @@ private func analyzeRows(_ sources: [String], _ document: PreparedDocument) -> D
       return false
     }
     // (With the ∫ the row consists of, if it is exactly one: Integrals.swift.)
-    let (resolvedRow, integral) = try Resolver(getFn: getFn, opts: rowOpts).resolveRow(
+    resolveOpts.surface = rowOpts.surface
+    let (resolvedRow, integral) = try Resolver(getFn: getFn, opts: resolveOpts).resolveRow(
       graphArgs != nil ? exactCases(rawParsed) : painted.map { .call(PAINT_CALL, [$0, rawParsed]) } ?? rawParsed)
     var resolved = try notTooDeep(resolvedRow)
     memberNotes[i] = perMemberNote(resolved, ropts.isList)

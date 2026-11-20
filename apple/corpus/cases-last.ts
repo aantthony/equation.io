@@ -45,6 +45,11 @@ export const LAST_CASES: string[] = [
   // Families of trails, and of vector fields.
   'A = [(cos(t), sin(t)), (2 cos(t), sin(t))]; trail(A); trail(A[1]); k = [1, 2]; (k y, -x); [1, 2] (y, -x); (y, -k x); B = (k cos(t), sin(t)); trail(B); B',
   "p' = (p_y, -p_x); p(0) = [(1, 0), (2, 0)]; p; trail(p); trail(p[1]); q' = -q; q(0) = [1, 2]; trail((t, q)); (t, q)",
+  // What the wide random runs found: a state's start that takes a function's name, lists to expand inside a
+  // list that is no value as written, and an equality case between points.
+  'f(s) = -0.5; y = f(x); f(0) = {3 > 0: 1, 10} - 2; g(x) = x; g(0) = 1; g(2); h(0) = 1; h(x) = x; h(2)',
+  'M = [t, 1]; f(s) = [s, 2 s]; f(sort(M)); [sort(M), 2 sort(M)]; f(M); k(s) = [s]; k(sort(M)); [M, sort(M)]; [[1, 2] + M, 3]',
+  'T = (3, 1, 2); L = [3, 1, 2]; f(s) = (s, s + 1); {T = f(2): total(L[L > 1]), L[L > 1]}; {T = (3, 1, 2): 1, 0}; A = (1, 2); {A = f(1): L, 0}; {A = A: 1}; {L = 3: 1, 0}',
   // Rows too deep to walk: what the engine says of them on the site.
   `y = ${terms(20000, k => `sin(${k} x)`)}; y = x`,
   `y = ${'sin('.repeat(20000)}x${')'.repeat(20000)}; ${terms(20000, k => `${k}`)}; y = ${'-'.repeat(20000)}x; y = ${terms(20000, () => 'x', '^')}`,

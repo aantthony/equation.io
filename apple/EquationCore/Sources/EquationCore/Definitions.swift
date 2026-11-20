@@ -699,7 +699,12 @@ func buildDefs(
     guard fnNames.contains(name) else { return nil }
     if skip.contains(name) || defs.unsupported[name] != nil { throw Unsupported("the function \(name)") }
     if defs.errors.has(name) { throw LanguageError("\(name) has an error in its definition.") }
-    guard case .function(_, let params, _)? = byName[name] else { return nil }
+    guard case .function(_, let params, _)? = byName[name] else {
+      // A state's start, f(0) = …, written below a function f takes the name
+      // from it, and the TypeScript reads the parameters of a definition that
+      // has none: its engine's words are the function row's error.
+      throw LanguageError("d.params is not iterable")
+    }
     if resolving.contains(name) {
       if resolving.last != name {
         throw LanguageError("\(name) and \(resolving.last!) are defined in terms of each other.")
