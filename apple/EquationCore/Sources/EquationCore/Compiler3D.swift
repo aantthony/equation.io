@@ -115,8 +115,8 @@ extension Resolver {
       if name == "revolve" {
         throw LanguageError("revolve(…) must be a whole row, not part of a definition.")
       }
-      // Port: the site keeps a tube a definition names (a function's body).
-      throw Unsupported("tube(…) in a definition")
+      // (A tube a definition names is kept: a function's body, drawn where it is called.)
+      return .call(name, args)
     }
     if name == "revolve", args.count >= 1, args.count <= 2 {
       // revolve(f) names the profile by its function: f stands for f(x), or

@@ -62,4 +62,7 @@ export const SURFACE_CASES: string[] = [
   // Parametric regions: a pair in u and v fills what it traces.
   '(u, v); a = 2; (a u cos(2pi v), u sin(2pi v) + t); (u^2, v, 1); (u, v, u v, 1); (v, 1); (u + x, v); y = u v',
   'view(x = 10^X); (u, v); ---; on((X, Y, Z) = (x, y, x y), x = -1..1, y = -1..1); (u/2, v/2); a = 0.5; (a u, v - 1); ---; z = 1; (u, v)',
+  // tube(…) inside a definition: kept, and drawn by the row that reads it.
+  'T = tube((cos(2pi u), sin(2pi u), u), 0.2); T; k(r) = tube((u, u^2, u^3), r); k(0.1); k(0.3) + 1; y = k(1)',
+  'c(s) = (cos(s), sin(s), s/4); f(a) = tube(c(2pi u), a); f(0.2); g = tube((u, 0, 1)) + 1; g; h = revolve(sqrt(x)); h; (1, tube((u, u, u)))',
 ];
