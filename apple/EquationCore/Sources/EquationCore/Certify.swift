@@ -558,3 +558,25 @@ public func certifySystem(
   result.complete = result.unresolved == 0
   return result
 }
+
+/// A system's row with "certify search box" on (web/trace-worker.ts, the
+/// 'certify' kind): the numeric roots only say where to look, each proof is
+/// the interval test's. `pts` are the roots to draw (a certified root the
+/// search missed among them), `info` what the row then reads.
+public func certifiedSearch(
+  _ residuals: [Expr], _ names: [String], _ lo: [Double], _ hi: [Double], _ env: [String: Double]
+) throws -> (pts: [[Double]], info: String) {
+  var numeric = solveSystem(residuals, names, lo, hi, SolveOptions(env: env))
+  let proof = try certifySystem(residuals, names, lo, hi, env, seeds: numeric)
+  for p in proof.roots {
+    let known = numeric.contains { q in
+      var sum = 0.0
+      for k in q.indices { sum += (q[k] - p[k]) * (q[k] - p[k]) }
+      return sum.squareRoot() < 1e-7
+    }
+    if !known { numeric.append(p) }
+  }
+  let count = "\(proof.roots.count) certified root\(proof.roots.count == 1 ? "" : "s")"
+  let reach = proof.complete ? "complete" : "\(proof.unresolved) unresolved regions (bounded search)"
+  return (numeric, "Search box: \(count); \(reach)")
+}

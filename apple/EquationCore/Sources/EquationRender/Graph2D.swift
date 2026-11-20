@@ -32,6 +32,9 @@ public struct Graph2D: Equatable, Sendable {
   /// The sequence rows that plot their partial sums S_N = Σ a_n instead of
   /// their terms (the site's toggle on such a row).
   public var partialSums: Set<Int> = []
+  /// The system rows whose search box is certified (the site's "certify
+  /// search box" toggle on such a row; Graph2D+Systems.swift).
+  public var certified: Set<Int> = []
   /// The index names across and down when the graph is a lattice panel (its
   /// rows are an automaton's or a table's, or its view row names them): the
   /// grid then runs between cells and the cells are numbered. Nil for the plane.
