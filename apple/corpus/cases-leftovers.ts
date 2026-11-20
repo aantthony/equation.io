@@ -47,7 +47,7 @@ const text = (v: number) => String(v);
 // --- data files (lib/csv.ts, lib/hash.ts) ---
 
 /** Files as text: what a parser of real exports meets. */
-const CSV_FILES: string[] = [
+export const CSV_FILES: string[] = [
   'name,age,height\nAda,36,1.7\nBob,41,1.82\nCy,,1.6\n',
   'a,b\n1,2\n3,4',
   '﻿x;y\n1,5;2\n2,5;3\n',

@@ -170,6 +170,9 @@ import MetalKit
     ///   slide row value          drag row's slider to a value (row from 0), and let go
     ///   toggle row id            flip a row's display toggle (levels, sums, streamlines, arrows)
     ///   undo                     the window's Undo, once
+    ///   import path [path…]      give the window data files (CSV), as the importer or a drop does
+    ///   save path                the document's bytes, as saving writes them, to a file
+    ///   load path                open a document's bytes in the window, as opening does
     ///   ungrouped                stop grouping a gesture's rewrites, to see what grouping does
     ///
     /// On the Mac every move of a drag is followed by an event of the
@@ -253,6 +256,14 @@ import MetalKit
               self.window?.undoManager?.undo()
             #endif
             await Self.pump()
+          case "import" where step.count >= 2:
+            self.model?.importData(step.dropFirst().map { URL(fileURLWithPath: $0) })
+            await Self.pump()
+          case "save" where step.count >= 2:
+            try? self.model?.encoded()?.write(to: URL(fileURLWithPath: step[1]))
+          case "load" where step.count >= 2:
+            if let bytes = try? Data(contentsOf: URL(fileURLWithPath: step[1])) { self.model?.load(bytes) }
+            await Self.pump()
           case "ungrouped":
             self.model?.undoManager = nil
           case "ask" where step.count >= 3:
@@ -305,10 +316,12 @@ import MetalKit
             let status = (self.model?.status ?? []).enumerated().map { k, row in
               let toggles = (row.toggles ?? []).map { "\($0.id)=\($0.on ? "on" : "off")" }.joined(separator: ",")
               let slider = row.slider.map { " slider \($0.min)..\($0.max) step \($0.step) at \($0.value)" } ?? ""
+              let needs = row.needsFile.map { " | needs \($0)\(row.opensFile == true ? " [asks]" : "")" } ?? ""
               return "row \(k): error \(row.error ?? "-") | unsupported \(row.unsupported ?? "-") | "
-                + "info \(row.info ?? "-") | toggles \(toggles.isEmpty ? "-" : toggles)\(slider)"
+                + "info \(row.info ?? "-") | toggles \(toggles.isEmpty ? "-" : toggles)\(slider)\(needs)"
             }
-            try? ([size, hover] + lines + status).joined(separator: "\n")
+            let data = (self.model?.dataNotices() ?? []).map { "data \($0)" }
+            try? ([size, hover] + lines + status + data).joined(separator: "\n")
               .write(to: file("txt"), atomically: true, encoding: .utf8)
           default:
             print("EQUATION_SCRIPT: can't read step \(step.joined(separator: " "))")

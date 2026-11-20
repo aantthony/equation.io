@@ -50,7 +50,10 @@ private final class StackBox<T>: @unchecked Sendable {
       let rows = doc["rows"] as! [String]
       let results = doc["results"] as! [[String: Any]]
       let isExample = !name.hasPrefix("case ")
-      let analysis = onMainStack { analyze(rows) }
+      // A document with data files: read on the device that has them, or as a link elsewhere.
+      let files = try (doc["files"] as? [[String: Any]]).map(dataFiles)
+      let link = doc["link"] as? Bool == true
+      let analysis = onMainStack { analyze(rows, files: link ? nil : files) }
       #expect(analysis.rows.count == rows.count)
       var whole = true
       for (i, want) in results.enumerated() {
@@ -134,15 +137,41 @@ private final class StackBox<T>: @unchecked Sendable {
   }
 
   @Test func whatIsNotPortedSaysSo() {
-    let rows = ["p = open(\"a.csv\")", "s_{n+1} = push(s_n, n)"]
+    let rows = ["graph(1)", "s_{n+1} = push(s_n, n)"]
     for text in rows {
       let row = analyze([text]).rows[0]
       #expect(row.unsupported != nil, "\(text)")
       #expect(row.cpu == nil && row.gpu == nil && row.error == nil, "\(text)")
     }
     // A name the port cannot read takes the rows that use it with it.
-    let analysis = analyze(["p = open(\"a.csv\")", "b = p + 1", "y = b x", "y = x"])
+    let analysis = analyze(["q = count(x^2 + y^2 < 1)", "b = q + 1", "c = 2 b", "y = x"])
     #expect(analysis.rows.map { $0.unsupported != nil } == [true, true, true, false])
+  }
+
+  /// A file arriving is the whole difference between a row that asks for it and one that draws.
+  @Test func dataFilesArrive() throws {
+    let csv = "age,height\n36,1.7\n41,1.82\n"
+    let hash = sha256Hex(Array(csv.utf8))
+    let rows = ["p = open(\"people.csv\", \(shortHash(hash)))", "(p.age, p.height)", "mean(p.age)"]
+    let asking = analyze(rows, files: DataFiles())
+    let message = "people.csv (\(shortHash(hash))) is not on this device — drop the file here to load it."
+    #expect(asking.rows.map(\.dataLocal) == [message, message, message])
+    #expect(asking.rows.allSatisfy { $0.error == nil && $0.unsupported == nil && $0.cpu == nil })
+    var files = DataFiles()
+    files.add(DataFile(name: "people.csv", table: try parseCsv(csv)), hash: hash)
+    let drawn = analyze(rows, files: files)
+    #expect(drawn.rows.allSatisfy { $0.dataLocal == nil && $0.error == nil })
+    #expect(drawn.rows[0].info == "2 rows · age, height")
+    #expect(drawn.rows[1].cpu == .dscatter(dim: 2, coords: [[36, 41], [1.7, 1.82]]))
+    #expect(drawn.rows[2].info == "= 38.5")
+    // A row that pins no hash finds the newest file of its name, and is written with its hash.
+    #expect(analyze(["p = open(\"people.csv\")", "p.age"], files: files).rows[1].cpu == .dlist(values: [36, 41]))
+    #expect(files.lookup(file: "people.csv", hash: "")?.hash == hash)
+    #expect(formatTableRow(name: "p", file: "people.csv", hash: hash) == rows[0])
+    #expect(tableRow(rows[0] + " # note")?.hash == shortHash(hash))
+    #expect(freeTableName("u", taken: []) == "data_u")
+    #expect(freeTableName("people", taken: ["people", "people_2"]) == "people_3")
+    #expect(rowSafeFileName(" a\"\n\"b.csv ") == "a_b.csv")
   }
 
   @Test func slidersWriteBack() {
@@ -192,7 +221,7 @@ private final class StackBox<T>: @unchecked Sendable {
     check("kind", got.kind, want["kind"] as? String)
     check("takesColor", got.takesColor, want["takesColor"] as! Bool)
     check("dist", got.dist?.rawValue, want["dist"] as? String)
-    if want["dataLocal"] as? String != nil { out.append("the site reads this row as a data row") }
+    check("dataLocal", got.dataLocal, want["dataLocal"] as? String)
     // The slider, and where a drag to a third of the way along lands.
     if let slider = want["slider"] as? [String: Any] {
       let wanted = Slider(
@@ -245,6 +274,9 @@ private final class StackBox<T>: @unchecked Sendable {
         // (A list's numbers come through each side's libm: equal to the last few places.)
         let wanted = "\(try cpuPlan(cpu, like: mine))"
         if !sameButForRounding("\(mine)", wanted) { check("cpu", "\(mine)", wanted) }
+      } catch let unrecorded as PackedColumn {
+        // A column too long to carry in the fixture: held to its length.
+        check("cpu packed length", packedLengths(mine), unrecorded.lengths(cpu))
       } catch {
         out.append("cpu: \(error)")
       }
@@ -351,7 +383,7 @@ private final class StackBox<T>: @unchecked Sendable {
     func expr(_ key: String) throws -> Expr { try decode(o[key]!) }
     func exprs(_ key: String) throws -> [Expr] { try (o[key] as! [Any]).map(decode) }
     func packed(_ v: Any?) throws -> [Double] {
-      guard let list = v as? [Any] else { throw FixtureError(description: "a packed column not recorded") }
+      guard let list = v as? [Any] else { throw PackedColumn() }
       return list.map(number)
     }
     func whole(_ key: String) -> Int? { (o[key] as? NSNumber)?.intValue }
@@ -525,6 +557,46 @@ struct FixtureError: Error, CustomStringConvertible {
 func fixture(_ name: String) throws -> Any {
   let url = try #require(Bundle.module.url(forResource: "Fixtures/\(name)", withExtension: "json"))
   return try JSONSerialization.jsonObject(with: Data(contentsOf: url))
+}
+
+/// A packed column the fixture did not carry (`{packed: n}`), and what can
+/// still be held of a plan that has one: each column's length.
+struct PackedColumn: Error {
+  func lengths(_ plan: [String: Any]) -> [Int] {
+    func length(_ v: Any?) -> Int { ((v as? [String: Any])?["packed"] as? Int) ?? (v as? [Any])?.count ?? -1 }
+    switch plan["type"] as? String {
+    case "dlist": return [length(plan["values"])]
+    case "dscatter": return (plan["coords"] as? [Any] ?? []).map(length)
+    default: return []
+    }
+  }
+}
+
+func packedLengths(_ plan: CpuPlan) -> [Int] {
+  switch plan {
+  case .dlist(let values): [values.count]
+  case .dscatter(_, let coords): coords.map(\.count)
+  default: []
+  }
+}
+
+/// A fixture document's data files, parsed as the app's store parses them:
+/// each under the SHA-256 of its bytes, which is checked against the hash the
+/// TypeScript recorded. A file too long to carry is written out again by
+/// apple/corpus/cases-data.ts `generated`'s rule.
+func dataFiles(_ list: [[String: Any]]) throws -> DataFiles {
+  var files = DataFiles()
+  for file in list {
+    var content = file["content"] as? String ?? ""
+    if let rows = file["generate"] as? Int {
+      content = "a,b,c\n"
+      for k in 0..<rows { content += "\(k),\((k * 37) % 101),\((k * k) % 53)\n" }
+    }
+    let hash = sha256Hex(Array(content.utf8))
+    #expect(hash == file["hash"] as? String)
+    files.add(DataFile(name: file["name"] as! String, table: try parseCsv(content)), hash: hash)
+  }
+  return files
 }
 
 /// A number as the fixtures carry it: whole numbers as JSON numbers, every

@@ -31,6 +31,10 @@ public struct RowAnalysis: Equatable, Sendable {
   public var viewAxes: [String]?
   /// The error the site reports for the row.
   public var error: String?
+  /// Set when the row reads a data file (`open(…)`) that is not on hand: the
+  /// row is valid, and draws once the file is supplied. What it says names
+  /// the file (lib/analysis.ts `dataLocal`, with `needsFile`).
+  public var dataLocal: String?
   /// Why the app cannot show the row yet: the site draws it, the port does
   /// not. Such a row has no plans, and its other fields say nothing.
   public var unsupported: String?
@@ -225,7 +229,7 @@ struct PreparedDocument {
   var random = RandomRows()
 }
 
-func prepareDocument(_ sources: [String]) -> PreparedDocument {
+func prepareDocument(_ sources: [String], files: DataFiles? = nil) -> PreparedDocument {
   // A trailing `# note` is prose for the reader; the math is what precedes it.
   let texts = sources.map { jsTrimmed(stripNote($0)) }
   let count = texts.count
@@ -304,7 +308,8 @@ func prepareDocument(_ sources: [String]) -> PreparedDocument {
     }
     let skip = Set(raw.filter { blocked[owner[$0.key]!] != nil }.map(\.key))
     // An automaton's letter names rows of cells, not scalar terms.
-    built = buildDefs(raw, skip: skip, sequences: seqScans.compactMap { $0 }.filter { !$0.lattice && !$0.emptyTuple })
+    built = buildDefs(
+      raw, skip: skip, sequences: seqScans.compactMap { $0 }.filter { !$0.lattice && !$0.emptyTuple }, files: files)
     var found = false
     for d in raw where !skip.contains(d.key) {
       guard let what = built.unsupported[d.key] else { continue }
@@ -340,8 +345,10 @@ func prepareDocument(_ sources: [String]) -> PreparedDocument {
 // MARK: - analyze
 
 /// Analyze a document: one result per row, and the constants' values.
-public func analyze(_ sources: [String]) -> DocumentAnalysis {
-  let document = prepareDocument(sources)
+/// `files`: the data files on hand, which `open(…)` rows read (Tables.swift);
+/// nil where there are none to be had, as for a link read off the device.
+public func analyze(_ sources: [String], files: DataFiles? = nil) -> DocumentAnalysis {
+  let document = prepareDocument(sources, files: files)
   let (texts, blocked, tildeNames) = (document.texts, document.blocked, document.tildeNames)
   let (raw, owner, duplicates) = (document.raw, document.owner, document.duplicates)
   // (A recurrence's chain of terms is written into the constants as rows resolve.)
@@ -378,6 +385,8 @@ public func analyze(_ sources: [String]) -> DocumentAnalysis {
     }
   }
 
+  // Definitions that only want their file, and each data file's readout (Tables.swift).
+  let (tableNames, tables) = tableRows(built, owner: owner, blocked: blocked, &rows)
   let stateSystem = buildStateSystem(built)
   // Only static constants can affect compilation. Dummy states permit evaluating
   // unrelated constants; every state and dependent constant is removed below.
@@ -397,7 +406,7 @@ public func analyze(_ sources: [String]) -> DocumentAnalysis {
     document.seqScans.compactMap { $0 }.filter { !$0.lattice && !$0.emptyTuple }, rawNames: raw.map(\.name))
   defer { sequences.release() }
   let listNames = Set(built.points).union(built.mats.keys).union(built.tensors.keys)
-    .union(sequences.sequences.keys.map { $0 + "_" }).union(built.lists.keys)
+    .union(sequences.sequences.keys.map { $0 + "_" }).union(built.lists.keys).union(tableNames)
   let valueNames = shadowedNames(raw.filter { $0.kind != "fn" }.map(\.name) + Array(tildeNames))
   let documentNames = Set(raw.map(\.name)).union(tildeNames)
   func getFn(_ name: String) throws -> FnDef? {
@@ -432,7 +441,7 @@ public func analyze(_ sources: [String]) -> DocumentAnalysis {
   // (List lowering reads them too, and notes the sliders an index reads.)
   ropts.isList = { isListName(built, $0) }
   ropts.getList = listGetter(built)
-  ropts.indexIssue = { index, _ in indexIssue(index, built) }
+  ropts.indexIssue = { index, target in indexIssue(index, built, target) }
   var memberNotes: [Int: String] = [:]
   if !sequences.sequences.isEmpty {
     ropts.sequenceTerm = { [unowned sequences] in try sequences.resolve($0, $1, $2) }
@@ -440,7 +449,7 @@ public func analyze(_ sources: [String]) -> DocumentAnalysis {
   sequences.getFn = getFn
   sequences.opts = ropts
   sequences.fnNames = { Set(built.fns.keys) }
-  sequences.indexNames = { Set(built.points).union(built.lists.keys) }
+  sequences.indexNames = { Set(built.points).union(built.lists.keys).union(tableNames) }
   sequences.isKnown = { constNames.contains($0) }
   sequences.addKnown = { constNames.insert($0) }
   sequences.protectedNames = Set(raw.map(\.name))
@@ -522,7 +531,8 @@ public func analyze(_ sources: [String]) -> DocumentAnalysis {
     if random.declares[i] != nil { continue }
     if rows[i].definition != nil || rows[i].comment || rows[i].error != nil || text.isEmpty { continue }
     do {
-      if scanOpenHead(text) != nil { throw Unsupported("data files") }
+      // A row that means to open a file and cannot says why (Tables.swift).
+      try refuseBadTableRow(text)
       // A call to the user's own view/camera/grid function is theirs.
       let head = viewHead(text)
       if isDividerRow(text) || (head != nil && !fnNames.contains(head!)) {
@@ -587,7 +597,7 @@ public func analyze(_ sources: [String]) -> DocumentAnalysis {
         if let first, first < i { throw LanguageError("Sequence \(seq.name) is already defined.") }
         rows[i].classified = try classifySeqRec(
           seq, fnNames: fnNames, getFn: getFn, constNames: { constNames }, ropts: ropts, resolver: sequences,
-          indexNames: Set(built.points).union(built.lists.keys))
+          indexNames: Set(built.points).union(built.lists.keys).union(tableNames))
         continue
       }
       // `x := 3` claims what := cannot have; the parser only sees a stray `:`.
@@ -714,6 +724,8 @@ public func analyze(_ sources: [String]) -> DocumentAnalysis {
       rows[i].unsupported = notSupported(error.what)
       if viewHead(text) != nil { viewsUnknown = true }
     } catch {
+      // A row reading a file that is not here is not broken (Tables.swift).
+      if needsFile(error, &rows[i]) { continue }
       // (`u(x, y) = …` read as u times a point: say so.)
       var text = reservedFnHint(texts[i]) ?? errorMessage(error)
       // `i = 3` fails as a claim about i; the author meant a definition, so
@@ -761,6 +773,8 @@ public func analyze(_ sources: [String]) -> DocumentAnalysis {
       rows[i].cpu = nil
       rows[i].gpu = nil
     }
+    // More points than a scene in space draws (Tables.swift).
+    limitCloud(&rows[i])
   }
 
   // A view naming index axes (one, as a panel sharing the other writes it)
@@ -851,6 +865,7 @@ public func analyze(_ sources: [String]) -> DocumentAnalysis {
         ? "matrix" : built.tensors.has(d.name) ? "tensor" : built.multivectors[d.name].map(algebraKind)
       let interval = built.intervals.has(d.name) ? "interval" : nil
       let constant = interval ?? valued ?? (named ? "point" : built.lists.has(d.name) ? "list" : "const")
+      // (`adults = person[…]` scans as a constant, but what it defines is another data file.)
       row.kind = "definition (\(d.kind == "const" ? constant : d.kind))"
     } else if let view = row.view {
       row.kind =
@@ -899,6 +914,8 @@ public func analyze(_ sources: [String]) -> DocumentAnalysis {
       row.slider = Slider(min: lo, max: hi, step: whole ? 1 : niceSpacing((hi - lo) / 400, 1).major, value: value)
     }
   }
+  // The kinds of the rows that are data files', or wait for one (Tables.swift).
+  tableKinds(&rows, tables)
   // Messages name a redefined built-in (`#e`, internally) as its row wrote it.
   for i in 0..<count {
     if let error = rows[i].error { rows[i].error = unaliased(error) }

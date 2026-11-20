@@ -13,6 +13,8 @@ struct DocumentView: View {
   @Environment(\.undoManager) private var undoManager
   @State private var model = GraphModel()
   @State private var chat = GraphChat()
+  /// The window's way in for data files: the importer, a drop, a row that asks for its file.
+  @State private var dataImport = DataImport()
   /// Bumped to put the cursor in Ask's field.
   @State private var askFocus = 0
   #if os(iOS)
@@ -25,7 +27,23 @@ struct DocumentView: View {
       .focusedSceneValue(\.graphDocument, $document)
       .focusedSceneValue(\.graphModel, model)
       .focusedSceneValue(\.graphLibrary, library)
+      .focusedSceneValue(\.dataImport, dataImport)
       .onAppear { timing.debug("window: appeared") }
+      // A CSV, chosen or dropped anywhere on the window, is the document's to open.
+      .fileImporter(
+        isPresented: Bindable(dataImport).picking, allowedContentTypes: DataImport.types,
+        allowsMultipleSelection: true
+      ) { result in
+        if case .success(let urls) = result { dataImport.take(urls: urls) }
+      }
+      .onDrop(of: [.fileURL] + DataImport.types, isTargeted: nil) { dataImport.take(providers: $0) }
+      .alert(
+        "Data", isPresented: Binding(get: { dataImport.problem != nil }, set: { if !$0 { dataImport.problem = nil } })
+      ) {
+        Button("OK", role: .cancel) {}
+      } message: {
+        Text(dataImport.problem ?? "")
+      }
   }
 
   @ViewBuilder private var content: some View {
@@ -40,6 +58,7 @@ struct DocumentView: View {
             Button("Open", systemImage: "folder", action: library.open).labelStyle(.iconOnly)
           }
           examples.labelStyle(.iconOnly)
+          addData.labelStyle(.iconOnly)
           ask.labelStyle(.iconOnly)
           share.labelStyle(.iconOnly)
         } editor: {
@@ -63,8 +82,16 @@ struct DocumentView: View {
       status: model.status,
       slide: { [model] row, value in model.setSlider(row: row, to: value) },
       slid: { [model] in model.endGesture() },
-      flip: { [model] row, toggle in model.flip(toggle, row: row) }
+      flip: { [model] row, toggle in model.flip(toggle, row: row) },
+      supply: { [dataImport] in dataImport.picking = true },
+      drop: { [dataImport] files in dataImport.take(providers: files) }
     )
+  }
+
+  /// Adds a data file (a CSV) to the graph: the importer; a drop does the same.
+  private var addData: some View {
+    Button("Add Data", systemImage: "tablecells") { dataImport.picking = true }
+      .help("Add a data file (CSV) to this graph")
   }
 
   /// The examples, where there is no menu bar (iPhone, an iPad without a keyboard).
@@ -91,13 +118,26 @@ struct DocumentView: View {
     chat.access.apply = { rows in document.wrappedValue.setLines(rows) }
     chat.access.model = model
     model.undoManager = registersUndo ? undoManager : nil
+    dataImport.open = { picked in document.wrappedValue.open(picked) }
+    #if DEBUG
+      // EQUATION_SCRIPT's `import`, `save` and `load` (GraphGestures.swift).
+      model.importData = { [dataImport] urls in dataImport.take(urls: urls) }
+      model.dataNotices = { [dataImport] in dataImport.last.map(\.text) }
+      model.encoded = { try? document.wrappedValue.encoded() }
+      model.load = { bytes in
+        guard var next = try? GraphDocument(data: bytes) else { return }
+        next.follow(document.wrappedValue)
+        document.wrappedValue = next
+      }
+    #endif
   }
 
   /// Shares the graph as its equation.io link, which opens (and unfurls
   /// with a preview) anywhere, app or not; the share sheet has Copy.
   private var share: some View {
     ShareLink(
-      item: URL(string: graphLink(document.rows.map(\.text)))!,
+      // (The rows name a data file by its hash; its bytes stay in the document.)
+      item: URL(string: graphLink(document.linkRows))!,
       subject: Text("Equation.io graph"),
       preview: SharePreview("Equation.io graph")
     )
@@ -117,6 +157,7 @@ struct DocumentView: View {
             ToolbarItem { examples }
           }
         #endif
+        .toolbar { ToolbarItem { addData } }
     } detail: {
       // Laid out beside the sidebar, not under it, so splits, centering and
       // zoom use the graph you can see; the system mirrors and blurs its edge

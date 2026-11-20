@@ -29,6 +29,7 @@ struct EquationApp: App {
       }
       .commands {
         LibraryCommands()
+        DataCommands()
         ZoomCommands()
         ExamplesCommands()
       }
@@ -37,6 +38,7 @@ struct EquationApp: App {
         DocumentView(document: file.$document, registersUndo: true)
       }
       .commands {
+        DataCommands()
         ZoomCommands()
         ExamplesCommands()
       }
@@ -57,6 +59,7 @@ struct EquationApp: App {
         DocumentView(document: $document)
       }
       .commands {
+        DataCommands()
         ZoomCommands()
         ExamplesCommands()
       }

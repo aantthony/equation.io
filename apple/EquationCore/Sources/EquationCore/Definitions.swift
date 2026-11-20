@@ -16,10 +16,10 @@
 ///
 /// - a name for an interval, or for anything built from one, is the hidden parameter every row
 ///   using it shares (Interval.swift); u and v take one as the range they run over.
+/// - `person = open("people.csv", 3a7f…)` names a data file (Tables.swift).
 ///
-/// Data files, lists and multivectors are not ported (states are
-/// in States.swift): their rows are reported as not supported yet, and so is
-/// every row that names one.
+/// What is not ported is reported as not supported yet, and so is every row
+/// that names it.
 public enum Definition: Equatable, Sendable {
   /// `draw`: `p ∈ A`, a binder over A's members.
   case constant(name: String, rhs: String, draw: Bool = false)
@@ -29,14 +29,14 @@ public enum Definition: Equatable, Sendable {
   /// `a(0) = …` — where the state a starts.
   case initial(name: String, rhs: String)
   /// `person = open("people.csv", 3a7f…)` — a local data file.
-  case table(name: String)
+  case table(name: String, file: String = "", hash: String = "")
   /// `Y ~ m X + b` — a fit, which defines its coefficients (RegressionRows.swift).
   case regression(name: String, lhs: String, rhs: String)
 
   public var name: String {
     switch self {
     case .constant(let name, _, _), .function(let name, _, _), .state(let name, _), .initial(let name, _),
-      .table(let name), .regression(let name, _, _):
+      .table(let name, _, _), .regression(let name, _, _):
       name
     }
   }
@@ -268,14 +268,11 @@ private func scanDraw(_ text: Units) -> (name: String, rhs: String)? {
   return (name, String(s.u[s.i...]))
 }
 
-/// A data file's hash, as a row pins it, is at least this many hex digits
-/// (lib/hash.ts `HASH_TOKEN_LEN`).
-private let hashTokenLength = 12
-
 /// A row that means to open a file, `name = open("file.csv", hash)`: the name
-/// as written, and whether the row says so well enough to be one
-/// (lib/defs.ts `OPEN_HEAD_RE`, and the whole of `TABLE_RE`).
-private func scanOpen(_ text: Units) -> (name: String, wellFormed: Bool)? {
+/// as written, and whether the row says so well enough to be one — then with
+/// the file it names and the hash it pins, lowercase, or "" (lib/defs.ts
+/// `OPEN_HEAD_RE`, and the whole of `TABLE_RE`).
+func scanOpen(_ text: Units) -> (name: String, wellFormed: Bool, file: String, hash: String)? {
   var s = RowScanner(text)
   s.space()
   guard let name = s.name() else { return nil }
@@ -288,25 +285,24 @@ private func scanOpen(_ text: Units) -> (name: String, wellFormed: Bool)? {
   s.space()
   guard let quote = s.peek, quote == unit("\"") || quote == unit("'") else { return nil }
   s.i += 1
+  let fileStart = s.i
   while let c = s.peek, c != quote { s.i += 1 }
-  guard s.eat(quote) else { return (name, false) }
+  let file = s.text(fileStart..<s.i)
+  guard s.eat(quote) else { return (name, false, "", "") }
   s.space()
+  var hash = ""
   if s.eat(",") {
     s.space()
     let start = s.i
     while let c = s.peek, isDigit(c) || (0x61...0x66).contains(c | 0x20) { s.i += 1 }
-    guard (hashTokenLength...64).contains(s.i - start) else { return (name, false) }
+    // At least `HASH_TOKEN_LEN` digits, because a row is resolved by hash prefix.
+    guard (HASH_TOKEN_LEN...64).contains(s.i - start) else { return (name, false, "", "") }
+    hash = String(decoding: s.u[start..<s.i].map { isDigit($0) ? $0 : $0 | 0x20 }, as: UTF16.self)
     s.space()
   }
-  guard s.eat(")") else { return (name, false) }
+  guard s.eat(")") else { return (name, false, "", "") }
   s.space()
-  return (name, s.atEnd)
-}
-
-/// The name of a row that means to open a file, whether or not it succeeds
-/// at saying so: `^\s*(NAME)\s*=\s*open\s*\(\s*["']`.
-func scanOpenHead(_ text: String) -> String? {
-  scanOpen(asAssignment(Array(text.utf16)))?.name
+  return (name, s.atEnd, file, hash)
 }
 
 /// A subscript written in braces, as a recurrence row is: `a_{0} = 1`
@@ -404,7 +400,8 @@ public func scanDefinition(_ source: String) -> Definition? {
   // a constant either: its own row explains what is wrong with it.
   if let open = scanOpen(text) {
     let name = canonicalName(open.name)
-    return open.wellFormed && claimable(name) ? .table(name: bindable(name)) : nil
+    guard open.wellFormed, claimable(name) else { return nil }
+    return .table(name: bindable(name), file: open.file, hash: open.hash)
   }
   // Only as a value: the parser reads `e(2)` as e · 2 wherever e is not the
   // document's value, so `e(x) := …` would define a function no row calls.
@@ -610,6 +607,11 @@ struct BuiltDefs {
   var intervals = OrderedMap<Expr>()
   /// The fits by their rows' keys (RegressionRows.swift).
   var fits: [String: FitResult] = [:]
+  /// Data files and cuts of them, the names whose definitions wanted a file
+  /// that is not here, and the keys of those definitions (Tables.swift).
+  var tables = OrderedMap<TableDef>()
+  var missingData = OrderedMap<MissingValue>()
+  var needsFile: Set<String> = []
 }
 
 private let positionVars: Set<String> = ["x", "y", "z", "w"]
@@ -619,7 +621,9 @@ private let paramVars: Set<String> = ["u", "v"]
 /// Those whose key is in `skip` are known not to be supported: they keep
 /// their names, so everything else parses as it does on the site, and are
 /// otherwise left alone.
-func buildDefs(_ raw: [Definition], skip: Set<String>, sequences: [SeqScan] = []) -> BuiltDefs {
+func buildDefs(
+  _ raw: [Definition], skip: Set<String>, sequences: [SeqScan] = [], files: DataFiles? = nil
+) -> BuiltDefs {
   var defs = BuiltDefs()
   var byName: [String: Definition] = [:]
   for d in raw { byName[d.name] = d }
@@ -669,7 +673,7 @@ func buildDefs(_ raw: [Definition], skip: Set<String>, sequences: [SeqScan] = []
     // Live too: list names accumulate as definitions are processed.
     opts.isList = { [defs] in isListName(defs, $0) }
     opts.getList = listGetter(defs)
-    opts.indexIssue = { [defs] index, _ in indexIssue(index, defs) }
+    opts.indexIssue = { [defs] index, target in indexIssue(index, defs, target) }
     if !seq.sequences.isEmpty { opts.sequenceTerm = { [unowned seq] in try seq.resolve($0, $1, $2) } }
     return opts
   }
@@ -679,7 +683,7 @@ func buildDefs(_ raw: [Definition], skip: Set<String>, sequences: [SeqScan] = []
     if let p = parsed[d.key] { return p }
     var values = valueNames
     var names = Set(defs.pointDims.keys).union(defs.mats.keys).union(defs.tensors.keys).union(seqIndexNames)
-      .union(defs.lists.keys)
+      .union(defs.lists.keys).union(tableListNames(defs))
     if case .function(_, let params, _) = d {
       // A function's parameters are values in its body, and index too.
       values.formUnion(shadowedNames(params))
@@ -749,7 +753,7 @@ func buildDefs(_ raw: [Definition], skip: Set<String>, sequences: [SeqScan] = []
   seq.getFn = getFn
   seq.opts = options()
   seq.fnNames = { Set(defs.fns.keys) }
-  seq.indexNames = { Set(defs.pointDims.keys).union(defs.lists.keys) }
+  seq.indexNames = { Set(defs.pointDims.keys).union(defs.lists.keys).union(tableListNames(defs)) }
   seq.isKnown = { known.contains($0) }
   seq.addKnown = { known.insert($0) }
   seq.protectedNames = known
@@ -763,7 +767,7 @@ func buildDefs(_ raw: [Definition], skip: Set<String>, sequences: [SeqScan] = []
   for d in raw where !skip.contains(d.key) {
     guard case .constant(let name, let rhs, false) = d else { continue }
     let above = Set(defs.pointDims.keys).union(seqIndexNames).union(defs.mats.keys).union(defs.tensors.keys)
-      .union(defs.lists.keys)
+      .union(defs.lists.keys).union(tableListNames(defs))
     guard let source = try? parseExpr(rhs, userFns: fnNames, listNames: above, valueNames: valueNames),
       case .ineq = source
     else { continue }
@@ -782,17 +786,25 @@ func buildDefs(_ raw: [Definition], skip: Set<String>, sequences: [SeqScan] = []
       case .function(let name, let params, _):
         if Set(params).count != params.count { throw LanguageError("Duplicate parameter names.") }
         _ = try getFn(name)
-      case .table:
-        throw Unsupported("data files")
+      case .table(let name, let file, let hash):
+        try openTable(name, file, hash, files, &defs)
       case .regression(_, let lhs, let rhs):
         let source = try parseFit(
           lhs, rhs, userFns: fnNames, valueNames: valueNames,
           listNames: Set(defs.pointDims.keys).union(defs.mats.keys).union(defs.tensors.keys).union(seqIndexNames)
-            .union(defs.lists.keys))
+            .union(defs.lists.keys).union(tableListNames(defs)))
         parsed[d.key] = .eq(source.lhs, source.rhs)
-        let fit = try fitRow(
-          source, defs, numEnv, getFn: getFn, opts: options(), isRow: { byName[$0] != nil },
-          stateNames: states.names)
+        var parameters: [String] = []
+        let fit: FitResult
+        do {
+          fit = try fitRow(
+            source, defs, numEnv, getFn: getFn, opts: options(), isRow: { byName[$0] != nil },
+            stateNames: states.names, parameters: &parameters)
+        } catch let error as LanguageError where error.missingData {
+          // (A fit whose data is elsewhere still claims its coefficients.)
+          for name in parameters { defs.missingData[name] = MissingValue(message: error.message, list: false) }
+          throw error
+        }
         defs.fits[d.name] = fit
         for (name, value) in fit.coefficients {
           defs.consts[name] = .num(value)
@@ -877,6 +889,15 @@ func buildDefs(_ raw: [Definition], skip: Set<String>, sequences: [SeqScan] = []
           // `N = line(P, A)` over a list names the lines, as join does.
           value = .call("join", args)
         }
+        // `adults = person[person.age >= 18]` names a cut of a data file (Tables.swift).
+        if let cut = try tableCut(name, value, draw: draw, defs, options(), comps: comps) {
+          // Registered first, so rows below report the file rather than an
+          // unknown name — then the row says what is missing, as the `open()`
+          // row it cuts does.
+          defs.tables[name] = cut
+          if let missing = cut.missing, files != nil { throw missingDataError(missing) }
+          continue
+        }
         // A list, a tuple of more than 3 values or a scatter of columns names
         // a list: the name is its values, over instances of its own.
         let listed = try namedList(name, value, draw: draw, ofPoints: ofPoints, defs, options(), comps: comps)
@@ -937,6 +958,7 @@ func buildDefs(_ raw: [Definition], skip: Set<String>, sequences: [SeqScan] = []
       defs.unsupported[d.key] = error.what
     } catch let error as LanguageError {
       defs.errors[d.key] = error.message
+      noteMissingData(error, d, shape: parsed[d.key], &defs)
     } catch let error as ParseError {
       defs.errors[d.key] = error.message
     } catch {
@@ -993,7 +1015,7 @@ func buildDefs(_ raw: [Definition], skip: Set<String>, sequences: [SeqScan] = []
     opts.complex = { at.complexes[$0] }
     opts.isList = { isListName(at, $0) }
     opts.getList = listGetter(at)
-    opts.indexIssue = { index, _ in indexIssue(index, at) }
+    opts.indexIssue = { index, target in indexIssue(index, at, target) }
     return try lowerLists(e, listGetter(at), opts, named: true)
   }
   let (beforeStates, stateNames) = (defs, states.names)
@@ -1296,7 +1318,7 @@ func buildDefs(_ raw: [Definition], skip: Set<String>, sequences: [SeqScan] = []
         || defs.fns[name] != nil || defs.unsupported[name] != nil || defs.mats.has(name) || defs.tensors.has(name)
         || defs.multivectors.has(name)
         || defs.states.has(name) || defs.vecStates[name] != nil
-        || defs.lists.has(name) || defs.intervals.has(name)
+        || defs.lists.has(name) || defs.intervals.has(name) || defs.tables.has(name) || defs.missingData.has(name)
     }
     func references(_ expr: Expr) -> NameSet {
       var names = freeVars(expr)
@@ -1338,6 +1360,8 @@ func buildDefs(_ raw: [Definition], skip: Set<String>, sequences: [SeqScan] = []
       defs.states[name] = nil
       defs.lists[name] = nil
       defs.intervals[name] = nil
+      defs.tables[name] = nil
+      defs.missingData[name] = nil
     }
     func remove(_ name: String) {
       let owner = ownerOf(name)

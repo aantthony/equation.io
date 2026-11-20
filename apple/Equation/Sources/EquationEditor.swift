@@ -29,6 +29,11 @@ struct EquationEditor {
   var slid: @MainActor () -> Void = {}
   /// Flip a row's display toggle (`RowStatus.Toggle.id`).
   var flip: @MainActor (Int, String) -> Void = { _, _ in }
+  /// A row asks for its data file: bring up the importer.
+  var supply: @MainActor () -> Void = {}
+  /// Files dropped on the equations are the document's to open, not text
+  /// for a row; false when it takes none of them.
+  var drop: @MainActor ([NSItemProvider]) -> Bool = { _ in false }
   #if os(iOS)
     /// The card the equations sit in on iPhone, which a pull at their top moves.
     @Environment(\.panelDrag) private var panelDrag
@@ -43,6 +48,11 @@ struct EquationEditor {
     controller.slide = slide
     controller.slid = slid
     controller.flip = flip
+    controller.supply = supply
+    controller.drop = drop
+    #if os(macOS)
+      controller.textView.onDropFiles = drop
+    #endif
     #if os(iOS)
       controller.panelDrag = panelDrag
       controller.bottomInset = bottomInset
@@ -94,6 +104,31 @@ final class EquationTextView: PlatformTextView {
         laidOutWidth = newSize.width
         onResize()
       }
+    }
+
+    /// Files dragged onto the equations (a CSV from the Finder) are the
+    /// document's to open: a text view of its own would type their paths in.
+    var onDropFiles: ([NSItemProvider]) -> Bool = { _ in false }
+
+    private func files(_ sender: any NSDraggingInfo) -> [URL] {
+      let board = sender.draggingPasteboard
+      return board.readObjects(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]) as? [URL] ?? []
+    }
+
+    override var acceptableDragTypes: [NSPasteboard.PasteboardType] { super.acceptableDragTypes + [.fileURL] }
+
+    override func draggingEntered(_ sender: any NSDraggingInfo) -> NSDragOperation {
+      files(sender).isEmpty ? super.draggingEntered(sender) : .copy
+    }
+
+    override func draggingUpdated(_ sender: any NSDraggingInfo) -> NSDragOperation {
+      files(sender).isEmpty ? super.draggingUpdated(sender) : .copy
+    }
+
+    override func performDragOperation(_ sender: any NSDraggingInfo) -> Bool {
+      let urls = files(sender)
+      if urls.isEmpty { return super.performDragOperation(sender) }
+      return onDropFiles(urls.compactMap { NSItemProvider(contentsOf: $0) })
     }
   #else
     override func layoutSubviews() {
@@ -183,6 +218,8 @@ final class EditorController: NSObject {
   var slide: @MainActor (Int, Double) -> Void = { _, _ in }
   var slid: @MainActor () -> Void = {}
   var flip: @MainActor (Int, String) -> Void = { _, _ in }
+  var supply: @MainActor () -> Void = {}
+  var drop: @MainActor ([NSItemProvider]) -> Bool = { _ in false }
   #if os(iOS)
     /// The card the equations sit in, on iPhone; nil beside the graph.
     var panelDrag: PanelDrag?
@@ -236,6 +273,7 @@ final class EditorController: NSObject {
       view.maxSize = NSSize(width: CGFloat.greatestFiniteMagnitude, height: .greatestFiniteMagnitude)
     #else
       view.delegate = self
+      view.textDropDelegate = self
       view.autocorrectionType = .no
       view.autocapitalizationType = .none
       view.spellCheckingType = .no
@@ -379,11 +417,13 @@ final class EditorController: NSObject {
     let width = widgetWidth
     var heights: [Int: CGFloat] = [:]
     for (i, row) in status.enumerated() {
-      guard row.slider != nil || row.error != nil || row.info != nil || row.unsupported != nil || row.toggles != nil
+      guard
+        row.slider != nil || row.error != nil || row.info != nil || row.unsupported != nil || row.toggles != nil
+          || row.needsFile != nil
       else { continue }
       let widget = RowWidget(
         status: row, slide: { [weak self] value in self?.slide(i, value) }, slid: { [weak self] in self?.slid() },
-        flip: { [weak self] toggle in self?.flip(i, toggle) })
+        flip: { [weak self] toggle in self?.flip(i, toggle) }, supply: { [weak self] in self?.supply() })
       let host: PlatformHostingController<RowWidget>
       if let existing = widgets[i] {
         host = existing
@@ -534,6 +574,31 @@ final class EditorController: NSObject {
   }
 #endif
 
+#if os(iOS)
+  extension EditorController: UITextDropDelegate {
+    /// A file dragged onto the equations (a CSV from Files) is the
+    /// document's to open; left to the text view, its text would be typed
+    /// into a row. Text dragged in is still text.
+    func textDroppableView(
+      _ textDroppableView: any UIView & UITextDroppable, proposalForDrop drop: any UITextDropRequest
+    ) -> UITextDropProposal {
+      guard drop.dropSession.items.contains(where: { DataImport.isFile($0.itemProvider) }) else {
+        return drop.suggestedProposal
+      }
+      let proposal = UITextDropProposal(operation: .copy)
+      proposal.dropPerformer = .delegate
+      return proposal
+    }
+
+    func textDroppableView(
+      _ textDroppableView: any UIView & UITextDroppable, willPerformDrop drop: any UITextDropRequest
+    ) {
+      let files = drop.dropSession.items.map(\.itemProvider).filter(DataImport.isFile)
+      if !files.isEmpty { _ = self.drop(files) }
+    }
+  }
+#endif
+
 /// What sits under a row: its slider, its display toggles, then its error
 /// or readout (the order of web/main.ts `reconcile`).
 struct RowWidget: View {
@@ -541,6 +606,8 @@ struct RowWidget: View {
   var slide: @MainActor (Double) -> Void
   var slid: @MainActor () -> Void = {}
   var flip: @MainActor (String) -> Void = { _ in }
+  /// Ask for the row's data file.
+  var supply: @MainActor () -> Void = {}
 
   var body: some View {
     VStack(alignment: .leading, spacing: 4) {
@@ -575,6 +642,19 @@ struct RowWidget: View {
           .font(.caption)
           .foregroundStyle(Color(Style.errorColor))
           .fixedSize(horizontal: false, vertical: true)
+      } else if let needsFile = status.needsFile {
+        // Not an error: the row is right, and its file is elsewhere. The row
+        // that names the file is where it is asked for (on the site the
+        // message is itself the button); a drop anywhere supplies it too.
+        Text(needsFile)
+          .font(.caption)
+          .foregroundStyle(.secondary)
+          .fixedSize(horizontal: false, vertical: true)
+        if status.opensFile == true {
+          Button("Choose File…", systemImage: "tray.and.arrow.down", action: supply)
+            .controlSize(.small)
+            .font(.caption)
+        }
       } else if let unsupported = status.unsupported {
         // Not an error: the site draws the row, and the app will.
         Text(unsupported)
