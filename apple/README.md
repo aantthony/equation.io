@@ -93,8 +93,20 @@ swift run metal-shot --diff web.png metal.png --out diff.png
 
 `Render3D.swift` and `Renderer3D.swift` are `web/render3d.ts` the same way:
 its scene types, and its vertex and fragment shaders (`Frag3D.swift`)
-compiled as Metal by `GLSL3D.swift`. The language's Swift port doesn't
-compile 3D rows yet, so a 3D scene comes from the TypeScript for now:
+compiled as Metal by `GLSL3D.swift`. A document with a row in space
+(`Graph.kind(of:)`) is drawn through `Document3D.swift`, which builds the
+scene from the rows' plans as `web/main.ts` `renderPanel` does: shaders for
+surfaces and clouds, and what the site samples, traces or solves on the CPU
+(curves and tubes, a field's streamlines, intersections, systems).
+
+```sh
+swift run metal-shot --out metal.png "z = sin(x) cos(y)" "camera(-pi/3, 0.5, 9)"
+```
+
+`tools/scene3d.ts` builds the same scene with the TypeScript pipeline, as
+JSON metal-shot also draws (`--scene scene.json`); `corpus/scenes3d.ts`
+records it for a set of documents, and `Document3DConformance` holds the
+Swift builder to it:
 
 ```sh
 node --experimental-transform-types ../tools/scene3d.ts "z = sin(x) cos(y)" "camera(-pi/3, 0.5, 9)" > scene.json
