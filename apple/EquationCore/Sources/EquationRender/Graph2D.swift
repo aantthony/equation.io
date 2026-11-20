@@ -49,6 +49,8 @@ public struct Graph2D: Equatable, Sendable {
   let sampledRegions = SampledRegions()
   /// The way back through the panel's plane map (Graph2D+Maps.swift).
   let planes = PlaneInverses()
+  /// Each graph row's layout (Graph2D+Graphs.swift).
+  let graphLayouts = GraphLayouts()
 
   public struct Window: Equatable, Sendable {
     public var x: [Double]?
@@ -135,6 +137,7 @@ public struct Graph2D: Equatable, Sendable {
     if !tfields.isEmpty { layers.tfields = tfields }
     if !bifs.isEmpty { layers.bifs = bifs }
     if !projections.isEmpty { layers.projections = projections }
+    if Self.isGraphPanel(analysis) { grid = .off }
     lattice = Self.latticeAxes(analysis)
     if let lattice, let written, let asked = window {
       let oriented = Self.orientLattice(x: asked.x, y: asked.y, written: written, axes: lattice)
@@ -219,6 +222,8 @@ public struct Graph2D: Equatable, Sendable {
         drawIntegral(shade, row: index, color: color, env: env, bounds: bounds, into: &overlay)
       case .pregion(let comps) where comps.count == 2:
         drawParametricRegion(comps, row: index, env: env, color: color, into: &overlay)
+      case .graph(let edges):
+        drawGraph(edges, row: index, color: css, env: env, time: time, pointsPerUnit: pointsPerUnit, into: &overlay)
       case .orbit:
         if let pts = orbits[index] { overlay.polylines.append(.init(pts: pts, color: css)) }
       case .trail(2, let coords):

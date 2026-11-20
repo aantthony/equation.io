@@ -73,6 +73,8 @@ public indirect enum MathObject: Equatable, Sendable {
   case automaton(rule: Expr, radius: Int, seed: Expr?, dims: Int, axes: [String])
   /// A function on the integer lattice, `T[i, j] = …`.
   case lattice(expr: Expr, axes: [String])
+  /// `graph(from, to)` / `graph(from, to, label)` (Graphs.swift): one edge per row.
+  case graph(edges: [[Expr]])
   // In space (Classify3D.swift).
   /// `tube(curve[, radius])`: a curve in space swept as a lit tube.
   case curveTube(coordinates: [Expr], radius: Expr)
@@ -155,6 +157,7 @@ public indirect enum MathObject: Equatable, Sendable {
     case .bifurcation: "bifurcation"
     case .automaton: "automaton"
     case .lattice: "lattice"
+    case .graph: "graph"
     case .distribution(let form, _, _): form.rawValue
     case .probability: "prob"
     case .orbit: "orbit"

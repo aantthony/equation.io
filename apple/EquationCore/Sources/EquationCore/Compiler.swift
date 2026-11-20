@@ -62,6 +62,8 @@ public enum CpuPlan: Equatable, Sendable {
   case automaton(rule: Expr, radius: Int, seed: Expr?, dims: Int, axes: [String])
   /// A table's value over the cells.
   case lattice(expr: Expr, axes: [String])
+  /// A graph's edges, one row of [from, to] or [from, to, label] each (Graphs.swift).
+  case graph(edges: [[Expr]])
   // In space (Compiler3D.swift).
   /// `heightmap`: f, when the surface is z = f(x, y).
   case implicit3d(residual: Expr, equation: Expr, heightmap: Expr?)
@@ -131,6 +133,7 @@ public enum CpuPlan: Equatable, Sendable {
     case .bifurcation: "bifurcation"
     case .automaton: "automaton"
     case .lattice: "lattice"
+    case .graph: "graph"
     case .implicit3d: "implicit3d"
     case .scalar3d: "scalar3d"
     case .spacecurve: "spacecurve"
@@ -330,6 +333,8 @@ public func compileCpu(_ classified: Classified) throws -> CpuPlan {
     return .automaton(rule: rule, radius: radius, seed: seed, dims: dims, axes: axes)
   case .lattice(let expr, let axes):
     return .lattice(expr: expr, axes: axes)
+  case .graph(let edges):
+    return .graph(edges: try edges.map { try $0.map(real) })
   case .distribution(let form, let rv, let mass):
     return switch form {
     case .density: .density(rv: rv, mass: mass)
@@ -450,7 +455,7 @@ public func compileGpu(_ classified: Classified) throws -> GpuPlan {
     return plan(.bifurcation(field: try glsl(sub(substVars(expr, [variable: .var("a")])))))
   case .point, .complexPoint, .curveParametric, .complexPath, .value, .note, .label, .figure, .tuple, .sequence,
     .automaton, .lattice, .curveTube, .intersection, .system, .complexSystem, .distribution, .probability, .orbit,
-    .trail, .geodesic,
+    .trail, .geodesic, .graph,
     .list, .histogram, .tuples, .blades, .flat:
     return plan(.none)
   case .family(let members, let shared):

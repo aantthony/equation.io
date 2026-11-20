@@ -59,6 +59,7 @@ import { DATA_CASES, generated } from './cases-data.ts';
 import { parseCsv, type Table } from '../../lib/csv.ts';
 import { shortHash } from '../../lib/hash.ts';
 import { MEASURE_CASES } from './cases-measure.ts';
+import { REST_CASES, recordGraph } from './cases-rest.ts';
 
 const fixtures = new URL('../EquationCore/Tests/EquationCoreTests/Fixtures/', import.meta.url);
 
@@ -120,6 +121,8 @@ for (const type of ['vlist', 'plist', 'dlist', 'dscatter', 'histogram', 'family'
 PORTED.add('projected2d');
 // Geodesics of a surface (Geodesic.swift).
 PORTED.add('geodesic');
+// Graphs (Graphs.swift).
+PORTED.add('graph');
 function slim(plan: { type: string } | undefined): unknown {
   if (!plan) return null;
   if (!PORTED.has(plan.type)) return { type: plan.type, omitted: true };
@@ -1156,6 +1159,7 @@ function cloudError(plot: import('../../lib/compiler.ts').CpuPlan | undefined): 
 }
 
 MEASURE_CASES.forEach((text, k) => docs.push({ name: `case measure ${k + 1}`, rows: splitStatements(text) }));
+REST_CASES.forEach((text, k) => docs.push({ name: `case rest ${k + 1}`, rows: splitStatements(text) }));
 randomDocs(Number(process.env.RANDOM_DOCS ?? 600)).forEach((text, k) =>
   docs.push({ name: `case random ${k + 1}`, rows: splitStatements(text) }),
 );
@@ -1228,6 +1232,8 @@ const recorded = docs.map(({ name, rows, files, link }) => {
         cpu: slim(row.cpu),
         gpu: slim(row.gpu),
         drawn: drawnOf(row.cpu, analysis.rvs, analysis.constEnv),
+        mark: !!row.mark,
+        graph: recordGraph(row.cpu, analysis.constEnv),
       };
     }),
   };

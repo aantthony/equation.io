@@ -295,6 +295,7 @@ private final class StackBox<T>: @unchecked Sendable {
     }
     // What is drawn of a random variable's law.
     out += drawnDifferences(got.cpu, want["drawn"], analysis)
+    out += restDifferences(got, want, analysis)
     let gpu = want["gpu"] as? [String: Any]
     check("gpu type", got.gpu?.type, gpu?["type"] as? String)
     func compareGpu(_ mine: GpuPlan, _ gpu: [String: Any], _ at: String) {
@@ -485,6 +486,8 @@ private final class StackBox<T>: @unchecked Sendable {
       return .automaton(
         rule: try expr("rule"), radius: (o["radius"] as! NSNumber).intValue, seed: try o["seed"].map(decode),
         dims: (o["dims"] as! NSNumber).intValue, axes: o["axes"] as! [String])
+    case "graph":
+      return .graph(edges: try (o["edges"] as! [[Any]]).map { try $0.map(decode) })
     case "lattice":
       if o["rows"] != nil { throw FixtureError(description: "a table of computed rows") }
       return .lattice(expr: try expr("expr"), axes: o["axes"] as! [String])

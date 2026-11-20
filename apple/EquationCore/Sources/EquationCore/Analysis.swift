@@ -58,6 +58,9 @@ public struct RowAnalysis: Equatable, Sendable {
   /// A scalar field shaded to its own size where it is drawn: gaussian(x, y)
   /// on a panel's surface (the site's `autoscale` on a scalar2d plan).
   public var autoscale = false
+  /// Set for `mark(v)` rows: v's value is highlighted as a vertex of the
+  /// graphs in its panel (Graphs.swift).
+  public var mark = false
 
   /// A `---` row, which starts a new panel.
   public var divider: Bool {
@@ -612,11 +615,15 @@ public func analyze(_ sources: [String], files: DataFiles? = nil) -> DocumentAna
         throw LanguageError(
           "d is taken by derivatives (d/dx), so it cannot name a slider or function. Pick another name, like k.")
       }
-      for call in ["graph", "mark"] where !fnNames.contains(call) && viewHeadIs(text, call) {
-        throw Unsupported("\(call)(…)")
-      }
+      // graph(from, to, label) reads as the tuple of its arguments: one edge
+      // per element of its multiset (Graphs.swift).
+      // (A document's own graph or mark function is that function.)
+      let graphArgs = fnNames.contains("graph") ? nil : wholeCall("graph", text)
+      // mark(v) is v, highlighted in the panel's graphs.
+      let markArg = fnNames.contains("mark") ? nil : wholeCall("mark", text)
+      let source = graphArgs.map { "(\($0))" } ?? markArg.map { "(\($0))" } ?? text
       if let takenName = takenBinder(text, valueNames) { throw LanguageError(takenName) }
-      let rawParsed = try parseExpr(text, userFns: fnNames, listNames: listNames, valueNames: valueNames)
+      let rawParsed = try parseExpr(source, userFns: fnNames, listNames: listNames, valueNames: valueNames)
       // `p(50..400)`: where p goes over that time.
       if case .bin(.mul, let value, .range(let from, let to), _) = rawParsed {
         func lower(_ e: Expr) throws -> Expr {
@@ -638,7 +645,7 @@ public func analyze(_ sources: [String], files: DataFiles? = nil) -> DocumentAna
       // A row not drawn over the plane may test equality in a case: `f(2)`
       // with f(m) = {mod(m, 2) = 0: …}.
       func plane(_ e: Expr) -> Bool { freeVars(e).contains(where: ["x", "y", "z"].contains) }
-      let exact = !plane(rawParsed)
+      let exact = graphArgs != nil || !plane(rawParsed)
       var rowOpts = ropts
       rowOpts.exactConditions = exact
       // (A row's own expression may read an interval: Interval.swift.)
@@ -655,10 +662,10 @@ public func analyze(_ sources: [String], files: DataFiles? = nil) -> DocumentAna
       }
       // (With the ∫ the row consists of, if it is exactly one: Integrals.swift.)
       let (resolvedRow, integral) = try Resolver(getFn: getFn, opts: rowOpts).resolveRow(
-        painted.map { .call(PAINT_CALL, [$0, rawParsed]) } ?? rawParsed)
+        graphArgs != nil ? exactCases(rawParsed) : painted.map { .call(PAINT_CALL, [$0, rawParsed]) } ?? rawParsed)
       var resolved = resolvedRow
       memberNotes[i] = perMemberNote(resolved, ropts.isList)
-      if exact {
+      if exact, graphArgs == nil {
         // Over numbers a case is the tolerance form the evaluator runs; one
         // whose side is a list stays an equation, for list lowering to
         // decide member by member.
@@ -701,6 +708,18 @@ public func analyze(_ sources: [String], files: DataFiles? = nil) -> DocumentAna
       if panelSurfaces[panel] != nil, !cls.needs3D {
         cls = try classifyOnSurface(cls)
         rows[i].autoscale = shadedToItsSize(cls.object, rawParsed, fnNames)
+      }
+      if graphArgs != nil {
+        rows[i].classified = try graphObject(cls)
+        continue
+      }
+      if markArg != nil {
+        guard case .value = cls.object else {
+          throw LanguageError("mark(v) highlights the vertex v of the graphs in its panel: give it one number.")
+        }
+        rows[i].mark = true
+        rows[i].classified = cls
+        continue
       }
       // A solid whose shape reads sliders is checked for folds at their values.
       if let solid = cls.solid { try checkFolds(solid, ropts.consts) }
@@ -931,11 +950,3 @@ public func analyze(_ sources: [String], files: DataFiles? = nil) -> DocumentAna
     constExprs: built.consts.entries.map(\.value))
 }
 
-/// `^\s*name\s*\(`
-private func viewHeadIs(_ text: String, _ name: String) -> Bool {
-  var s = RowScanner(text)
-  s.space()
-  guard s.eat(word: name) else { return false }
-  s.space()
-  return s.peek == unit("(")
-}
