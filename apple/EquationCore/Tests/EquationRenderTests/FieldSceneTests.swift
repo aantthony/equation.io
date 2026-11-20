@@ -43,6 +43,7 @@ private func kinds(_ layers: Layers2D) throws -> [(name: String, layers: Layers2
     "rgb-field",  // rgb(sin(x-t)^2, sin(y-t)^2, sin(x+y+t)^2)
     "mandelbrot",  // view(x = -2.2..0.8, y = -1.3..1.3); iter(z^2 + w)
     "burning-ship",  // view(x = -2.4..1.7, y = -1.2..1.9); iter((|re(z)| - i |im(z)|)^2 + w)
+    "rule-30",  // rule 30's first 81 rows, 121 cells wide; view(i = -60..60, n = 0..80)
   ])
   func eachLayerDraws(name: String) throws {
     let metal = try #require(MetalContext())
@@ -73,5 +74,35 @@ private func kinds(_ layers: Layers2D) throws -> [(name: String, layers: Layers2
     lines.time = 0.25
     #expect(try bytes(metal, flow) != flow0)
     #expect(try bytes(metal, lines) == lines0)
+  }
+
+  /// A cell texture is uploaded once per shade buffer, and dropped at the
+  /// end of the first frame that doesn't draw it.
+  @Test func cellTexturesFollowTheirBuffers() throws {
+    let metal = try #require(MetalContext())
+    let cells = try #require(try scene("rule-30").layers.cells?.first)
+    let textures = CellTextures()
+    let first = try #require(textures.texture(cells, device: metal.device))
+    #expect(first.pixelFormat == .r8Uint)
+    #expect(first.width == cells.width && first.height == cells.rows)
+    var recoloured = cells
+    recoloured.color = [1, 0, 0]
+    #expect(textures.texture(recoloured, device: metal.device) === first)
+    textures.endFrame()
+    #expect(textures.count == 1)
+
+    // Another buffer of the same cells is another texture.
+    var copy = cells
+    copy.shades = CellShades(cells.shades.bytes)
+    #expect(textures.texture(copy, device: metal.device) !== first)
+    #expect(textures.count == 2)
+    textures.endFrame()
+    #expect(textures.count == 1)
+    textures.endFrame()
+    #expect(textures.count == 0)
+
+    // Shades that are not width × rows cells are not drawn.
+    copy.width += 1
+    #expect(textures.texture(copy, device: metal.device) == nil)
   }
 }

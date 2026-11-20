@@ -191,6 +191,7 @@ final class MetalCanvas: MTKView, MTKViewDelegate {
     renderer.render(
       encoder, target: (Int(size.width), Int(size.height)), view: viewport.view, layers: layers,
       time: CACurrentMediaTime() - opened, theme: theme)
+    renderer.endFrame()
     encoder.endEncoding()
     buffer.present(drawable)
     buffer.commit()

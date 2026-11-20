@@ -63,6 +63,7 @@ public struct Curve2D: Equatable, Codable, Sendable {
 /// Everything drawable in a 2D frame, in back-to-front draw order
 /// (web/render2d.ts `Layers2D`). A layer joins this struct when its shader is ported.
 public struct Layers2D: Equatable, Codable, Sendable {
+  public var cells: [Cells2D]?
   public var fractals: [Fractal2D]?
   public var domains: [Curve2D]?
   public var colors: [ColorField2D]?
@@ -73,10 +74,11 @@ public struct Layers2D: Equatable, Codable, Sendable {
   public var curves: [Curve2D]?
 
   public init(
-    fractals: [Fractal2D]? = nil, domains: [Curve2D]? = nil, colors: [ColorField2D]? = nil,
+    cells: [Cells2D]? = nil, fractals: [Fractal2D]? = nil, domains: [Curve2D]? = nil, colors: [ColorField2D]? = nil,
     conformals: [Curve2D]? = nil, vfields: [VField2D]? = nil, tfields: [TField2D]? = nil,
     complexes: [Curve2D]? = nil, curves: [Curve2D]? = nil
   ) {
+    self.cells = cells
     self.fractals = fractals
     self.domains = domains
     self.colors = colors
@@ -150,9 +152,17 @@ public func niceSpacing(_ upp: Double, _ minPx: Double) -> (major: Double, minor
 
 public final class Renderer2D {
   public let metal: MetalContext
+  /// Cell textures by the shade buffer they were uploaded from (Cells2D.swift).
+  let cellTextures = CellTextures()
 
   public init(_ metal: MetalContext) {
     self.metal = metal
+  }
+
+  /// Drop cell textures no render drew since the last call: once per frame,
+  /// after every panel of a split view has rendered.
+  public func endFrame() {
+    cellTextures.endFrame()
   }
 
   /// Draw a frame into `encoder`, whose target is `target` pixels: the grid,
@@ -214,6 +224,15 @@ public final class Renderer2D {
       drawProgram(frag(item.field, item.params), item.color, item.params, item.uniforms)
     }
 
+    for c in layers.cells ?? [] {
+      guard let texture = cellTextures.texture(c, device: metal.device) else { continue }
+      uniforms.color = SIMD4(c.color, 1)
+      let named: [String: [Float]] = [
+        "uSize": [Float(c.width), Float(c.rows)], "uCorner": [Float(c.x0), Float(c.y0)],
+        "uRuns": [c.runs.x ? 1 : 0, c.runs.y ? 1 : 0],
+      ]
+      metal.draw(encoder, fragment: CELLS_FRAG, frame: uniforms, texture: { _ in texture }) { named[$0] }
+    }
     for f in layers.fractals ?? [] {
       // The site leaves a fractal's own uniforms unset; they are set here, as every other layer's are.
       let frag = fractalFrag(f.step, seed: f.seed, maxIter: f.maxIter, params: f.params)
