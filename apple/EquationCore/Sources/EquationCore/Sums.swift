@@ -293,6 +293,11 @@ extension Resolver {
     if reservedNames.contains(idx) {
       throw LanguageError("Cannot use \"\(idx)\" as a \(sym) index (it is reserved).")
     }
+    // A literal in the body is written once: every term's copy is that one
+    // list, so the terms pair up element by element rather than crossing.
+    // A bound that names a list is one sum per element (ObjectLists.swift).
+    let body = markedLists(body)
+    if let listed = try sumOverList(name, sym, args, body) { return listed }
     // A bound that uses an open name (the sequence index) cannot be expanded
     // here: the sum stays a call and evaluate() runs it once that name is a number.
     func bound(_ b: Expr) throws -> (expr: Expr, value: Double?) {

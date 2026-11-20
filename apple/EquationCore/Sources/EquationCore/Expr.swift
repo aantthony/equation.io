@@ -3,10 +3,24 @@
 ///
 /// Every kind of the TypeScript's union is here, field for field. The first
 /// fourteen are what the parser writes; the rest only lowering makes (a
-/// function applied to a point, a figure, a packed list, a loop). What the
-/// TypeScript hangs on a node besides (`axes` and `origin`, a list's identity
-/// while lists lower) is not carried: an enum's cases have no room for it,
-/// and `exprKey` leaves it out.
+/// function applied to a point, a figure, a packed list, a loop).
+///
+/// List identity. The TypeScript hangs `axes` and `origin` on list nodes: a
+/// list's identity while lists lower, which decides whether two lists zip
+/// (the same list) or cross (independent ones). An enum's cases have no room
+/// for them, and a value has no identity of its own, so the port carries
+/// them without touching a case:
+/// - the axes a lowered list runs over travel beside it, in a `Low`
+///   (Lists.swift), never on the node;
+/// - a list literal the resolver has met is written `[list](id, [ … ])`, a
+///   call no row can spell (`LIST_ID`), so every copy substitution makes of
+///   it is the same list, as every reference to the TypeScript's one node
+///   is; `[origin](id, [ … ])` is one `markOrigins` marked, whose identity
+///   also survives a copy that changes its items;
+/// - a list lowered ahead of its row is written back as `[seq](axes, list)`
+///   (`LIST_SEQ`), as the TypeScript writes back a node with its `axes`.
+/// List lowering reads all three and leaves none behind; `exprKey` of a
+/// lowered tree never sees one.
 public indirect enum Expr: Equatable, Hashable, Sendable {
   case num(Double)
   case `var`(String)
@@ -157,6 +171,13 @@ let NONE = "[none]"
 /// `[map](body, "m", M, …)` is the body once per member. List lowering
 /// evaluates it; nothing downstream sees it.
 let MAP = "[map]"
+/// A list literal with an identity, `[list]("7", [1, 2, 3])`, and one whose
+/// identity survives a changed copy (lib/expr.ts `origin`); see "List
+/// identity" above.
+let LIST_ID = "[list]"
+let LIST_ORIGIN = "[origin]"
+/// A lowered list with the axes it runs over, `[seq](axes, list)`.
+let LIST_SEQ = "[seq]"
 /// Passes a tail-recursive function may take before it is undefined
 /// (lib/expr.ts `LOOP_LIMIT`).
 let LOOP_LIMIT = 250

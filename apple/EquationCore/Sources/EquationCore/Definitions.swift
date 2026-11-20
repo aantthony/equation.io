@@ -8,9 +8,11 @@
 ///   written into the rows that name it.
 /// - `A = (1, 2)` names a point: its components are the constants A_x, A_y.
 /// - `within = r < 2` names a condition, read in braces: `{within: 1}`.
+/// - `L = [1, 2, 3]`, `T = (1, 2, 3, 4)` and `p ∈ L` name lists (Lists.swift).
 ///
 /// - `a = e^(i pi/3)` names a complex number, written in where it is read.
 /// - `M = ((1, 2), (3, 4))` names a matrix, expanded where it is used.
+/// - `L = [1, 2, 3]`, `T = (1, 2, 3, 4)` and `p ∈ L` name lists (Lists.swift).
 ///
 /// Data files, lists, intervals and multivectors are not ported (states are
 /// in States.swift): their rows are reported as not supported yet, and so is
@@ -450,6 +452,9 @@ struct BuiltDefs {
   /// constants `M#k` (see `hoist`).
   var mats = OrderedMap<Mat>()
   var tensors = OrderedMap<Tensor>()
+  /// Named lists, and scatters of columns, each with the instances it runs
+  /// over (Lists.swift).
+  var lists = OrderedMap<Low>()
   /// Per-definition errors by key; failed definitions are not in the stores.
   var errors = OrderedMap<String>()
   /// Definitions the port cannot read yet, by key, with what stopped it.
@@ -511,6 +516,10 @@ func buildDefs(_ raw: [Definition], skip: Set<String>, sequences: [SeqScan] = []
     // Σ/Π bounds in later definitions may use the constants resolved so far.
     opts.consts = { numEnv[$0] }
     opts.boundConsts = boundConsts
+    // Live too: list names accumulate as definitions are processed.
+    opts.isList = { [defs] in isListName(defs, $0) }
+    opts.getList = listGetter(defs)
+    opts.indexIssue = { [defs] index, _ in indexIssue(index, defs) }
     if !seq.sequences.isEmpty { opts.sequenceTerm = { [unowned seq] in try seq.resolve($0, $1, $2) } }
     return opts
   }
@@ -520,6 +529,7 @@ func buildDefs(_ raw: [Definition], skip: Set<String>, sequences: [SeqScan] = []
     if let p = parsed[d.key] { return p }
     var values = valueNames
     var names = Set(defs.pointDims.keys).union(defs.mats.keys).union(defs.tensors.keys).union(seqIndexNames)
+      .union(defs.lists.keys)
     if case .function(_, let params, _) = d {
       // A function's parameters are values in its body, and index too.
       values.formUnion(shadowedFnNames(params))
@@ -584,7 +594,7 @@ func buildDefs(_ raw: [Definition], skip: Set<String>, sequences: [SeqScan] = []
   seq.getFn = getFn
   seq.opts = options()
   seq.fnNames = { Set(defs.fns.keys) }
-  seq.indexNames = { Set(defs.pointDims.keys) }
+  seq.indexNames = { Set(defs.pointDims.keys).union(defs.lists.keys) }
   seq.isKnown = { known.contains($0) }
   seq.addKnown = { known.insert($0) }
   seq.protectedNames = known
@@ -597,7 +607,8 @@ func buildDefs(_ raw: [Definition], skip: Set<String>, sequences: [SeqScan] = []
   // whether the condition's row is above the function's or below.
   for d in raw where !skip.contains(d.key) {
     guard case .constant(let name, let rhs, false) = d else { continue }
-    let above = Set(defs.pointDims.keys).union(seqIndexNames)
+    let above = Set(defs.pointDims.keys).union(seqIndexNames).union(defs.mats.keys).union(defs.tensors.keys)
+      .union(defs.lists.keys)
     guard let source = try? parseExpr(rhs, userFns: fnNames, listNames: above, valueNames: valueNames),
       case .ineq = source
     else { continue }
@@ -619,11 +630,14 @@ func buildDefs(_ raw: [Definition], skip: Set<String>, sequences: [SeqScan] = []
       case .table:
         throw Unsupported("data files")
       case .state(let name, _):
-        states.derivs[name] = try Resolver(getFn: getFn, opts: options()).resolve(try parse(d))
+        let opts = options()
+        states.derivs[name] = try withoutStateFamily(
+          try Resolver(getFn: getFn, opts: opts).resolve(try parse(d)), opts.isList)
       case .initial(let name, _):
-        states.inits[name] = try Resolver(getFn: getFn, opts: options()).resolve(try parse(d))
+        let opts = options()
+        states.inits[name] = try withoutStateFamily(
+          try Resolver(getFn: getFn, opts: opts).resolve(try parse(d)), opts.isList)
       case .constant(let name, _, let draw):
-        if draw { throw Unsupported("drawing a name from a list (∈)") }
         let resolved = try Resolver(getFn: getFn, opts: options()).resolve(try parse(d))
         defs.conditions[name] = nil
         // u and v take only an interval: the range they run over.
@@ -637,35 +651,58 @@ func buildDefs(_ raw: [Definition], skip: Set<String>, sequences: [SeqScan] = []
         // `M = ((a, b), (c, d))`, `R = e^(a J)`, `N = 2 M`: a tuple of rows,
         // or matrix algebra, names a matrix.
         let getMat: GetMat = { defs.mats[$0] }
-        let getTensor: GetTensor = { tensor, _ in defs.tensors[tensor] }
-        if let computed = try lowerMatrix(resolved, comps: comps, getMat: getMat, getTensor: getTensor) {
+        let getTensor = tensorGetter(defs)
+        // A binder draws from a list; the other named values below are not one.
+        func notDrawn(_ what: String) throws {
+          if draw { throw LanguageError("\(name) ∈ … draws from a list; that is \(what).") }
+        }
+        // M Q with Q a multiset of points is those points moved, never a
+        // matrix: the object expansion applies M to each.
+        let ofPoints = readsPointList(resolved, defs)
+        if !ofPoints,
+          let computed = try lowerMatrix(resolved, comps: comps, getMat: getMat, getTensor: getTensor)
+        {
+          try notDrawn("a matrix")
           defs.mats[name] = computed.map { row in row.map { hoist(name, $0) } }
           continue
         }
         // `T = e_x ⊗ e_y ⊗ e_z`: a tensor of any other shape.
-        if let tensor = try lowerTensorValue(resolved, comps: comps, getMat: getMat, getTensor: getTensor) {
+        if !ofPoints,
+          let tensor = try lowerTensorValue(resolved, comps: comps, getMat: getMat, getTensor: getTensor)
+        {
+          try notDrawn("a tensor")
           defs.tensors[name] = Tensor(shape: tensor.shape, data: tensor.data.map { hoist(name, $0) })
           continue
         }
-        let e = try lowerObjects(resolved, comps: comps, mats: getMat, tensors: getTensor)
+        // A list, a tuple of more than 3 values or a scatter of columns names
+        // a list: the name is its values, over instances of its own.
+        let listed = try namedList(name, resolved, draw: draw, ofPoints: ofPoints, defs, options(), comps: comps)
         // A tuple of computed points that is square, `A = (2 P, Q + R)`:
         // one tensor, named as a matrix when it is square.
-        if let reduced = tensorOfNode(e), reduced.shape.count >= 2 {
+        if let reduced = tensorOfNode(listed.e), reduced.shape.count >= 2 {
+          try notDrawn("a tensor")
           if let m = toMat(reduced) { defs.mats[name] = m } else { defs.tensors[name] = reduced }
           continue
         }
+        if listed.isSeq || isDataScatter(listed.e) {
+          defs.lists[name] = listed
+          continue
+        }
+        let e = listed.e
         // `within = r < R`, or another name for one: a condition.
         var alias: Expr?
         if case .var(let other) = e { alias = defs.conditions[other] }
         if case .ineq = e { alias = alias ?? e }
         if let alias {
+          if draw { throw LanguageError("\(name) ∈ … draws from a list; that is a condition.") }
           defs.conditions[name] = alias
           continue
         }
         var store: [(String, Expr)] = [(name, e)]
         if case .vec(let items) = e {
-          // (A longer tuple is a list of its values, which is not ported.)
-          if items.count != 2 && items.count != 3 { throw Unsupported("tuples of more than 3 values") }
+          if items.count != 2 && items.count != 3 {
+            throw LanguageError("A named point needs 2 or 3 components.")
+          }
           let names = pointComps(name, items.count)
           for c in names where byName[c] != nil {
             throw LanguageError("Cannot name a point \(name): \(c) is already defined.")
@@ -745,6 +782,7 @@ func buildDefs(_ raw: [Definition], skip: Set<String>, sequences: [SeqScan] = []
     &defs, &states, defined: { byName[$0] != nil },
     comps: { name in pointNames.contains(name) ? pointComps(name, pointDims[name] ?? 2) : nil },
     mats: { matrices[$0] })
+  writeComplexLists(&defs)
 
   // A definition whose value depends on position — x, y, or z, directly or
   // via another such definition — is a coordinate field, not a constant. So
@@ -880,6 +918,17 @@ func buildDefs(_ raw: [Definition], skip: Set<String>, sequences: [SeqScan] = []
     dropPoint(p)
     for c in names { defs.fields[c] = nil }
   }
+  // A binder draws from a list; one over position (or over u, v) is a field
+  // (or a curve), which has no members to draw.
+  for d in raw {
+    guard case .constant(let name, _, true) = d else { continue }
+    let names = defs.points.contains(name) ? pointComps(name, defs.pointDims[name] ?? 2) : [name]
+    guard names.contains(where: defs.fields.has) else { continue }
+    let what = names.contains(where: paramNames.contains) ? "a curve" : "a field"
+    defs.errors[name] = "\(name) ∈ … draws from a list; that is \(what)."
+    dropPoint(name)
+    for c in names { defs.fields[c] = nil }
+  }
   // Grid families draw in definition order, not dependency-resolution order.
   var orderedFields = OrderedMap<Expr>()
   for name in pendingFields.keys {
@@ -936,12 +985,19 @@ func buildDefs(_ raw: [Definition], skip: Set<String>, sequences: [SeqScan] = []
     }
   }
 
+  // A list holds data: its elements may only use constants and t.
+  for (name, message) in strayListNames(defs, constNames) {
+    defs.errors[name] = message
+    defs.lists[name] = nil
+  }
+
   // Trial-evaluate to surface cycles and unsupported calls at definition time.
   func check(_ name: String, _ visiting: inout Set<String>) throws {
     guard let e = defs.consts[name] else {
       // A surviving matrix or tensor name means it was defined below its
       // use, so lowering saw it as a plain scalar.
-      if let kind = defs.mats.has(name) ? "a matrix" : defs.tensors.has(name) ? "a tensor" : nil {
+      let listed = defs.lists.has(name) ? "a list" : nil
+      if let kind = listed ?? (defs.mats.has(name) ? "a matrix" : defs.tensors.has(name) ? "a tensor" : nil) {
         throw LanguageError("\(name) is \(kind) — move its definition above where it is used.")
       }
       throw LanguageError(
@@ -1010,6 +1066,7 @@ func buildDefs(_ raw: [Definition], skip: Set<String>, sequences: [SeqScan] = []
         || defs.complexes.has(name)
         || defs.fns[name] != nil || defs.unsupported[name] != nil || defs.mats.has(name) || defs.tensors.has(name)
         || defs.states.has(name) || defs.vecStates[name] != nil
+        || defs.lists.has(name)
     }
     func references(_ expr: Expr) -> NameSet {
       var names = freeVars(expr)
@@ -1045,6 +1102,7 @@ func buildDefs(_ raw: [Definition], skip: Set<String>, sequences: [SeqScan] = []
       defs.mats[name] = nil
       defs.tensors[name] = nil
       defs.states[name] = nil
+      defs.lists[name] = nil
     }
     func remove(_ name: String) {
       let owner = ownerOf(name)
@@ -1072,6 +1130,7 @@ func buildDefs(_ raw: [Definition], skip: Set<String>, sequences: [SeqScan] = []
       // (A matrix's entries are checked one by one, to the same end.)
       for (name, matrix) in defs.mats.entries { candidates += matrix.flatMap { $0 }.map { (name, $0, []) } }
       for (name, tensor) in defs.tensors.entries { candidates += tensor.data.map { (name, $0, []) } }
+      candidates += defs.lists.entries.map { ($0.key, $0.value.e, []) }
       for (name, expr, params) in candidates where present(name) {
         var refs = sourceRefs(name)
         for ref in references(expr) { refs.insert(ref) }

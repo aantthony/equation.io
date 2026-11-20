@@ -80,7 +80,7 @@ public struct Graph2D: Equatable, Sendable {
         let color = colors[index]
       else { continue }
       switch gpu.shader {
-      case .none:
+      case .none, .family:
         break
       case .implicit2d(let field, _):
         let graphEval = gpu.graphEval.map { Curve2D.GraphEval(glsl: $0.glsl, slopeScale: $0.slopeScale) }

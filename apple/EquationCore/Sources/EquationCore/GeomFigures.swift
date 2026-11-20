@@ -4,14 +4,14 @@
 /// those points, and a figure of a matrix is the figure of its rows.
 
 /// Figures that are just their points: moving the points moves the figure.
-private let POINT_FIGURES: Set<String> = ["segment", "polyline", "polygon", "vector", "hull"]
+let POINT_FIGURES: Set<String> = ["segment", "polyline", "polygon", "vector", "hull"]
 
 private func figureCall(_ e: Expr) -> (name: String, args: [Expr])? {
   if case .call(let name, let args) = e, POINT_FIGURES.contains(name) { return (name, args) }
   return nil
 }
 
-private func holdsFigure(_ e: Expr) -> Bool {
+func holdsFigure(_ e: Expr) -> Bool {
   switch e {
   case .call(let name, let args): POINT_FIGURES.contains(name) || args.contains(where: holdsFigure)
   case .bin(_, let a, let b, _): holdsFigure(a) || holdsFigure(b)
@@ -67,10 +67,14 @@ private func pushTransforms(_ e: Expr, _ rowsOf: (Expr) -> [Expr]?) throws -> Ex
 /// as its rows, computed as the matrix first (2 M, M N), so polyline(M N)
 /// draws what P = M N; polyline(P) draws.
 func lowerFigureObjects(
-  _ source: Expr, _ comps: @escaping (String) -> [String]?, _ mats: @escaping GetMat, _ tensors: @escaping GetTensor
+  _ source: Expr, _ comps: @escaping (String) -> [String]?, _ mats: @escaping GetMat, _ tensors: @escaping GetTensor,
+  notMatrix: (Expr) -> Bool = { _ in false }
 ) throws -> Expr {
   /// A matrix consumed as its rows (lib/object-lists.ts `matrixRows`).
+  /// `notMatrix`: a list of points beside a matrix (R P) is a multiset of
+  /// points, not a matrix scaled by a list.
   func matrixRows(_ arg: Expr) -> [Expr]? {
+    if notMatrix(arg) { return nil }
     let m: Mat? =
       if case .var(let name) = arg {
         mats(name)
@@ -92,51 +96,9 @@ func lowerFigureObjects(
         default: false
         }
       }
-      if points { return try lowerFigureObjects(.call(name, items), comps, mats, tensors) }
+      if points { return try lowerFigureObjects(.call(name, items), comps, mats, tensors, notMatrix: notMatrix) }
     }
     if let rows = matrixRows(args[0]) { return .call(name, rows) }
   }
   return e
-}
-
-/// What a row that failed to lower says. Where lowering fails, the site
-/// expands the row over its lists (lib/object-lists.ts `expand`), and a
-/// matrix is the list of its rows there, as a tuple of points is of its
-/// points: distance(M, A) is a list of distances. Lists are not ported, so
-/// the failure of a row that names a matrix or writes a tuple of points is
-/// not known to be the site's — unless it is about the matrix itself, which
-/// the site keeps (`/matri|tensor/`, but for a matrix standing where a value
-/// goes).
-func failedLowering(
-  _ error: LanguageError, _ e: Expr, _ comps: (String) -> [String]?, _ mats: GetMat, withMatrices: Bool
-) -> any Error {
-  func isRow(_ item: Expr) -> Bool {
-    switch item {
-    case .vec: true
-    case .var(let name): comps(name) != nil
-    default: false
-    }
-  }
-  func readsRows(_ n: Expr) -> Bool {
-    switch n {
-    case .var(let name): if mats(name) != nil { return true }
-    case .vec(let items): if items.contains(where: isRow) { return true }
-    default: break
-    }
-    return childrenOf(n).contains(where: readsRows)
-  }
-  guard withMatrices || readsRows(e) else { return error }
-  let text = error.message.lowercased()
-  let aboutTheMatrix = (text.contains("matri") || text.contains("tensor")) && !text.contains("not a value on its own")
-  return aboutTheMatrix ? error : Unsupported("a row that reads a matrix or a tuple of points as a list")
-}
-
-/// A tuple of points is a list of them in order (lib/list.ts): it draws as
-/// dots, indexes and feeds polyline(T). Lists are not ported, so a lowered
-/// row that still holds one is not supported.
-func refuseTuplesOfPoints(_ e: Expr) throws {
-  if case .vec(let items) = e, items.contains(where: { if case .vec = $0 { true } else { false } }) {
-    throw Unsupported("tuples of points")
-  }
-  for child in childrenOf(e) { try refuseTuplesOfPoints(child) }
 }

@@ -77,6 +77,9 @@ final class GeomContext {
   let getTensor: GetTensor
   /// Whether matrix algebra is live for this lowering.
   let matsPossible: Bool
+  /// Which names are lists: an argument that reads one is no point yet
+  /// (ObjectLists.swift `waitingComp`).
+  var isList: (String) -> Bool = { _ in false }
   private var matSeen: [Expr: MatValue?] = [:]
   private var tenSeen: [Expr: Tensor?] = [:]
 

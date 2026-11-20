@@ -389,7 +389,7 @@ public func analyze(_ sources: [String]) -> DocumentAnalysis {
     document.seqScans.compactMap { $0 }.filter { !$0.lattice && !$0.emptyTuple }, rawNames: raw.map(\.name))
   defer { sequences.release() }
   let listNames = Set(built.points).union(built.mats.keys).union(built.tensors.keys)
-    .union(sequences.sequences.keys.map { $0 + "_" })
+    .union(sequences.sequences.keys.map { $0 + "_" }).union(built.lists.keys)
   let valueNames = shadowedFnNames(raw.filter { $0.kind != "fn" }.map(\.name) + Array(tildeNames))
   let documentNames = Set(raw.map(\.name)).union(tildeNames)
   func getFn(_ name: String) throws -> FnDef? {
@@ -418,13 +418,18 @@ public func analyze(_ sources: [String]) -> DocumentAnalysis {
   boundConsts.names = built.sumBoundConsts
   ropts.consts = { boundVals[$0] }
   ropts.boundConsts = boundConsts
+  // (List lowering reads them too, and notes the sliders an index reads.)
+  ropts.isList = { isListName(built, $0) }
+  ropts.getList = listGetter(built)
+  ropts.indexIssue = { index, _ in indexIssue(index, built) }
+  var memberNotes: [Int: String] = [:]
   if !sequences.sequences.isEmpty {
     ropts.sequenceTerm = { [unowned sequences] in try sequences.resolve($0, $1, $2) }
   }
   sequences.getFn = getFn
   sequences.opts = ropts
   sequences.fnNames = { Set(built.fns.keys) }
-  sequences.indexNames = { Set(built.points) }
+  sequences.indexNames = { Set(built.points).union(built.lists.keys) }
   sequences.isKnown = { constNames.contains($0) }
   sequences.addKnown = { constNames.insert($0) }
   sequences.protectedNames = Set(raw.map(\.name))
@@ -470,9 +475,7 @@ public func analyze(_ sources: [String]) -> DocumentAnalysis {
       try Resolver(getFn: getFn, opts: ropts).resolve(
         try parseExpr(body, userFns: fnNames, listNames: listNames, valueNames: valueNames))
     },
-    lower: {
-      try lowerObjects($0, comps: comps, mats: { built.mats[$0] }, tensors: { name, _ in built.tensors[name] })
-    },
+    lower: { try lowerObjects($0, built, ropts).e },
     userDefined: {
       constNames.contains($0) || built.fns[$0] != nil || built.mats.has($0) || built.tensors.has($0)
     })
@@ -563,7 +566,7 @@ public func analyze(_ sources: [String]) -> DocumentAnalysis {
         if let first, first < i { throw LanguageError("Sequence \(seq.name) is already defined.") }
         rows[i].classified = try classifySeqRec(
           seq, fnNames: fnNames, getFn: getFn, constNames: { constNames }, ropts: ropts, resolver: sequences,
-          indexNames: Set(built.points))
+          indexNames: Set(built.points).union(built.lists.keys))
         continue
       }
       // `d = 1` is no definition (d starts d/dx).
@@ -580,9 +583,10 @@ public func analyze(_ sources: [String]) -> DocumentAnalysis {
       // `p(50..400)`: where p goes over that time.
       if case .bin(.mul, let value, .range(let from, let to), _) = rawParsed {
         func lower(_ e: Expr) throws -> Expr {
-          try lowerObjects(
-            try Resolver(getFn: getFn, opts: ropts).resolve(e), comps: comps, mats: { built.mats[$0] },
-            tensors: { name, _ in built.tensors[name] })
+          let low = try lowerObjects(try Resolver(getFn: getFn, opts: ropts).resolve(e), built, ropts)
+          // (One path per run of a family's list is not ported.)
+          if low.isSeq { throw Unsupported("orbits of a list") }
+          return low.e
         }
         rows[i].classified = try classifyOrbit(
           try lower(value), from: try lower(from), to: try lower(to), built, constNames: constNames)
@@ -604,9 +608,14 @@ public func analyze(_ sources: [String]) -> DocumentAnalysis {
       }
       var resolved = try Resolver(getFn: getFn, opts: rowOpts).resolve(
         painted.map { .call(PAINT_CALL, [$0, rawParsed]) } ?? rawParsed)
+      memberNotes[i] = perMemberNote(resolved, ropts.isList)
       if exact {
-        // Over numbers a case is the tolerance form the evaluator runs.
-        let cases = exactCases(resolved)
+        // Over numbers a case is the tolerance form the evaluator runs; one
+        // whose side is a list stays an equation, for list lowering to
+        // decide member by member.
+        // (By what indexes, as the site asks it: the lists and the named points.)
+        let cases = exactCases(
+          resolved, keepingLists: { listNames.contains($0) || listNames.contains(dottedHead($0)) })
         if cases != resolved && plane(resolved) {
           throw LanguageError(equalityCaseMessage)
         }
@@ -619,17 +628,28 @@ public func analyze(_ sources: [String]) -> DocumentAnalysis {
         continue
       }
       // Expand point arithmetic: a point name A becomes (A_x, A_y).
-      let lowered = try lowerObjects(
-        resolved, comps: comps, mats: { built.mats[$0] }, tensors: { name, _ in built.tensors[name] })
-      var cls = try classify(lowered, defined: constNames, fields: fieldEnv)
+      // Lists then broadcast and reduce away.
+      let low = try lowerObjects(resolved, built, rowOpts)
+      let lowered = low.e
+      var cls = try classifyRow(low, defined: constNames, fields: fieldEnv)
       // A mapped panel draws per-pixel rows in its screen coordinates (AxisMap.swift).
       if let maps = panelMaps[panel] {
         cls = try classifyMapped(cls, lowered, maps, defined: constNames, fields: fieldEnv)
       }
       rows[i].info = curveHint(cls.object, text)
       // `e = 0.6` parsed with e already a number; only the text still says e.
-      if let taken, case .note(let expr, let variable, _, let identity) = cls.object {
-        cls.object = .note(expr: expr, variable: variable, constant: taken, identity: identity)
+      // `i = [0..9]` is a family of such claims, one per member.
+      func claimed(_ object: MathObject, by taken: String) -> MathObject? {
+        guard case .note(let expr, let variable, _, let identity) = object else { return nil }
+        return .note(expr: expr, variable: variable, constant: taken, identity: identity)
+      }
+      if let taken, let note = claimed(cls.object, by: taken) {
+        cls.object = note
+      } else if let taken, case .family(var members, let shared) = cls.object,
+        members.allSatisfy({ claimed($0.object, by: taken) != nil })
+      {
+        for k in members.indices { members[k].object = claimed(members[k].object, by: taken)! }
+        cls.object = .family(members: members, shared: shared)
       }
       rows[i].classified = cls
     } catch let error as Unsupported {
@@ -671,6 +691,7 @@ public func analyze(_ sources: [String]) -> DocumentAnalysis {
       rows[i].gpu = try compileGpu(cls)
       rows[i].cpu = cpu
       if let info = try? plotReadout(cpu, readoutEnv) { rows[i].info = info }
+      rows[i].info = withNote(rows[i].info, memberNotes[i])
     } catch let error as Unsupported {
       rows[i].unsupported = notSupported(error.what)
       rows[i].classified = nil
@@ -727,8 +748,9 @@ public func analyze(_ sources: [String]) -> DocumentAnalysis {
     // (A slider a sequence's term is read at, a_k, steps in whole numbers too.)
   } || document.seqScans.contains { $0 != nil }
   var namedByUnsupported: Set<String> = []
-  if hasSums {
-    for i in 0..<count where rows[i].unsupported != nil {
+  // (So does one that indexes a list or counts a histogram's bins.)
+  for i in 0..<count where rows[i].unsupported != nil && (hasSums || mayBindWholeNumbers(texts[i])) {
+    do {
       for name in writtenNames(texts[i]) {
         namedByUnsupported.insert(name)
         // The slider a term is read at: the k of a_k.
@@ -755,11 +777,17 @@ public func analyze(_ sources: [String]) -> DocumentAnalysis {
       continue
     }
     let named = row.definition.map { built.points.contains($0.name) } ?? false
+    // A binder has no readout of its own: its note is its info.
+    if case .constant(let name, let rhs, true)? = row.definition, row.error == nil,
+      let note = pairDrawNote(name, rhs)
+    {
+      row.info = note
+    }
     if row.comment {
       row.kind = "comment (group heading)"
     } else if let d = row.definition {
       let valued = built.mats.has(d.name) ? "matrix" : built.tensors.has(d.name) ? "tensor" : nil
-      let constant = valued ?? (named ? "point" : "const")
+      let constant = valued ?? (named ? "point" : built.lists.has(d.name) ? "list" : "const")
       row.kind = "definition (\(d.kind == "const" ? constant : d.kind))"
     } else if let view = row.view {
       row.kind =

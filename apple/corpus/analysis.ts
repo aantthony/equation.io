@@ -51,7 +51,10 @@ const replacer = (_key: string, value: unknown): unknown =>
   typeof value === 'number' && !Number.isSafeInteger(value)
     ? String(value)
     : value instanceof Float64Array || value instanceof Float32Array
-      ? { packed: value.length }
+      ? // A packed column travels as its numbers while it is short enough to.
+        value.length <= 4096
+        ? Array.from(value)
+        : { packed: value.length }
       : value;
 
 /** web/render2d.ts niceSpacing's major step (that module needs a browser). */
@@ -78,6 +81,8 @@ for (const type of ['sequence', 'cobweb', 'bifurcation', 'automaton', 'lattice']
 for (const type of ['implicit3d', 'scalar3d', 'spacecurve', 'system', 'vfield3d', 'psurface']) PORTED.add(type);
 // Random variables (lib/dist.ts): what the CPU draws of one, by its name.
 for (const type of ['density', 'pmf', 'expect', 'prob']) PORTED.add(type);
+// Lists and families (Lists.swift, ObjectLists.swift, ListPlans.swift).
+for (const type of ['vlist', 'plist', 'dlist', 'dscatter', 'histogram', 'family']) PORTED.add(type);
 function slim(plan: { type: string } | undefined): unknown {
   if (!plan) return null;
   if (!PORTED.has(plan.type)) return { type: plan.type, omitted: true };
@@ -265,6 +270,65 @@ const CASES: string[] = [
   'y = e_x; e_x; a ∈ [1, 2]; y = a x',
   'graph((1, 2)); mark(3); lightcones; tidal; ds^2 = dx^2 + dy^2',
   'y = x..2; 1..5; y = "text"; y = x == 1',
+  // Lists: literals, ranges, names, broadcasting.
+  '[1, 2, 3]; [1..5]; [0, 0.5..2]; [10..1]; [1, 3..10]; []; [2, 2, 3, 3, 3]; [1.5, 1/3, pi]',
+  'L = [1, 2, 3]; L; 2 L; L + 1; L^2; sin(L); -L; L L; L + L; L/2; {L > 1: L}; max(L, 2); mod(L, 2); atan2(L, 1)',
+  'a = 2; [a, 2a, a^2]; [1..a]; [a..1]; [0, a..7]; b = 0.5; [0, b..2]; [t, 2t]; [x, 1]; [a, t]; a [1, 2] + t',
+  '[1..3] + [10, 20]; ([1, 2], [3, 4]); L = [1, 2]; (L, L); (L, L^2); M = [3, 4]; (L, M); L + M; (L, M, L); (L, 1)',
+  '[1, 2..1]; [1..t]; [1..q]; [0, 0..5]; [5, 4..9]; [1..20000]; [1/0, 2]; [1, (2, 3)]; [1, [2, 3], 4]; [[1, 2], [3]]',
+  'L = [1..200]; L; 2 L; a = 2; a L; (L, L^2); (L, a L); sin(a L); mean(a L); L[L > 150]; count(L); total(L)',
+  // Lists of points, their coordinates, and arithmetic on them.
+  '[(1, 2), (3, 4)]; P = [(0, 0), (1, 1), (2, 0)]; P; P.x; P.y; (P.x, P.y + 1); P.z; P[1]; P[3]; count(P); mean(P)',
+  'P = [(0, 0), (1, 2)]; total(P); P + (1, 0); 2 P; -P; P + P; Q = P + (1, 1); Q; (Q.x, P.y); P/2; P (1, 2); P^2',
+  'A = (1, 2); B = (3, 4); [A, B]; [A, B, (0, 0)]; L = [A, B]; L; L.x; [A, 1]; [(1, 2), (1, 2, 3)]; mean([A, B])',
+  'P = [(0, 0), (1, 2)]; f(x, y) = x + y; f(P); g(p) = p.x; g(P); h(x, y) = (y, x); h(P); k(a, b, c) = a; k(P)',
+  '[(1, 2, 3), (4, 5, 6)]; ([1, 2], [3, 4], 0); [(t, 1), (2, t)]; a = 2; [(a, 1), (1, a)]; [(x, 1)]; [(u, 1), (u, 2)]',
+  // Reductions and sorting.
+  'L = [3, 1, 2]; mean(L); total(L); count(L); min(L); max(L); stdev(L); median(L); sort(L); sort(L)[1]; L[1]',
+  'mean([1, 2, 3, 4]); total([]); mean([]); count([]); stdev([1]); median([1, 2, 3, 4]); min([4, 2]); max([t, 1])',
+  'mean([t, 2t]); mean(5); total(2, 3); mean(q); count((1, 2)); sort([3, 1], [1, 2]); sort(3); stdev([t, 1]); median([1, a])',
+  'L = [3, 1, 2]; T = sort(L); T; T[2]; T[1..2]; T[0]; T[4]; T[1.5]; T[[1, 3]]; n = 2; T[n]; T + T; T[T > 1]; 2 T',
+  'P = [(2, 0), (1, 1), (3, 5)]; sort(P, P.x); sort(P, P.y)[1]; sort(P); sort(P, [1, 2, 3]); S = sort(P, -P.x); S; S[1]',
+  'L = [1, 2, 3, 4]; mean(L) + 1; total(L^2); y = mean(L) x; y = total(L x); max(L) - min(L); mean(L, 2); count(L, L)',
+  // Filters, and comparisons as values.
+  'L = [1..10]; L[L > 5]; L[L == 3]; L[L != 3]; L[2 < L < 6]; L > 5; L == 2; L[1 < 2]; L[L > t]; L[L > q]',
+  'L = [1..6]; M = L[L > 2]; M; (M, M^2); count(M); (L[L > 2], L[L > 2]^2); big = L > 3; big; {big: 1}; L[mean(L) > 0]',
+  'L = [1, 2, 3]; M = [1, 2]; L[M > 1]; L < M; L^2 < 5; (L > 1) > 2; L[L]; L[M]; L[[3, 1]]; L[5]; L[x]; x[1]; 3[1]',
+  'P = [(0, 1), (2, 3), (4, 5)]; P[P.x > 1]; P.x > 1; P.y[P.x > 1]; count(P[P.x > 1]); P[1 < P.x < 5]',
+  // Tuples.
+  '(1, 2, 3, 4); (1, 2, 3, 4, 5, 6, 7, 8, 9, 10); T = (3, 1, 2, 5); T; T[2]; total(T); sort([3, 1, 2, 4]); (1, [2, 3], 4, 5)',
+  'sort([2, 1]); sort([3, 1, 2]); A = (3, 1, 2); A[2]; A[1] + A[3]; B = (1, 2); B[1]; B[3]; [(1, 2, 3, 4), (5, 6, 7, 8)]',
+  'T = (1, 2, 3, 4); 2 T; T + T; T + (1, 1, 1, 1); T + (1, 2); mean(T); count(T); T[2..3]; [T, T]; [T, 1]; (T, T)',
+  'M = [(1, 2, 3, 4), (5, 6, 7, 8)]; M; M[2]; count(M); total(M); mean(M); sort(M); max(M); L = sort([1..12]); L; L[3]',
+  // Families.
+  'y = [1, 2, 3] x; a = [1..3]; y = a x; y < a; x^2 + y^2 = a^2; (a, a^2); a x; (cos(a u), sin(u)); y = a x + [0, 1]',
+  'k = [1..40]; y = k x; b = [1, 2]; (y, -b x); y = {b > 1: x, -x}; b + x = y; b; b x y; (b u, u); y = sin(b x) + t',
+  'i = [0..3]; e = [1, 2]; t = [1, 2]; d = [1, 2]',
+  'c = [1, 2]; s = 2; y = c x + s; y = c x^s; (c, s) + (x, y); x = c; y > c x; c < x < c + 1; y = c; c = y',
+  'a = [1, 2]; b = [3, 4]; y = a x + b; y = a x + a; (a, b); (a, a); x^2/a + y^2/b = 1; a + b; a b = 3',
+  // Functions per member.
+  'avg(s) = mean(s); avg([1, 2, 3]); L = [1, 2, 3]; avg(L); f(m) = total(L m); f(L); f(2); g(a) = [a, 2a]; (g(1), g(2))',
+  'h(a) = [1, 2] + a; (h(1), h(2)); h(3); L = [1, 2]; h(L); g(a) = [a, 2a]; g(L); (g(1), g(1)); c(m) = count(m); c(L); c(3)',
+  'f(x) = (x, x^2); f([1, 2, 3]); g(x, y) = x + y; g([(1, 2), (3, 4)]); L = [1, 2]; f(L); (f(L), 1); f(L) + (1, 1)',
+  'm(p) = mean(p); P = [(0, 0), (2, 4)]; m(P); d2(x, y) = total(x) + y; d2(P); w2(p) = p.x + count(p); w2(P)',
+  // Histograms.
+  'L = [1, 2, 2, 3, 3, 3, 4]; hist(L); hist(L, 3); hist(L)/2; 2 hist(L); hist(L) + 1; h = hist(L); hist(L, 1); hist(L, 2.5)',
+  'hist([2, 2]); hist(3); hist([1, 2, 3], 3, 4); hist([]); hist([1/0, 1]); hist([t, 1]); hist([(1, 2)]); hist(x)',
+  'n = 4; L = [1..20]; hist(L, n); m = 3; L[m]; k = 2.5; L[k]; j = 2; sort(L)[j]; i2 = 1; y = i2 x',
+  // Cases over lists, and members with no value.
+  'L = [1..5]; {L > 2: L}; {L > 2: L, 0}; M = {L > 2: L}; M; count(M); mean(M); {L = 3: 1, 0}; {L > t: 1, 0}; (L, M)',
+  'L = [1, 2, 3]; y = {L > 1: x, -x}; {x > 0: L, 0}; {L > 1: (L, 1)}; sort({L > 1: L}); total({L > 1: L}); {L: 1}',
+  // Text, and what a list cannot do.
+  '"a"; ["a", "b"]; L = [1, 2]; L == "a"; L + "a"; y = L == 1; x == 1; [1, 2] = [1, 2]; L = 3; count(["a", "b"]); mean(["a"])',
+  'L = [1, 2]; y = L[1] x; y = L; L = y; L < y; (L, x); [1, 2] x y; L x; [x, y]; N = [x, 1]; N; K = [q0, 1]; K',
+  // Binders.
+  'p ∈ [1, 2, 3]; p; y = p x; q ∈ [0, 1]; (p, q); r ∈ 3; r; s ∈ x; w2 ∈ [1, 5]; (w2, w2)',
+  'A = [1, 2]; p ∈ A; q ∈ A; (p, q); (A, A); (p, A); T = sort(A); k ∈ T; k; c ∈ p > 1; e ∈ [1, 2]; x ∈ [1, 2]',
+  // Definitions in and out of order.
+  'y = L x; L = [1, 2]; b = L[1]; c = M[1]; M = [1, 2]; a = M; a; M = [3]; d1 = [1, 2] + q9',
+  'L = [1, 2, 3]; L[1]; L[L > 1][1]; [1, 2, 3][2]; sort(L)[4]; [(1, 2), (3, 4)][1]; L[2] x = y; sort([3, 1])[1]',
+  'y = d/dx [x, x^2]; L = [1, 2]; y = d/dx (L x); a = 2; b = [a, 1]; b; c = mean(b); c; y = c x',
+  'L = [1, 2]; f(x) = L x; f(2); y = f(x); g(x) = mean(L) x; y = g(x); h(x) = L[1] x; y = h(x); s(L) = L + 1; s(2)',
   // Point arithmetic and points through functions and cases.
   'A = (1+1, 2 0.5); A; 2 A + (0, 0); A - A; 0 A; A/1; -A; A 2; (A_x, A_y + 1)',
   'A = (1, 2); y = {x > 0: (1, 2), (3, 4)}; {t > 0: A, (0, 0)}; {t > 0: A, 1}; {A: 1}; x = A; (1, 2) = A',
@@ -637,6 +701,99 @@ function randomDocs(count: number): string[] {
   return out;
 }
 
+/** Small documents written at random from lists: a few lists and points
+ *  defined, then rows that combine, reduce, index and draw them. Seeded, and
+ *  apart from randomDocs so each corpus stays the one it was. */
+function randomListDocs(count: number): string[] {
+  let seed = 0x51ed27;
+  const random = (): number => {
+    seed = (Math.imul(seed, 1664525) + 1013904223) | 0;
+    return (seed >>> 0) / 4294967296;
+  };
+  const pick = <T>(items: readonly T[]): T => items[Math.floor(random() * items.length)];
+  const NUM = ['1', '2', '3', '0.5', '-1', 'a', 'n', 't', '10'];
+  const list = (): string =>
+    pick([
+      '[1, 2, 3]', '[1..4]', '[0, 0.5..2]', 'L', 'L', 'M', 'M', 'T', '[a, 2]', '[1..n]', 'L[L > 1]', 'sort(M)', '2 L',
+      'L + 1', 'P.x', 'P.y', '[t, 1]', '[3, 1, 2]', '[]', 'L[2..3]', 'M^2', '-L', 'sin(L)', '[L, 5]', 'p', 'q',
+    ]);
+  const scalar = (): string =>
+    pick([
+      ...NUM, 'mean(' + list() + ')', 'total(' + list() + ')', 'count(' + list() + ')', 'max(' + list() + ')',
+      'min(' + list() + ')', 'median(' + list() + ')', 'stdev(' + list() + ')', 'T[1]', 'T[n]', 'sort(L)[2]', 'L[1]',
+      'A_x', 'f(2)', 'avg(' + list() + ')',
+    ]);
+  const value = (): string => (random() < 0.5 ? list() : scalar());
+  const op = (): string => pick(['+', '-', '', '/', '^']);
+  const row = (): string => {
+    switch (Math.floor(random() * 17)) {
+      case 0:
+        return list();
+      case 1:
+        return `${value()} ${op()} ${value()}`;
+      case 2:
+        return `(${value()}, ${value()})`;
+      case 3:
+        return `y = ${value()} x ${pick(['+', '-'])} ${value()}`;
+      case 4:
+        return scalar();
+      case 5:
+        return `${list()}[${pick(['1', '2', 'n', '0', '9', 'L > 1', 'M < 3', 'L == 2', '1..2', '[1, 2]', 't', '1.5'])}]`;
+      case 6:
+        return `${pick(['sort', 'hist', 'mean', 'total', 'count', 'f', 'g', 'avg', 'abs', 'floor'])}(${value()})`;
+      case 7:
+        return `{${list()} ${pick(['<', '>', '<=', '='])} ${scalar()}: ${value()}${pick(['', ', 0', ', ' + list()])}}`;
+      case 8:
+        return `${list()} ${pick(['<', '>', '==', '!=', '<='])} ${value()}`;
+      case 9:
+        return pick(['P', 'P + (1, 0)', '2 P', 'g(P)', 'P[1]', 'P[P.x > 0]', 'sort(P, P.x)', 'mean(P)', '(P.x, P.y^2)', '[A, (0, 0)]', 'count(P)', 'P - A', '(p, q)', '(p, p)', '(L, p)']);
+      case 10:
+        return `(${value()}, ${value()}, ${value()}${pick(['', ', ' + value()])})`;
+      case 11:
+        return `${pick(['y', 'x', 'x^2 + y^2', 'y - x'])} ${pick(['=', '<', '>'])} ${value()}`;
+      case 12:
+        return `hist(${list()}${pick(['', ', 3', ', n', ', 1'])})${pick(['', '/2', ''])}`;
+      case 13:
+        return `(${value()} u, ${pick(['u', 'u^2', value()])})`;
+      case 14:
+        return `sort(${list()}${pick(['', ', ' + list()])})${pick(['', '[1]', '[n]'])}`;
+      case 15:
+        // Lists beside the kinds around them: sums, figures, matrices, complex numbers.
+        return pick([
+          'sum(k=1..n, L k)', 'sum(k=1..3, [k, 1])', 'y = sum(k=1..M, x^k)', 'sum(k=1..L, k)', 'prod(k=1..2, L + k)',
+          'segment(A, P)', 'polygon(P)', 'polyline(sort(P, P.x))', 'hull(P)', 'circle(A, L)', 'segment((0, 0), (L, 1))',
+          'vector(P)', 'polyline(P)', 'distance(P, A)', 'dot(P, A)', 'midpoint(P, A)', 'abs(P - A)', 'R P', 'R A',
+          'hull(R P)', 'R L', 'R[1]', 'L i', '[i, 1]', 'e^(i L)', 'abs(e^(i L))', 'sort([i, 1])', '(L, L, 1)',
+          'polygon(P + (1, 0))', '2 hull(P)', 'rotate(hull(P), L)', 'circle((p, 0), 1)', 'segment(A, (p, q))',
+          'polyline((L, L^2))', 'polygon(sort(P, P.y)) + (1, 1)', 'count(R)', 'T (1, 0)', 'R T', 'label(A, "a")',
+        ]);
+      default:
+        return `${pick(['f', 'g', 'avg'])}(${value()}${pick(['', ', ' + value()])})`;
+    }
+  };
+  const out: string[] = [];
+  for (let k = 0; k < count; k++) {
+    const defs = [
+      `a = ${pick(['2', '0.5', '3'])}`,
+      `n = ${pick(['2', '3', 'round(2)', '1'])}`,
+      `L = ${pick(['[1, 2, 3]', '[1..4]', '[3, 1, 2]', '[a, 1, 2]', '[1..n]'])}`,
+      `M = ${pick(['[1, 2]', 'L^2', '[2, 3, 4]', 'L[L > 1]', '2 L', '[t, 1]'])}`,
+      `T = ${pick(['sort(L)', '(1, 2, 3, 4)', 'sort([2, 1])', '(3, 1, 2)'])}`,
+      `P = ${pick(['[(0, 0), (1, 2)]', '(L, L^2)', '[(1, 1), (2, 3), (0, 1)]', '[A, (2, 2)]'])}`,
+      'A = (1, 2)',
+      `f(s) = ${pick(['s^2', '(s, s + 1)', 'mean(s)', 's + total(L)', '[s, 2 s]', 'L s'])}`,
+      `g(u1, v1) = ${pick(['u1 + v1', '(v1, u1)', 'u1 total(v1)'])}`,
+      'avg(s) = mean(s)',
+      'R = ((0, -1), (1, 0))',
+      `p ∈ ${pick(['[1, 2]', 'L', '[0, 1, 2]'])}`,
+      `q ∈ ${pick(['[1, 2]', 'L', 'M'])}`,
+    ].filter(() => random() < 0.8);
+    const rows = Array.from({ length: 5 }, row);
+    out.push((random() < 0.8 ? [...defs, ...rows] : [...rows, ...defs]).join('; '));
+  }
+  return out;
+}
+
 interface Doc {
   name: string;
   rows: string[];
@@ -648,6 +805,9 @@ for (const [category, items] of EXAMPLES)
 CASES.forEach((text, k) => docs.push({ name: `case ${k + 1}`, rows: splitStatements(text) }));
 DISCRETE_CASES.forEach((text, k) => docs.push({ name: `case discrete ${k + 1}`, rows: splitStatements(text) }));
 randomDocs(Number(process.env.RANDOM_DOCS ?? 600)).forEach((text, k) => docs.push({ name: `case random ${k + 1}`, rows: splitStatements(text) }));
+randomListDocs(Number(process.env.RANDOM_LIST_DOCS ?? 400)).forEach((text, k) =>
+  docs.push({ name: `case random list ${k + 1}`, rows: splitStatements(text) }),
+);
 
 const recorded = docs.map(({ name, rows }) => {
   const analysis = analyzeRows(rows);

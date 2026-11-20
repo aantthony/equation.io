@@ -169,9 +169,9 @@ private func describe(_ spans: [HighlightSpan], _ row: String) -> String {
   /// Rows of the whole fixture that the Swift-derived names color differently
   /// (the rows' shapes alone gave 72): all of them rows the definitions port
   /// leaves alone, where a definition the site fails (`S = X +`, a `~` row
-  /// half typed, `p = "text"`) still binds its name here. Lower this as the
-  /// port reaches those rows.
-  private let knownDifferingRows = 19
+  /// half typed) still binds its name here. Lower this as the port reaches
+  /// those rows.
+  private let knownDifferingRows = 13
 
   @Test func notesMatchTheSite() {
     for document in fixture.documents {

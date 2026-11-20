@@ -297,6 +297,10 @@ func evaluate(_ e: Expr, _ env: inout [String: Double]) throws -> Double {
       return env["\(chain)\(JS.string(k))"] ?? .nan
     }
     guard let fn = evalFunctions[name] else {
+      // (A list as the resolver marks it: Expr.swift, "List identity".)
+      if name == LIST_ID || name == LIST_ORIGIN || name == LIST_SEQ {
+        throw LanguageError("List in scalar context.")
+      }
       if name == INTERVAL {
         throw LanguageError(
           "An interval is a range of numbers, not one value: "
