@@ -235,22 +235,22 @@ import Testing
 
   /// The TypeScript's CPU plan, for the kinds ported.
   private func cpuPlan(_ o: [String: Any]) throws -> CpuPlan {
-    func expr(_ key: String) throws -> Expr { try exprFromJSON(o[key]!) }
-    func exprs(_ key: String) throws -> [Expr] { try (o[key] as! [Any]).map(exprFromJSON) }
+    func expr(_ key: String) throws -> Expr { try decode(o[key]!) }
+    func exprs(_ key: String) throws -> [Expr] { try (o[key] as! [Any]).map(decode) }
     switch o["type"] as! String {
     case "implicit2d":
       var levels: CpuGrid?
       if let l = o["levels"] as? [String: Any] {
         levels = CpuGrid(
-          name: l["name"] as! String, expr: try exprFromJSON(l["expr"]!),
-          grad: try (l["grad"] as? [Any])?.map(exprFromJSON), params: l["params"] as! [String],
+          name: l["name"] as! String, expr: try decode(l["expr"]!),
+          grad: try (l["grad"] as? [Any])?.map(decode), params: l["params"] as! [String],
           angular: l["angular"] as! Bool, level: l["level"] as? String)
       }
       return .implicit2d(residual: try expr("residual"), equation: try expr("equation"), levels: levels)
     case "ineq2d":
       return .ineq2d(
         constraints: try (o["constraints"] as! [[String: Any]]).map {
-          Constraint(residual: try exprFromJSON($0["residual"]!), strict: $0["strict"] as! Bool)
+          Constraint(residual: try decode($0["residual"]!), strict: $0["strict"] as! Bool)
         })
     case "scalar2d":
       if o["autoscale"] != nil { throw FixtureError(description: "an autoscaled field") }
@@ -258,7 +258,7 @@ import Testing
     case "point": return .point(dim: (o["dim"] as! NSNumber).intValue, coords: try exprs("coords"))
     case "pcurve":
       if o["tube"] != nil { throw FixtureError(description: "a tube") }
-      func optional(_ key: String) throws -> [Expr]? { try (o[key] as? [Any])?.map(exprFromJSON) }
+      func optional(_ key: String) throws -> [Expr]? { try (o[key] as? [Any])?.map(decode) }
       return .pcurve(
         dim: (o["dim"] as! NSNumber).intValue, comps: try exprs("comps"), d1: try optional("d1"),
         d2: try optional("d2"), d3: try optional("d3"))
@@ -302,37 +302,6 @@ func close(_ a: Double, _ b: Double) -> Bool {
   if a.isNaN || b.isNaN { return a.isNaN && b.isNaN }
   if a == b { return true }
   return abs(a - b) <= 1e-13 * max(abs(a), abs(b))
-}
-
-/// The TypeScript's JSON for an Expr, for the kinds Swift has.
-func exprFromJSON(_ json: Any) throws -> Expr {
-  guard let o = json as? [String: Any], let kind = o["kind"] as? String else {
-    throw FixtureError(description: "not an expr: \(json)")
-  }
-  func expr(_ key: String) throws -> Expr { try exprFromJSON(o[key]!) }
-  func exprs(_ key: String) throws -> [Expr] { try (o[key] as! [Any]).map(exprFromJSON) }
-  switch kind {
-  case "num": return .num(number(o["value"]!))
-  case "var": return .var(o["name"] as! String)
-  case "bin":
-    return .bin(
-      BinOp(rawValue: o["op"] as! String)!, try expr("a"), try expr("b"),
-      glyph: (o["glyph"] as? String).map { ProductGlyph(rawValue: $0)! })
-  case "neg": return .neg(try expr("a"))
-  case "call": return .call(o["name"] as! String, try exprs("args"))
-  case "eq": return .eq(try expr("l"), try expr("r"))
-  case "ineq":
-    return .ineq(
-      IneqOp(rawValue: o["op"] as! String)!, try expr("l"), try expr("r"), grouped: o["grouped"] as? Bool ?? false)
-  case "vec": return .vec(try exprs("items"))
-  case "piecewise":
-    let cases = try (o["cases"] as! [[String: Any]]).map {
-      Expr.Case(
-        cond: try exprFromJSON($0["cond"]!), value: try exprFromJSON($0["value"]!), bare: $0["bare"] as? Bool ?? false)
-    }
-    return .piecewise(cases, otherwise: try o["otherwise"].map(exprFromJSON))
-  default: throw FixtureError(description: "a \(kind) node")
-  }
 }
 
 /// GLSL with every number literal respelled from its float32 value, so the

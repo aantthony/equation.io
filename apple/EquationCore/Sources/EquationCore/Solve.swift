@@ -359,7 +359,10 @@ public func traceSystem(
         collectDiscrete(c.value)
       }
       if let otherwise { collectDiscrete(otherwise) }
-    case .num, .var, .index, .range, .eqtest, .str:
+    case .loop(_, let seeds, _, _):
+      seeds.forEach(collectDiscrete)
+    case .num, .var, .index, .range, .eqtest, .str, .comp, .figure, .trail, .label, .hist, .family, .data, .lazy,
+      .text:
       break
     }
   }

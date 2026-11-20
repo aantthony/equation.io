@@ -43,7 +43,9 @@ struct DecodeError: Error, CustomStringConvertible {
   var description: String
 }
 
-/// The TypeScript's JSON for an Expr.
+/// The TypeScript's JSON for an Expr, as the fixtures carry one: a number
+/// is a JSON number or its text as JavaScript prints it, and a packed column
+/// (a Float64Array) is the list of its numbers.
 func decode(_ json: Any) throws -> Expr {
   guard let o = json as? [String: Any], let kind = o["kind"] as? String else {
     throw DecodeError(description: "not an expr: \(json)")
@@ -63,6 +65,15 @@ func decode(_ json: Any) throws -> Expr {
       throw DecodeError(description: "not a number: \(v)")
     default: throw DecodeError(description: "not a number: \(v)")
     }
+  }
+  func int(_ key: String) throws -> Int { Int(try number(o[key]!)) }
+  /// A recorder leaves a long column out, with a mark in its place.
+  func packed(_ v: Any?) throws -> [Double] {
+    guard let list = v as? [Any] else { throw DecodeError(description: "a packed column that was not recorded") }
+    return try list.map(number)
+  }
+  func columns(_ v: Any) throws -> [Column] {
+    try (v as! [[String: Any]]).map { Column(name: $0["name"] as! String, values: try packed($0["values"])) }
   }
   switch kind {
   case "num": return .num(try number(o["value"]!))
@@ -90,6 +101,25 @@ func decode(_ json: Any) throws -> Expr {
       Expr.Case(cond: try decode($0["cond"]!), value: try decode($0["value"]!), bare: $0["bare"] as? Bool ?? false)
     }
     return .piecewise(cases, otherwise: try o["otherwise"].map(decode))
+  case "comp":
+    return .comp(
+      value: try expr("value"), index: try int("index"), arity: try int("arity"),
+      functionName: o["functionName"] as! String)
+  case "figure":
+    return .figure(
+      form: FigureForm(rawValue: o["form"] as! String)!, dimension: try int("dimension"),
+      vertices: try exprs("vertices"), over: try o["over"].map(columns))
+  case "trail": return .trail(coordinates: try exprs("coordinates"))
+  case "label": return .label(coordinates: try exprs("coordinates"), text: o["text"] as! String)
+  case "hist":
+    return .hist(centers: try packed(o["centers"]), counts: try packed(o["counts"]), width: try number(o["width"]!))
+  case "family": return .family(members: try exprs("members"))
+  case "data": return .data(values: try packed(o["values"]))
+  case "lazy": return .lazy(cols: try columns(o["cols"]!), body: try expr("body"))
+  case "text": return .text(values: o["values"] as! [String])
+  case "loop":
+    return .loop(
+      params: o["params"] as! [String], seeds: try exprs("seeds"), body: try expr("body"), limit: try int("limit"))
   default: throw DecodeError(description: "unknown kind \(kind)")
   }
 }

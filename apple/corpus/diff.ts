@@ -13,7 +13,7 @@
  */
 import { writeFileSync } from 'node:fs';
 import { diff } from '../../lib/diff.ts';
-import { ANGLE_FN, ANGLE_RATE_FN, childrenOf, type Expr, INTERVAL, parseExpr } from '../../lib/expr.ts';
+import { ANGLE_FN, ANGLE_RATE_FN, type Expr, INTERVAL, parseExpr, RECUR } from '../../lib/expr.ts';
 import { splitStatements, stripNote } from '../../lib/statements.ts';
 import { EXAMPLES } from '../../web/examples.ts';
 
@@ -28,53 +28,30 @@ interface Entry {
   errorType?: string;
 }
 
-/** The kinds Swift's Expr has (apple/EquationCore Expr.swift). */
-const SWIFT_KINDS = new Set([
-  'num',
-  'var',
-  'bin',
-  'neg',
-  'call',
-  'index',
-  'range',
-  'eqtest',
-  'eq',
-  'ineq',
-  'vec',
-  'list',
-  'str',
-  'piecewise',
-]);
-const inSwift = (e: Expr): boolean => SWIFT_KINDS.has(e.kind) && childrenOf(e).every(inSwift);
-
 // Every number is written as text, digits as JavaScript prints them (the
 // shortest that read back to the same double): non-finite numbers and -0 have
 // no JSON spelling, and Foundation's JSON reader gets the last digit of some
-// that do wrong (-6/5040, a sinc′ coefficient, for one).
+// that do wrong (-6/5040, a sinc′ coefficient, for one). A packed column (a
+// Float64Array) is written as the list of its numbers.
 const replacer = (key: string, value: unknown): unknown => {
   if (key === 'axes' || key === 'origin') return undefined;
+  if (ArrayBuffer.isView(value)) return Array.from(value as Float64Array);
   if (typeof value === 'number') return Object.is(value, -0) ? '-0' : String(value);
   return value;
 };
 const json = (value: unknown): string => JSON.stringify(value, replacer);
 
 const entries = new Map<string, Entry>();
-let skipped = 0;
 let oversize = 0;
 const MAX_ENTRY = 12_000;
 
 /** Record d(input)/d(variable); returns the derivative when there is one. */
 function record(src: string, input: Expr, variable: string): Expr | undefined {
-  if (!inSwift(input)) {
-    skipped++;
-    return undefined;
-  }
   const key = json([input, variable]);
   let result: Expr | undefined;
   let entry: Entry;
   try {
     result = diff(input, variable);
-    if (!inSwift(result)) throw new Error(`diff made a kind Swift lacks: ${src}`);
     entry = { src, variable, input, expr: result };
   } catch (err) {
     if (result) throw err;
@@ -314,6 +291,52 @@ const built: [string, Expr][] = [
   ['{: x^2}', { kind: 'piecewise', cases: [], otherwise: sq(x) }],
   ['(x > 0) grouped', { kind: 'ineq', op: '>', l: x, r: n(0), grouped: true }],
   ['() empty vec', { kind: 'vec', items: [] }],
+  // The kinds only lowering writes.
+  ['f(P) of a tuple', { kind: 'comp', value: { kind: 'vec', items: [x, y] }, index: 0, arity: 2, functionName: 'f' }],
+  ['f(P) of x^2', { kind: 'comp', value: sq(x), index: 1, arity: 2, functionName: 'f' }],
+  ['f(P) of a constant', { kind: 'comp', value: a, index: 0, arity: 0, functionName: 'p.x' }],
+  ['f(P) of floor(x)', { kind: 'comp', value: call('floor', x), index: 0, arity: 2, functionName: 'f' }],
+  ['sin(f(P))', call('sin', { kind: 'comp', value: sq(x), index: 0, arity: 2, functionName: 'f' })],
+  ['a polygon', { kind: 'figure', form: 'polygon', dimension: 2, vertices: [x, n(0), n(1), y] }],
+  [
+    'a packed polyline',
+    {
+      kind: 'figure',
+      form: 'polyline',
+      dimension: 2,
+      vertices: [{ kind: 'var', name: '@a' }, x],
+      over: [{ name: '@a', values: Float64Array.of(1, 2.5) }],
+    },
+  ],
+  ['a trail', { kind: 'trail', coordinates: [x, y] }],
+  ['a label', { kind: 'label', coordinates: [x, y], text: 'here' }],
+  ['a histogram', { kind: 'hist', centers: Float64Array.of(0.5, 1.5), counts: Float64Array.of(2, 1), width: 1 }],
+  ['a family', { kind: 'family', members: [sq(x), y] }],
+  ['a packed list', { kind: 'data', values: Float64Array.of(1, 2, 3) }],
+  ['x + a packed list', bin('+', x, { kind: 'data', values: Float64Array.of(1, 2, 3) })],
+  [
+    'a lazy list',
+    {
+      kind: 'lazy',
+      cols: [{ name: '@a', values: Float64Array.of(1, 2) }],
+      body: bin('*', x, { kind: 'var', name: '@a' }),
+    },
+  ],
+  ['a text column', { kind: 'text', values: ['a', 'b'] }],
+  [
+    'a loop',
+    {
+      kind: 'loop',
+      params: ['s', 'k'],
+      seeds: [x, n(0)],
+      body: {
+        kind: 'piecewise',
+        cases: [{ cond: { kind: 'ineq', op: '>=', l: { kind: 'var', name: 'k' }, r: n(3) }, value: x }],
+        otherwise: call(RECUR, sq({ kind: 'var', name: 's' }), bin('+', { kind: 'var', name: 'k' }, n(1))),
+      },
+      limit: 250,
+    },
+  ],
 ];
 for (const [src, input] of built) {
   for (const v of ['x', 'y']) {
@@ -326,7 +349,7 @@ const list = [...entries.values()];
 writeFileSync(new URL('diff-corpus.json', fixtures), JSON.stringify(list) + '\n');
 const errors = list.filter(e => e.error !== undefined);
 console.log(
-  `${list.length} derivatives, ${errors.length} errors; left out: ${skipped} of kinds Swift lacks, ${oversize} too long`,
+  `${list.length} derivatives, ${errors.length} errors; left out: ${oversize} too long`,
 );
 for (const [message, group] of Object.entries(Object.groupBy(errors, e => `${e.errorType}: ${e.error}`))) {
   console.log(`  ${group!.length}  ${message}`);

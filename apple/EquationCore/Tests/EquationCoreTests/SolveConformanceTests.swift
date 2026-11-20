@@ -72,7 +72,7 @@ import Testing
     var failures: [String] = []
     let cases = fixture["roots"] as! [[String: Any]]
     for c in cases {
-      let f = try decode(exactNumbers(c["f"]!))
+      let f = try decode(c["f"]!)
       let got = findRoots(f, c["v"] as! String, solveNumber(c["lo"]!), solveNumber(c["hi"]!))
       let want: FoundRoots =
         if let list = c["result"] as? [[String: Any]] {
@@ -95,7 +95,7 @@ import Testing
   }
 }
 
-/// The fixture's numbers are text (see exactNumbers).
+/// The fixture's numbers are text: JSONSerialization reads some doubles an ulp off.
 private func solveNumber(_ json: Any) -> Double {
   switch json as! String {
   case "Infinity": .infinity
@@ -105,7 +105,7 @@ private func solveNumber(_ json: Any) -> Double {
   }
 }
 private func numbers(_ json: Any) -> [Double] { (json as! [Any]).map(solveNumber) }
-private func exprs(_ json: Any) throws -> [Expr] { try (json as! [Any]).map { try decode(exactNumbers($0)) } }
+private func exprs(_ json: Any) throws -> [Expr] { try (json as! [Any]).map(decode) }
 
 /// Paths of points: the same doubles, or (not `exact`) the same shape with
 /// each coordinate within rounding of the TypeScript's.

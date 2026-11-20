@@ -177,6 +177,13 @@ func viewHead(_ text: String, ignoringCase: Bool = false) -> String? {
   return nil
 }
 
+/// A viewport row by its text: a `---` divider, or a view/camera/grid/on
+/// call that is not the definition of a function by that name, `grid(x) = …`
+/// (lib/analysis.ts `isViewportText`). `text` is trimmed.
+func isViewportText(_ text: String) -> Bool {
+  isDividerRow(text) || (viewHead(text, ignoringCase: true) != nil && scanDefinition(text) == nil)
+}
+
 /// Split on top-level commas only, so a (tx, ty, tz) target stays one arg.
 private func splitArgs(_ s: String) -> [String] {
   var parts: [Units] = []
@@ -215,16 +222,12 @@ private func splitRange(_ s: String) -> (String, String)? {
   return nil
 }
 
-private func message(_ error: Error) -> String {
-  (error as? LanguageError)?.message ?? (error as? ParseError)?.message ?? "\(error)"
-}
-
 private func numExpr(_ e: Expr, _ env: [String: Double], _ what: String) throws -> Double {
   let v: Double
   do {
     v = try evaluate(e, env)
   } catch {
-    throw LanguageError("\(what): \(message(error))")
+    throw LanguageError("\(what): \(errorMessage(error))")
   }
   if !v.isFinite { throw LanguageError("\(what) is not a finite number.") }
   return v

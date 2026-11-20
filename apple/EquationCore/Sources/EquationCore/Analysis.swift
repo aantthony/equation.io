@@ -122,9 +122,10 @@ private func touches(_ name: String, _ names: Set<String>) -> Bool {
   return false
 }
 
-/// The index as a standalone identifier in the term (lib/seq.ts `usesIndex`).
-private func usesIndex(_ rhs: String, _ index: String) -> Bool {
-  let u = Array(rhs.utf16)
+/// The index as a standalone identifier in the term (lib/seq.ts `usesIndex`):
+/// `a_j = 1/j^2` is a sequence, but `T_c = 300` and `k_B = 1.38` are
+/// subscripted constants.
+func usesIndex(_ u: Units, _ index: String) -> Bool {
   let w = Array(index.utf16)
   guard !w.isEmpty, u.count >= w.count else { return false }
   for start in 0...(u.count - w.count) where Array(u[start..<(start + w.count)]) == w {
@@ -161,7 +162,7 @@ private func sequenceLetter(_ text: String) -> String? {
   guard s.eat("_") else { return nil }
   let conventional: Set<String> = ["n", "k", "m"]
   func isSequence(_ index: String, _ rhs: String) -> Bool {
-    conventional.contains(index) || (!reservedNames.contains(index) && usesIndex(rhs, index))
+    conventional.contains(index) || (!reservedNames.contains(index) && usesIndex(Array(rhs.utf16), index))
   }
   if s.eat("{") || s.eat("(") {
     s.space()
@@ -232,16 +233,11 @@ private func isMetricRow(_ text: String) -> Bool {
   return s.peek == unit("=")
 }
 
-private func message(_ error: Error) -> String {
-  (error as? LanguageError)?.message ?? (error as? ParseError)?.message ?? (error as? ShaderError)?.message
-    ?? "\(error)"
-}
-
 /// A scalar field in x alone (or y alone) is most often a curve meant as
 /// `y = …`: the row says how to write that, since it now draws a field.
 private func curveHint(_ object: MathObject, _ text: String) -> String? {
   guard case .scalarField(let expr) = object else { return nil }
-  let vars = freeVarNames(expr)
+  let vars = freeVars(expr)
   let (free, other) = vars.contains("x") ? ("x", "y") : ("y", "x")
   if !vars.contains(free) || vars.contains(other) { return nil }
   return "scalar field — for the curve write \(other) = \(text)"
@@ -332,7 +328,7 @@ public func analyze(_ sources: [String]) -> DocumentAnalysis {
     let levelSet = d.kind == "fn" && built.fns[d.name] != nil && texts[i] != texts[first]
     var planar = false
     if let field = built.fields[d.name] {
-      let vars = freeVarNames(field)
+      let vars = freeVars(field)
       planar = !vars.contains("u") && !vars.contains("v")
     }
     if planar || levelSet {
@@ -457,7 +453,7 @@ public func analyze(_ sources: [String]) -> DocumentAnalysis {
       if case .bin(.mul, _, .range, _) = rawParsed { throw Unsupported("orbits") }
       // A row not drawn over the plane may test equality in a case: `f(2)`
       // with f(m) = {mod(m, 2) = 0: …}.
-      func plane(_ e: Expr) -> Bool { freeVarNames(e).contains(where: ["x", "y", "z"].contains) }
+      func plane(_ e: Expr) -> Bool { freeVars(e).contains(where: ["x", "y", "z"].contains) }
       let exact = !plane(rawParsed)
       var rowOpts = ropts
       rowOpts.exactConditions = exact
@@ -477,7 +473,7 @@ public func analyze(_ sources: [String]) -> DocumentAnalysis {
       switch resolved {
       case .eq, .ineq: break
       default:
-        let free = freeVarNames(resolved).list.filter { !constNames.contains($0) }
+        let free = freeVars(resolved).list.filter { !constNames.contains($0) }
         if free.contains(where: { $0 == "u" || $0 == "v" }),
           !free.contains(where: ["x", "y", "z", "w"].contains)
         {
@@ -495,7 +491,7 @@ public func analyze(_ sources: [String]) -> DocumentAnalysis {
       rows[i].unsupported = notSupported(error.what)
       if viewHead(text) != nil { viewsUnknown = true }
     } catch {
-      var text = message(error)
+      var text = errorMessage(error)
       // `i = 3` fails as a claim about i; the author meant a definition, so
       // say why it is not one.
       if let taken = takenDefinitionName(texts[i]), taken != "d" {
@@ -531,7 +527,7 @@ public func analyze(_ sources: [String]) -> DocumentAnalysis {
       rows[i].classified = nil
       rows[i].info = nil
     } catch {
-      rows[i].error = message(error)
+      rows[i].error = errorMessage(error)
       rows[i].cpu = nil
       rows[i].gpu = nil
     }

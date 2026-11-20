@@ -111,10 +111,10 @@ private func describe(_ spans: [HighlightSpan], _ row: String) -> String {
   /// The tables the highlighter reads are the TypeScript's.
   @Test func builtinTablesMatchTheSite() {
     let tables = fixture.tables
-    #expect(functions.union(laterFunctions) == Set(tables.functions))
+    #expect(functions == Set(tables.functions))
     #expect(callForms == Set(tables.callForms))
     #expect(distributionNames == Set(tables.distributions))
-    #expect(constantNames == Set(tables.constants))
+    #expect(Set(constants.keys) == Set(tables.constants))
   }
 
   /// The rows of `documents` whose spans are not the site's, and how many rows were looked at.
@@ -163,7 +163,7 @@ private func describe(_ spans: [HighlightSpan], _ row: String) -> String {
     for document in fixture.documents {
       for (k, row) in document.rows.enumerated() {
         #expect(noteStart(row) == (document.notes[k] < 0 ? nil : document.notes[k]), "\(row)")
-        let got = noteColorRGB(row)
+        let got = noteColor(row)
         if let want = document.noteColors[k] {
           #expect(got.map { simd_close($0, want) } == true, "\(row)")
         } else {

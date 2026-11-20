@@ -72,7 +72,7 @@ public struct ColorRow: Equatable, Sendable {
 /// usually a curve being typed.
 public func takesColor(_ row: ColorRow) -> Bool {
   let blank = row.text.utf16.allSatisfy(isJSWhitespace)
-  if blank || row.comment || (row.def && !row.point) || row.view || noteColorRGB(row.text) != nil { return false }
+  if blank || row.comment || (row.def && !row.point) || row.view || noteColor(row.text) != nil { return false }
   switch row.plan {
   case .note, .metric, .value(shade: false): return false
   default: return true

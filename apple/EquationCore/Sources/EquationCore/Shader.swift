@@ -13,8 +13,7 @@ public struct ShaderError: Error, Equatable, Sendable {
 }
 
 /// The shader spelling of a function, where it is not the function's own
-/// name (lib/glsl.ts `FN_GLSL`). The bracketed names are calls only lowering
-/// writes: lib/expr.ts ANGLE_FN, ANGLE_RATE_FN and the *_PDF_FN densities.
+/// name (lib/glsl.ts `FN_GLSL`).
 public let fnGLSL: [String: String] = [
   "ln": "log",
   "log": "eq_log10",
@@ -32,23 +31,18 @@ public let fnGLSL: [String: String] = [
   "sinc": "eq_sinc",
   "coth": "eq_coth",
   "tanh": "eq_tanh",
-  "[angle]": "eq_angle",
-  "[angle′]": "eq_angle_rate",
-  "[gammapdf]": "eq_gammapdf",
-  "[betapdf]": "eq_betapdf",
-  "[tpdf]": "eq_tpdf",
-  "[weibullpdf]": "eq_weibullpdf",
-]
-
-/// The probability mass functions of the discrete laws (lib/expr.ts `PMF_FNS`).
-private let pmfFns: Set<String> = [
-  "[binomialpmf]", "[poissonpmf]", "[negativebinomialpmf]", "[discreteuniformpmf]",
+  ANGLE_FN: "eq_angle",
+  ANGLE_RATE_FN: "eq_angle_rate",
+  GAMMA_PDF_FN: "eq_gammapdf",
+  BETA_PDF_FN: "eq_betapdf",
+  T_PDF_FN: "eq_tpdf",
+  WEIBULL_PDF_FN: "eq_weibullpdf",
 ]
 
 /// Compile a (possibly chained) inequality to a GLSL boolean via the given
 /// scalar emitter (lib/glsl.ts `condGLSL`).
 public func condGLSL(_ cond: Expr, _ emit: (Expr) throws(ShaderError) -> String) throws(ShaderError) -> String {
-  guard case .ineq = cond else { throw ShaderError(notACondition(cond)) }
+  guard case .ineq = cond else { throw ShaderError(notACondition(cond).message) }
   var parts: [String] = []
   for c in ineqComparisons(cond) {
     let l = try emit(c.l)
@@ -241,7 +235,7 @@ func fmt(_ value: Double) throws(ShaderError) -> String {
       "This row has an infinite constant (\(value > 0 ? "∞" : "−∞")) in it, so it cannot be drawn"
         + " — a count or total over an unbounded set is ∞.")
   }
-  let s = jsNumberString(value)
+  let s = JS.string(value)
   if let e = s.firstIndex(of: "e") { return "\(s[..<e])E\(s[s.index(after: e)...])" }
   return s.contains(".") ? s : "\(s).0"
 }
@@ -361,9 +355,7 @@ public func fourierGraphGLSL(
   _ e: Expr, differentiate: (Expr, String) throws -> Expr = { e, v in try diff(e, v) }
 ) throws(ShaderError) -> (glsl: String, slopeScale: Double)? {
   guard let loop = try fourierLoop(e) else { return nil }
-  var names: Set<String> = []
-  freeVars(loop.count, into: &names)
-  if names.contains("x") { return nil }
+  if freeVars(loop.count).contains("x") { return nil }
   do {
     if case .num(let slope) = try differentiate(loop.position, "x"), slope.isFinite {
       return (try loop.call("\(try fmt(abs(slope))) * reach"), slope)
@@ -395,7 +387,7 @@ public func uniformName(_ p: String) -> String {
 /// parameters, say).
 public func toGLSL(_ e: Expr) throws(ShaderError) -> String {
   switch e {
-  case .index, .range, .eqtest:
+  case .index, .range, .eqtest, .comp, .figure, .lazy, .trail, .label, .hist, .family:
     throw ShaderError(structuralDiagnostic(e))
   case .num(let value):
     return try fmt(value)
@@ -424,7 +416,7 @@ public func toGLSL(_ e: Expr) throws(ShaderError) -> String {
   case .call(let name, let arguments):
     // No float32 twin, on purpose: a pmf is nonzero only AT the integers, a
     // set of measure zero no fragment ever lands on. Rows draw it as stems.
-    if pmfFns.contains(name) {
+    if PMF_FNS.contains(name) {
       throw ShaderError("A probability mass function is drawn as stems, not as a curve.")
     }
     // A Σ/Π is either expanded away or evaluated on the CPU (a sequence
@@ -442,11 +434,15 @@ public func toGLSL(_ e: Expr) throws(ShaderError) -> String {
     throw ShaderError("Inequality in scalar context.")
   case .vec:
     throw ShaderError("Vector in scalar context.")
-  case .list:
+  case .list, .data:
     throw ShaderError("A list can only be plotted as its own row.")
-  case .str:
+  case .str, .text:
     throw ShaderError("Text cannot be plotted — it can only be compared, inside a filter.")
   case .piecewise(let cases, let otherwise):
     return try piecewiseGLSL(cases, otherwise: otherwise, toGLSL)
+  case .loop:
+    // Port: compileTyped (lib/complex.ts) emits loops, since it types the
+    // params; this is what lib/glsl.ts `toGLSL` itself says of one.
+    throw ShaderError("A recursive function cannot be used here yet.")
   }
 }

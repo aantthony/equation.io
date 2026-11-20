@@ -78,82 +78,10 @@ public struct AxisMapError: Error, Equatable, Sendable, CustomStringConvertible 
 
 // MARK: - The expressions a map is built from
 
-private func freeVars(_ e: Expr, into out: inout Set<String>) {
-  switch e {
-  case .var(let name): out.insert(name)
-  case .neg(let a): freeVars(a, into: &out)
-  case .bin(_, let a, let b, _):
-    freeVars(a, into: &out)
-    freeVars(b, into: &out)
-  case .call(_, let args): for a in args { freeVars(a, into: &out) }
-  default: break
-  }
-}
-
-private func freeVars(_ e: Expr) -> Set<String> {
-  var out: Set<String> = []
-  freeVars(e, into: &out)
-  return out
-}
-
-private func substVars(_ e: Expr, _ values: [String: Expr]) -> Expr {
-  switch e {
-  case .var(let name): values[name] ?? e
-  case .neg(let a): .neg(substVars(a, values))
-  case .bin(let op, let a, let b, let glyph): .bin(op, substVars(a, values), substVars(b, values), glyph: glyph)
-  case .call(let name, let args): .call(name, args.map { substVars($0, values) })
-  default: e
-  }
-}
-
-/// lib/expr.ts `realPow`: a negative base to a small-denominator rational
-/// power is the real root when the denominator is odd, undefined otherwise.
-func realPow(_ a: Double, _ b: Double) -> Double {
-  if a >= 0 { return pow(a, b) }
-  for q in 1...12 {
-    let p = (b * Double(q)).rounded()
-    var x = abs(p)
-    var y = Double(q)
-    while y != 0 { (x, y) = (y, x.truncatingRemainder(dividingBy: y)) }
-    let g = x == 0 ? 1 : x
-    let pr = p / g
-    let qr = Double(q) / g
-    if abs(b - pr / qr) < 1e-6 {
-      if qr.truncatingRemainder(dividingBy: 2) == 0 { return .nan }
-      return (abs(pr).truncatingRemainder(dividingBy: 2) == 1 ? -1 : 1) * pow(-a, b)
-    }
-  }
-  return .nan
-}
-
-private let mapFunctions: [String: @Sendable (Double) -> Double] = [
-  "exp": exp, "ln": log, "log": log10, "log2": log2, "sqrt": sqrt, "abs": abs,
-  "sin": sin, "cos": cos, "tan": tan, "asin": asin, "acos": acos, "atan": atan,
-  "sinh": sinh, "cosh": cosh, "tanh": tanh, "asinh": asinh, "acosh": acosh, "atanh": atanh,
-]
-
-/// lib/expr.ts `evaluate`, for what an axis map is built from: numbers, one
-/// variable, pi and e, arithmetic and the one-argument functions. NaN for
-/// anything else, as a map whose evaluation throws reads on the site.
+/// lib/expr.ts `evaluate` of a map at one value of its variable. NaN where
+/// the evaluation throws, as such a map reads on the site.
 func evaluateMap(_ e: Expr, _ name: String, _ value: Double) -> Double {
-  switch e {
-  case .num(let v): return v
-  case .var(let n): return n == name ? value : n == "pi" ? .pi : n == "e" ? M_E : .nan
-  case .neg(let a): return -evaluateMap(a, name, value)
-  case .bin(let op, let a, let b, _):
-    let (x, y) = (evaluateMap(a, name, value), evaluateMap(b, name, value))
-    switch op {
-    case .add: return x + y
-    case .sub: return x - y
-    case .mul: return x * y
-    case .div: return x / y
-    case .pow: return realPow(x, y)
-    }
-  case .call(let fn, let args):
-    guard args.count == 1, let f = mapFunctions[fn] else { return .nan }
-    return f(evaluateMap(args[0], name, value))
-  default: return .nan
-  }
+  (try? evaluate(e, [name: value])) ?? .nan
 }
 
 /// Each function the map may apply, and the one that undoes it.
@@ -208,7 +136,7 @@ public func parseAxisMap(_ axis: AxisMap.Axis, _ src: String, env: [String: Doub
   let usage =
     "An axis map writes \(axis.rawValue) in terms of the screen's \(screen), like \(axis.rawValue) = 10^\(screen)."
   guard var forward = try? parseExpr(src) else { throw AxisMapError(message: usage) }
-  let free = freeVars(forward).subtracting(["pi", "e"])
+  let free = freeVars(forward).list.filter { $0 != "pi" && $0 != "e" }
   guard free.contains(screen) else { throw AxisMapError(message: usage) }
   var values: [String: Expr] = [:]
   for name in free where name != screen {

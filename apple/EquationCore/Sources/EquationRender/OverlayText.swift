@@ -1,5 +1,6 @@
 import CoreGraphics
 import CoreText
+import EquationCore
 import Foundation
 
 // The canvas's colors and text, as the overlay (Overlay2D.swift) needs them:
@@ -60,7 +61,7 @@ public struct CSSColor: Equatable, Sendable, Codable, ExpressibleByStringLiteral
 
   public var css: String {
     let c = [r, g, b].map { Int(($0 * 255).rounded()) }
-    return a == 1 ? "rgb(\(c[0]), \(c[1]), \(c[2]))" : "rgba(\(c[0]), \(c[1]), \(c[2]), \(jsNumber(a)))"
+    return a == 1 ? "rgb(\(c[0]), \(c[1]), \(c[2]))" : "rgba(\(c[0]), \(c[1]), \(c[2]), \(JS.string(a)))"
   }
 
   public init(from decoder: any Decoder) throws {
@@ -85,12 +86,6 @@ func cgColor(_ c: RGB, alpha: CGFloat = 1) -> CGColor {
 
 /// The site's `cssRgb(theme.bg)`: the page behind the graph, which halos text.
 func cssRgb(_ c: RGB) -> CGColor { CSSColor(c).cgColor }
-
-/// JavaScript's `String(number)` for the numbers the overlay prints: a whole
-/// one without its `.0`.
-func jsNumber(_ v: Double) -> String {
-  v == v.rounded() && abs(v) < 1e15 ? String(Int64(v)) : "\(v)"
-}
 
 /// The site's `ui-sans-serif, system-ui` at a CSS weight: 400 as `11px` has
 /// it, 600 and `bold`.

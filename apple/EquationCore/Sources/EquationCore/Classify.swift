@@ -119,8 +119,12 @@ func checkScalar(_ e: Expr) throws {
       try checkScalar(c.value)
     }
     if let otherwise { try checkScalar(otherwise) }
-  case .index, .range, .eqtest: throw LanguageError("This object must be lowered before scalar type inference.")
-  case .str: throw LanguageError("Expected a scalar expression.")
+  case .loop:
+    // Port: lib/complex.ts `loopTypes` types a loop's params and result.
+    throw Unsupported("recursive functions")
+  case .index, .range, .eqtest, .comp, .figure, .lazy, .trail, .label, .hist, .family:
+    throw LanguageError("This object must be lowered before scalar type inference.")
+  case .data, .str, .text: throw LanguageError("Expected a scalar expression.")
   }
 }
 
@@ -191,7 +195,7 @@ private func levelFamily(_ l: Expr, _ r: Expr, _ params: [String], _ defined: Se
   } else {
     return nil
   }
-  let fv = freeVarNames(f)
+  let fv = freeVars(f)
   if !fv.contains("x") && !fv.contains("y") { return nil }
   return LevelSetSpec(name: "F", expr: f, params: jsSorted(fv.list.filter(defined.contains)), level: name)
 }
@@ -200,7 +204,7 @@ private func levelFamily(_ l: Expr, _ r: Expr, _ params: [String], _ defined: Se
 /// value — a numerical check, not a proof: they are compared at seeded
 /// random points spread over several scales, where both are defined.
 func holdsEverywhere(_ l: Expr, _ r: Expr) -> Bool {
-  let names = freeVarNames(.eq(l, r)).list.filter { $0 != "pi" && $0 != "e" }
+  let names = freeVars(.eq(l, r)).list.filter { $0 != "pi" && $0 != "e" }
   var seed: Int32 = Int32(truncatingIfNeeded: 0x9e37_79b9 as UInt32)
   func random() -> Double {
     seed = seed &+ 0x6d2b_79f5
@@ -262,7 +266,7 @@ func classify(_ lowered: Expr, defined: Set<String>, fields: [String: Expr]) thr
   let ode = try matchODE(expr)
   if let ode { expr = .vec(ode) }
 
-  var vars = freeVarNames(expr)
+  var vars = freeVars(expr)
   if vars.contains("i") || vars.contains("w") { throw Unsupported("complex numbers") }
   var params: [String] = []
   for v in vars.list where defined.contains(v) {
@@ -296,7 +300,7 @@ func classify(_ lowered: Expr, defined: Set<String>, fields: [String: Expr]) thr
 
   // `t = 3` reads like a constant, but t is time: the row would be a silent
   // claim about the clock. Say so instead of drawing nothing.
-  if case .eq(.var("t"), let r) = expr, !freeVarNames(r).contains("t"), !hasSpace, !hasParam {
+  if case .eq(.var("t"), let r) = expr, !freeVars(r).contains("t"), !hasSpace, !hasParam {
     throw LanguageError(tReserved)
   }
   var sides: (l: Expr, r: Expr)?
@@ -375,7 +379,7 @@ func classify(_ lowered: Expr, defined: Set<String>, fields: [String: Expr]) thr
     if vars.contains("z") { throw Unsupported("surfaces in space") }
     let graphRhs: Expr? = isVar(l, "y") ? r : isVar(r, "y") ? l : nil
     let levels = levelFamily(l, r, params, defined)
-    if let graphRhs, !freeVarNames(graphRhs).contains("y") {
+    if let graphRhs, !freeVars(graphRhs).contains("y") {
       return done(.curveGraph(rhs: graphRhs, equation: expr, levels: levels))
     }
     return done(.curveImplicit(residual: .bin(.sub, l, r), equation: expr, levels: levels))

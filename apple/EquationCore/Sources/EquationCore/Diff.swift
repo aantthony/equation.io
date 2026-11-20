@@ -136,7 +136,15 @@ public func diff(_ e: Expr, _ v: String) throws(DiffError) -> Expr {
       let db = try diff(b, v)
       return mul(pow(a, b), add(mul(db, call("ln", a)), mul(b, div(try diff(a, v), a))))
     }
-  case .index, .range, .eqtest:
+  case .comp(let value, let index, let arity, let functionName):
+    // f(P): a component of the derivative is the derivative of the
+    // component. A value diff() cannot carry (a tuple inside arithmetic)
+    // leaves the whole call to the finite-difference fallback.
+    guard let dv = try? diff(value, v) else {
+      throw DiffError("Cannot differentiate this point.", nonSmooth: true)
+    }
+    return isNumVal(dv, 0) ? ZERO : .comp(value: dv, index: index, arity: arity, functionName: functionName)
+  case .index, .range, .eqtest, .figure, .lazy, .trail, .label, .hist, .family:
     throw DiffError(structuralDiagnostic(e), nonSmooth: true)
   case .call(let name, let args):
     // A continuous interval's parameter varies on its own, not with x.
@@ -269,7 +277,9 @@ public func diff(_ e: Expr, _ v: String) throws(DiffError) -> Expr {
     var out: [Expr] = []
     for item in items { out.append(try diff(item, v)) }
     return .list(out)
-  case .str:
+  case .data:
+    throw DiffError("Cannot differentiate a list.")
+  case .str, .text:
     throw DiffError("Cannot differentiate text.")
   case .piecewise(let cases, let otherwise):
     // Branchwise derivative (ignores the boundary points). A case comes out
@@ -278,6 +288,9 @@ public func diff(_ e: Expr, _ v: String) throws(DiffError) -> Expr {
     for c in cases { out.append(Expr.Case(cond: c.cond, value: try diff(c.value, v))) }
     guard let otherwise else { return .piecewise(out, otherwise: nil) }
     return .piecewise(out, otherwise: try diff(otherwise, v))
+  case .loop:
+    // Central difference instead.
+    throw DiffError("Cannot differentiate a recursive function.", nonSmooth: true)
   }
 }
 

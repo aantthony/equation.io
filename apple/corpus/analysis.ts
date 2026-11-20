@@ -7,13 +7,29 @@
  *   node --experimental-transform-types --no-warnings apple/corpus/analysis.ts
  *
  * Writes analysis.json (per document: its rows, and per row what
- * lib/analysis.ts says of it) and evaluate.json (lib/expr.ts evaluate and
+ * lib/analysis.ts says of it) and evaluate.json (lib/expr.ts evaluate, what
+ * it and its neighbours make of the kinds no row can write, and
  * the number formatting readouts are written with) beside the parser's
  * fixtures.
  */
 import { writeFileSync } from 'node:fs';
 import { analyzeRows } from '../../lib/analysis.ts';
-import { evaluate, exprKey, parseExpr, realPow } from '../../lib/expr.ts';
+import { diff } from '../../lib/diff.ts';
+import {
+  childrenOf,
+  type Expr,
+  evaluate,
+  exprKey,
+  freeVars,
+  mapChildren,
+  parseExpr,
+  realPow,
+  RECUR,
+  structuralDiagnostic,
+  substVars,
+  TERM_AT_FN,
+} from '../../lib/expr.ts';
+import { toGLSL } from '../../lib/glsl.ts';
 import { takesColor } from '../../lib/palette.ts';
 import { valueReadout } from '../../lib/plot.ts';
 import { rowKind } from '../../lib/row-kind.ts';
@@ -428,6 +444,118 @@ const evals = EXPRS.map(src => {
   };
 });
 
+// --- the kinds only lowering writes ---
+//
+// No row parses to one, so each is built here, and everything the language
+// reads of a tree is recorded for it: its key, children and free variables,
+// a substitution, its value, its derivative and its shader text.
+
+const nm = (value: number): Expr => ({ kind: 'num', value });
+const vr = (name: string): Expr => ({ kind: 'var', name });
+const op = (o: '+' | '-' | '*' | '/' | '^', a: Expr, b: Expr): Expr => ({ kind: 'bin', op: o, a, b });
+const fn = (name: string, ...args: Expr[]): Expr => ({ kind: 'call', name, args });
+const when = (l: Expr, o: '<' | '<=' | '>' | '>=', r: Expr, value: Expr) => ({
+  cond: { kind: 'ineq', op: o, l, r } as Expr,
+  value,
+});
+const cases = (list: Array<{ cond: Expr; value: Expr }>, otherwise?: Expr): Expr => ({
+  kind: 'piecewise',
+  cases: list,
+  ...(otherwise ? { otherwise } : {}),
+});
+const loop = (body: Expr, limit = 250, seeds: Expr[] = [vr('x'), nm(0)]): Expr => ({
+  kind: 'loop',
+  params: ['s', 'k'],
+  seeds,
+  body,
+  limit,
+});
+const column = { name: '@a', values: Float64Array.of(1, 2.5, NaN) };
+const [X, Y, S, K] = [vr('x'), vr('y'), vr('s'), vr('k')];
+const next = fn(RECUR, op('+', S, Y), op('+', K, nm(1)));
+const polygon: Expr = { kind: 'figure', form: 'polygon', dimension: 2, vertices: [X, nm(1), vr('a'), Y] };
+const STRUCTURES: Array<[string, Expr]> = [
+  ['f(P), a tuple', { kind: 'comp', value: { kind: 'vec', items: [X, Y] }, index: 1, arity: 2, functionName: 'f' }],
+  ['p.x of a name', { kind: 'comp', value: vr('P'), index: 0, arity: 0, functionName: 'p.x' }],
+  ['f(P), a product', { kind: 'comp', value: op('*', X, X), index: 0, arity: 3, functionName: 'f' }],
+  ['a polygon', polygon],
+  [
+    'a packed polyline',
+    {
+      kind: 'figure',
+      form: 'polyline',
+      dimension: 2,
+      vertices: [vr('@a'), op('*', vr('a'), vr('@a'))],
+      over: [column],
+    },
+  ],
+  ['a segment in space', { kind: 'figure', form: 'segment', dimension: 3, vertices: [X, Y, nm(0), nm(1), nm(2), X] }],
+  ['a trail', { kind: 'trail', coordinates: [X, vr('t')] }],
+  ['a label', { kind: 'label', coordinates: [X, Y], text: 'a "b" \\ c' }],
+  ['a histogram', { kind: 'hist', centers: Float64Array.of(0.5, 1.5), counts: Float64Array.of(2, 0), width: 1 }],
+  ['a family', { kind: 'family', members: [{ kind: 'eq', l: Y, r: X }, polygon] }],
+  ['a packed list', { kind: 'data', values: Float64Array.of(1, -0, Infinity, 0.1, NaN) }],
+  ['an empty packed list', { kind: 'data', values: new Float64Array(0) }],
+  ['a lazy list', { kind: 'lazy', cols: [column], body: fn('sin', op('*', vr('a'), vr('@a'))) }],
+  ['a text column', { kind: 'text', values: ['NYC', 'a"b', ''] }],
+  ['a loop', loop(cases([when(K, '>=', nm(5), S)], next))],
+  ['a loop out of passes', loop(cases([when(K, '>=', nm(5), S)], next), 3)],
+  ['a loop of no passes', loop(cases([when(K, '>=', nm(5), S)], next), 0)],
+  ['a loop with no case holding', loop(cases([when(K, '<', nm(0), S)]))],
+  ['a loop of nested cases', loop(cases([when(K, '<', nm(4), cases([when(S, '>', nm(50), K)], next))], op('*', S, K)))],
+  ['a loop that is one leaf', loop(op('+', S, nm(1)))],
+  ['a loop that only recurs', loop(next, 7)],
+  [
+    'a loop leaving the finite range',
+    loop(cases([when(K, '>=', nm(40), S)], fn(RECUR, op('^', S, nm(9)), op('+', K, nm(1))))),
+  ],
+  ['a loop of a chained condition', loop(cases([when({ kind: 'ineq', op: '<', l: nm(2), r: K }, '<', S, K)], next))],
+  ['a loop testing a name', loop(cases([{ cond: K, value: S }], next))],
+  ['a loop short of seeds', loop(cases([when(K, '>=', nm(5), S)], next), 250, [X])],
+  ['a loop reading outside itself', loop(cases([when(K, '>=', vr('a'), op('+', S, vr('t')))], next))],
+  ['a loop in a sum', op('+', loop(cases([when(K, '>=', nm(2), S)], next)), K)],
+  ['a term of a recurrence', fn(TERM_AT_FN, { kind: 'str', value: 'seq_' }, X, Y)],
+  ['a term past its chain', fn(TERM_AT_FN, { kind: 'str', value: 'seq_' }, op('+', X, nm(40)))],
+  ['a term of no chain', fn(TERM_AT_FN, X, X)],
+  ['a packed list in arithmetic', op('+', X, { kind: 'data', values: Float64Array.of(1, 2) })],
+  ['a point passed in a call', fn('sin', { kind: 'comp', value: vr('P'), index: 0, arity: 2, functionName: 'g' })],
+  ['text in a case', cases([when(X, '>', nm(0), { kind: 'text', values: ['a'] })], polygon)],
+];
+const SUBSTITUTION: Record<string, Expr> = { x: op('+', vr('t'), nm(1)), y: S, s: K, k: S, a: K, '@a': nm(9), P: Y };
+const STRUCTURE_ENVS: Array<Record<string, number>> = [
+  { x: 1, y: 2, a: 3, t: 0.5, P: 4, seq_1: 7, seq_2: 8, k: 100, s: -1 },
+  { x: 2, y: -0.5, a: 1, t: 0, P: 0, seq_1: 7, seq_2: 8 },
+  { x: 2.5, y: 1e300, a: 2, t: 1, seq_1: 7 },
+];
+/** A tree as the fixtures carry one: a packed column as the list of its numbers. */
+const tree = (e: Expr): unknown =>
+  JSON.parse(
+    JSON.stringify(e, (_key, value: unknown) =>
+      ArrayBuffer.isView(value) ? Array.from(value as Float64Array) : typeof value === 'number' ? num(value) : value,
+    ),
+  );
+const attempt = (run: () => unknown): unknown => {
+  try {
+    return { out: run() };
+  } catch (err) {
+    return { error: (err as Error).message, errorType: (err as Error).constructor.name };
+  }
+};
+const structures = STRUCTURES.map(([name, expr]) => ({
+  name,
+  expr: tree(expr),
+  key: exprKey(expr),
+  kind: expr.kind,
+  children: childrenOf(expr).map(exprKey),
+  mapped: exprKey(mapChildren(expr, child => ({ kind: 'neg', a: child }))),
+  free: [...freeVars(expr)],
+  substituted: exprKey(substVars(expr, SUBSTITUTION)),
+  diagnostic: structuralDiagnostic(expr),
+  values: STRUCTURE_ENVS.map(env => attempt(() => num(evaluate(expr, { ...env })))),
+  derivative: attempt(() => exprKey(diff(expr, 'x'))),
+  glsl: attempt(() => toGLSL(expr)),
+}));
+
 const POW: Array<[number, number]> = [];
 for (const a of [0, -0, 1, -1, 2, -2, -8, 0.5, -0.5, 10, NaN, Infinity, -Infinity])
   for (const b of [0, 1, -1, 2, 3, 0.5, 1 / 3, 2 / 3, 0.33333, 1 / 7, 5 / 12, 1 / 13, -1 / 3, 2.5, NaN, Infinity, -Infinity])
@@ -444,6 +572,9 @@ writeFileSync(
   new URL('evaluate.json', fixtures),
   JSON.stringify({
     evals,
+    substitution: Object.fromEntries(Object.entries(SUBSTITUTION).map(([name, e]) => [name, tree(e)])),
+    structureEnvs: STRUCTURE_ENVS.map(env => Object.fromEntries(Object.entries(env).map(([k, v]) => [k, num(v)]))),
+    structures,
     pow: POW.map(([a, b]) => ({ a: num(a), b: num(b), value: num(realPow(a, b)) })),
     numbers: NUMBERS.map(v => ({
       v: num(v),
@@ -459,4 +590,7 @@ writeFileSync(
     })),
   }) + '\n',
 );
-console.log(`${evals.length} expressions × ${ENVS.length} points, ${POW.length} powers, ${NUMBERS.length} numbers`);
+console.log(
+  `${evals.length} expressions × ${ENVS.length} points, ${structures.length} built trees, ${POW.length} powers, ` +
+    `${NUMBERS.length} numbers`,
+);
