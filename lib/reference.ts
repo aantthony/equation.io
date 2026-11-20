@@ -420,7 +420,7 @@ export interface LabelledRows {
 
 /**
  * What the Apple app's lookups answer from (lib/assistant-tools.ts),
- * bundled as assistant.json by `pnpm app:web`: the kinds by group with their
+ * bundled as assistant.json by `pnpm app:data`: the kinds by group with their
  * smallest forms, worked examples by kind and by function, notes on
  * functions, and named shapes.
  */

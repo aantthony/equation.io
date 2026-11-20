@@ -22,7 +22,7 @@ import { EvalGraph, readSyntax } from './graph.ts';
 const num = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v);
 const text = (v: unknown): string => (typeof v === 'string' ? v : '');
 
-/** What the lookups answer from, as the app bundles it (apple/vite.config.ts). */
+/** What the lookups answer from, as the app bundles it (apple/tools/app-data.ts). */
 let data: AssistantData | undefined;
 const lookups = () =>
   (data ??= assistantData(

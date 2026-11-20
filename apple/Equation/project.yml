@@ -1,6 +1,6 @@
 # The Apple app: one multiplatform target for iPhone, iPad and Mac.
 #
-#   pnpm app:web                 # build the renderer page into WebBundle/
+#   pnpm app:data                # the examples and Ask's reference, into Data/
 #   xcodegen -s apple/Equation/project.yml
 #   open apple/Equation/Equation.xcodeproj
 name: Equation
@@ -18,11 +18,19 @@ targets:
     supportedDestinations: [iOS, macOS]
     sources:
       - path: Sources
+      # examples.json, assistant.json and language.json, written by pnpm
+      # app:data and copied as they are: Examples.swift and Chat.swift read
+      # them from Data/ in the bundle.
+      - path: Data
+        type: folder
+        buildPhase: resources
     dependencies:
       - package: EquationCore
         product: EquationCore
       - package: EquationCore
         product: EquationRender
+      - package: EquationCore
+        product: EquationAssist
     info:
       path: Sources/Info.plist
       properties:
@@ -66,18 +74,3 @@ targets:
         ENABLE_APP_SANDBOX: YES
         ENABLE_USER_SELECTED_FILES: readwrite
         ENABLE_OUTGOING_NETWORK_CONNECTIONS: YES
-        # The renderer-copy script reads WebBundle/ from the source tree.
-        ENABLE_USER_SCRIPT_SANDBOXING: NO
-    postCompileScripts:
-      - name: Bundle the renderer
-        basedOnDependencyAnalysis: false
-        script: |
-          src="$SRCROOT/WebBundle"
-          if [ ! -f "$src/native-app/index.html" ]; then
-            echo "error: The renderer is not built. Run pnpm app:web in the repository."
-            exit 1
-          fi
-          dest="$TARGET_BUILD_DIR/$UNLOCALIZED_RESOURCES_FOLDER_PATH/Web"
-          rm -rf "$dest"
-          mkdir -p "$dest"
-          cp -R "$src/" "$dest/"

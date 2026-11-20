@@ -1,7 +1,14 @@
 import SwiftUI
 
-/// The web app's examples (web/examples.ts), bundled as Web/examples.json by
-/// `pnpm app:web`.
+/// What `pnpm app:data` writes for the app (apple/tools/app-data.ts) into
+/// Equation/Data, a folder the bundle carries whole.
+enum AppData {
+  static func url(_ name: String) -> URL {
+    (Bundle.main.resourceURL ?? Bundle.main.bundleURL).appending(path: "Data/\(name).json")
+  }
+}
+
+/// The web app's examples (web/examples.ts), bundled as Data/examples.json.
 struct ExampleCategory: Decodable, Identifiable {
   var name: String
   var examples: [Example]
@@ -15,8 +22,7 @@ struct ExampleCategory: Decodable, Identifiable {
   }
 
   static let all: [ExampleCategory] = {
-    guard let url = Bundle.main.resourceURL?.appending(path: "Web/examples.json"),
-      let data = try? Data(contentsOf: url),
+    guard let data = try? Data(contentsOf: AppData.url("examples")),
       let categories = try? JSONDecoder().decode([ExampleCategory].self, from: data)
     else { return [] }
     return categories
