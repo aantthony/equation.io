@@ -34,4 +34,13 @@ export const SURFACE_CASES: string[] = [
   'C = (1, 2); curvature(C); D = (u, v); curvature(D); E = (u, x); curvature(E); G = (u, u, u, u); curvature(G); torsion((u, u^2))',
   'f(a, b) = (a, b); curvature(f); r = 2; C = (r cos(u), r sin(u)); curvature(C); curvature(C, 0); (curvature(C, 0), 1)',
   'C = (cos(3 u), sin(2 u)); y = curvature(C, x/10); curvature(C, t); z = torsion((cos(u), sin(u), u^2), x)',
+  // Coordinates named in a tuple: flows in field coordinates, and positions.
+  "r = sqrt(x^2 + y^2); theta = atan2(y, x); (r', theta') = (r(1 - r), 1); (theta', r') = (1, 0); (r', theta') = (1, t)",
+  "r = sqrt(x^2 + y^2); theta = atan2(y, x); (r', theta') = (1, 2, 3); (r', theta') = 1; (r', theta) = (1, 1); (r', r') = (1, 1)",
+  "p = x + y; q = 2x + 2y; (p', q') = (1, 0); s = x^2; (s', p') = (1, x); (x', p') = (y, 1); (y', x') = (x, -y); (k', x') = (1, 1)",
+  "r = sqrt(x^2 + y^2); theta = atan2(y, x); (r', theta', z') = (0, 1, 0.5); (z', r', theta') = (1, 0, 1); (r', theta', z') = (0, 1)",
+  "rho = sqrt(x^2 + y^2 + z^2); (rho', x') = (1, 1); (z', x') = (1, 1); (x', y', z', w') = (1, 1, 1, 1); (x', y') = (y, -x); (x', y', z') = (y, -x, 1)",
+  "a = 2; r = sqrt(x^2 + y^2); theta = atan2(y, x); (r', theta') = (a - r, sin(t)); u2 = x t; v2 = y - t; (u2', v2') = (1, 0); (r', theta') = (abs(r), 1)",
+  "r = sqrt(x^2 + y^2); theta = atan2(y, x); (r, theta) = (2, 0.8); (r, theta) = (3u, 6pi u); (x, y) = (1, 2); (r, r) = (1, 2); (r, theta) = 2",
+  "p = x^2 - y^2; q = 2 x y; (p, q) = (1, 0); (p, q, x) = (1, 0, 1); (p, q) = (1, 2, 3); (p, k) = (1, 0); (x, y, z) = (1, 2, 3); (p, x, y, z) = (1, 2, 3, 4)",
 ];

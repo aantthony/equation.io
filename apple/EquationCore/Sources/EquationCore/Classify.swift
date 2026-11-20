@@ -331,32 +331,11 @@ func classify(_ lowered: Expr, defined: Set<String>, fields: [String: Expr]) thr
     throw LanguageError(conditionAsNumber(misread))
   }
   // A row naming coordinates in a tuple on the left: a position
-  // `(r, theta) = (2, pi/4)`, or a planar flow `(r', theta') = (F, G)`
-  // (lib/coordinate.ts). Only the Cartesian flow (x', y') is ported.
-  if case .eq(.vec(let names), _) = expr,
-    names.allSatisfy({ if case .var = $0 { true } else { false } })
-  {
-    let written = names.compactMap { item -> String? in if case .var(let n) = item { n } else { nil } }
-    let flow = written.contains { $0.hasSuffix("'") }
-    if let spaceFlow = try lowerSpaceFlow(expr, fields) {
-      expr = spaceFlow
-    } else if try isSpacePosition(written, expr, fields) {
-      // Three coordinates on the left: a system in space, below.
-    } else if flow
-      ? written != ["x'", "y'"] : written.allSatisfy({ spaceVarNames.contains($0) || fields[$0] != nil })
-    {
-      throw Unsupported("coordinates named in a tuple")
-    }
-    if flow, written.count == 2, case .eq(_, let rhs) = expr {
-      guard case .vec(let velocity) = rhs else {
-        throw LanguageError("A coordinate flow needs two components on the right.")
-      }
-      if velocity.count != 2 {
-        throw LanguageError("Mismatched components: 2 on the left, \(velocity.count) on the right.")
-      }
-    }
-  }
-  if !fields.isEmpty { expr = substVars(expr, fields) }
+  // `(r, theta) = (2, pi/4)`, or a flow `(r', theta') = (F, G)`, which
+  // lowers to the Cartesian one (Coordinate.swift).
+  let coordinate = try coordinateRow(expr, fields)
+  _ = coordinate
+  expr = try lowerCoordinateFlow(expr, fields)
   let ode = try matchODE(expr)
   if let ode { expr = .vec(ode) }
   if let nested = nestedFigure(expr) { throw LanguageError("\(nested)(…) must be the whole expression.") }
