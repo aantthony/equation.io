@@ -69,6 +69,12 @@ export const DISCRETE_CASES: string[] = [
   'L_0[i, j] = {-20 < i < 20: {-20 < j < 20: mod(floor(43758.5 fract(sin(12.9898 i + 78.233 j))), 2), 0}, 0}; L_{n+1}[i, j] = mod(L_n[i-1, j] + L_n[i+1, j] + L_n[i, j-1] + L_n[i, j+1], 2)',
   'L_{n+1}[i, j] = L_n[i, j+1]; M_{n+1}[i, i] = M_n[i, i]; N_{n+1}[i, j] = N_n[i]; P_{n+1}[i, j] = P_n[2i, j]; Q_0[i] = 1; Q_{n+1}[i, j] = Q_n[i, j]',
   'L_0 = [(0, 0), 1]; L_{n+1}[i, j] = L_n[i, j]; M_0 = [(0.5, 0)]; M_{n+1}[i, j] = M_n[i, j]; a = 2; N_{n+1}[i, j] = a N_n[i, j] + n',
+  // A lattice view: its index axes, across then down.
+  'c_{n+1}[i] = mod(c_n[i-1] + c_n[i+1], 2); view(i = -60..60, n = 0..80)',
+  'c_{n+1}[i] = mod(c_n[i-1] + c_n[i+1], 2); view(n = 0..80, i = -60..60, locked); ---; view(i = 0..1, n = 0..1); y = x',
+  'T[i, j] = i j; view(j = 0..5); ---; T[i, j] = i + j; view(i = 0..5, j = 0..3, ratio = 2); ---; U[i, j] = 1; view(k = 0..1)',
+  'view(i = 0..10, n = 0..5); y = x; ---; view(i = 0..1, x = 0..1); view(i = 0..1, j = 0..1, k = 0..1); view(i = 0..1, i = 2..3)',
+  'L = [1, 2]; view(i = 0..1, j = 0..1); L; ---; view(X = -1..1, Y = -2..2); y = x; view(i = 1..0, n = 0..1); view(i = 0..1, n)',
   // Tables.
   'n = 6; T[i, j] = {0 <= i < n: {0 <= j < n: mod(i + j, n)}}',
   'n = 12; T[i, j] = {0 < i < n: {0 < j < n: {gcd(i, n) = 1: {gcd(j, n) = 1: mod(i j, n)}}}}',

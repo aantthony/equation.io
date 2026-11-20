@@ -47,7 +47,7 @@ public struct Graph2D: Equatable, Sendable {
     for (index, row) in analysis.rows.enumerated() {
       switch row.view {
       case .grid(let mode)?: grid = Frame2D.Grid(rawValue: mode) ?? .on
-      case .view(let x, let y, let ratio, _)?: window = Window(x: x, y: y, ratio: ratio)
+      case .view(let x, let y, let ratio, _, _)?: window = Window(x: x, y: y, ratio: ratio)
       default: break
       }
       if row.classified?.animated == true { animated = true }

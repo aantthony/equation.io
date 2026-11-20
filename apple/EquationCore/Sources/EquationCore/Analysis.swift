@@ -559,6 +559,39 @@ public func analyze(_ sources: [String]) -> DocumentAnalysis {
     }
   }
 
+  // A view naming index axes (one, as a panel sharing the other writes it)
+  // needs a lattice in its panel with those axes; on the plane it is a slip
+  // for x and y: `view(X = -1..1, Y = -2..2)`.
+  do {
+    var panelAt = 0
+    var latticeAxes: [[String]] = [[]]
+    var indexViews: [(row: Int, panel: Int, axes: [String])] = []
+    // (A row the port leaves alone may be the lattice a view names.)
+    var unknown: Set<Int> = []
+    for i in 0..<count {
+      if case .split? = rows[i].view {
+        panelAt += 1
+        latticeAxes.append([])
+      }
+      switch rows[i].cpu {
+      case .automaton(_, _, _, _, let axes)?, .lattice(_, let axes)?: latticeAxes[panelAt] += axes
+      default: break
+      }
+      if rows[i].unsupported != nil, !rows[i].comment { unknown.insert(panelAt) }
+      if case .view(_, _, _, _, let axes?)? = rows[i].view {
+        indexViews.append((i, panelAt, axes.filter { !$0.isEmpty }))
+      }
+    }
+    for (i, at, axes) in indexViews where !axes.allSatisfy(latticeAxes[at].contains) {
+      rows[i].view = nil
+      if unknown.contains(at) {
+        rows[i].unsupported = notSupported("a lattice view of a panel with a row that is not supported yet")
+      } else {
+        rows[i].error = "view(…) frames the plane with x and y; an index axis names a lattice in this panel."
+      }
+    }
+  }
+
   // A slider that is a Σ/Π bound steps in whole numbers. A row the port
   // leaves alone never expands its sums, so which sliders it bounds one by is
   // not known here: one such a row names, with a sum in reach, is left alone

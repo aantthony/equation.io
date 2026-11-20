@@ -176,7 +176,8 @@ import Testing
         switch view["kind"] as! String {
         case "view":
           .view(
-            x: pair("x"), y: pair("y"), ratio: view["ratio"].map(number), locked: view["locked"] as? Bool ?? false)
+            x: pair("x"), y: pair("y"), ratio: view["ratio"].map(number), locked: view["locked"] as? Bool ?? false,
+            axes: view["axes"] as? [String])
         case "camera":
           .camera(
             theta: number(view["theta"]!), phi: number(view["phi"]!), radius: view["radius"].map(number),
@@ -189,7 +190,9 @@ import Testing
         case "grid": .grid(mode: view["mode"] as! String)
         default: nil
         }
-      check("view spec", String(describing: Optional(mine)), String(describing: wanted))
+      // (JSON has no -0: a lattice view's down range from 0 is [-80, -0] on the site too.)
+      let spelled = String(describing: Optional(mine)).replacingOccurrences(of: " -0.0]", with: " 0.0]")
+      check("view spec", spelled, String(describing: wanted))
     }
     // Classification and plans.
     let cls = want["cls"] as? [String: Any]

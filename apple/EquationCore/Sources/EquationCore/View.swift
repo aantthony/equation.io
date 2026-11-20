@@ -12,7 +12,12 @@
 public enum ViewSpec: Equatable, Sendable {
   /// [lo, hi] of each axis given (at least one is); `ratio` is pixels per y
   /// unit over pixels per x unit; `locked` pins the window.
-  case view(x: [Double]?, y: [Double]?, ratio: Double?, locked: Bool)
+  ///
+  /// A lattice view names its index axes instead of x and y,
+  /// `view(i = -60..60, n = 0..80)`: `axes` is [across, down] as written (the
+  /// second empty when only one is), and y is the down range negated, since
+  /// row n + 1 sits below row n.
+  case view(x: [Double]?, y: [Double]?, ratio: Double?, locked: Bool, axes: [String]? = nil)
   /// Orbit angles in radians; `spin` in radians per second.
   case camera(theta: Double, phi: Double, radius: Double?, target: [Double]?, spin: Double?, locked: Bool)
   /// A `---` divider: where the new panel goes (`place` nil splits along the
@@ -311,6 +316,7 @@ func parseViewRow(_ text: String, _ env: [String: Double]) throws -> ViewSpec? {
     var x: [Double]?
     var y: [Double]?
     var ratio: Double?
+    var lattice: [(axis: String, range: [Double])] = []
     for arg in args {
       // `(x, y) = (Y cos X, Y sin X)`: both coordinates from the screen at once.
       var plane = RowScanner(arg)
@@ -344,19 +350,38 @@ func parseViewRow(_ text: String, _ env: [String: Double]) throws -> ViewSpec? {
       if range == nil, axis == "x" || axis == "y", mentionsWord(named.value, axis.uppercased()) {
         throw Unsupported("a view that maps its axes")
       }
-      // Any other letter names an index axis: the view is a lattice.
-      if axis != "x" && axis != "y" { throw Unsupported("a lattice view") }
-      if (axis == "x" ? x : y) != nil { throw LanguageError("view(...) sets \(axis) twice.") }
+      if (axis == "x" ? x : axis == "y" ? y : nil) != nil || lattice.contains(where: { $0.axis == axis }) {
+        throw LanguageError("view(...) sets \(axis) twice.")
+      }
       guard let range else { throw LanguageError(usage) }
       let lo = try num(range.0, env, "view \(axis) lower bound")
       let hi = try num(range.1, env, "view \(axis) upper bound")
       if lo >= hi {
         throw LanguageError("view \(axis) range needs lo < hi (got \(JS.string(lo))..\(JS.string(hi))).")
       }
-      if axis == "x" { x = [lo, hi] } else { y = [lo, hi] }
+      // Any other letter names an index axis: the view is a lattice.
+      if axis == "x" { x = [lo, hi] } else if axis == "y" { y = [lo, hi] } else { lattice.append((axis, [lo, hi])) }
+    }
+    var axes: [String]?
+    if !lattice.isEmpty {
+      if x != nil || y != nil || lattice.count > 2 {
+        throw LanguageError(
+          "A lattice view names its index axes, across then down: view(i = -60..60, n = 0..80). "
+            + "The plane is framed with x and y.")
+      }
+      if lattice.count == 1 {
+        // One axis, as a panel sharing the other writes it: taken as across
+        // here, and turned down by orientLattice when that is its axis.
+        axes = [lattice[0].axis, ""]
+        x = lattice[0].range
+      } else {
+        axes = [lattice[0].axis, lattice[1].axis]
+        x = lattice[0].range
+        y = [-lattice[1].range[1], -lattice[1].range[0]]
+      }
     }
     if x == nil && y == nil { throw LanguageError(usage) }
-    return .view(x: x, y: y, ratio: ratio, locked: locked)
+    return .view(x: x, y: y, ratio: ratio, locked: locked, axes: axes)
   }
   let usage = "Expected camera(theta, phi, radius?, (x, y, z)?, spin = rate?, locked?) — angles in radians."
   // spin = … is named and comes last, so the positional arguments keep their meaning.
