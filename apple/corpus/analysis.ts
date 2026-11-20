@@ -52,6 +52,7 @@ import { INTERVAL_CASES } from './cases-intervals.ts';
 import { PANEL_CASES, recordGridFields, recordStates } from './cases-panels.ts';
 import { SURFACE_CASES } from './cases-surfaces.ts';
 import { LEFTOVER_CASES, recordData } from './cases-leftovers.ts';
+import { SAMPLED_CASES } from './cases-sampled.ts';
 
 const fixtures = new URL('../EquationCore/Tests/EquationCoreTests/Fixtures/', import.meta.url);
 
@@ -121,8 +122,8 @@ function slim(plan: { type: string } | undefined): unknown {
 }
 
 /** What web/scene.ts draws of a random variable's plan, from lib/dist.ts: a pmf's stems (the whole law, and
- *  through a window), the stems or the polygon a P(…) row selects, a uniform sum's exact curve, and an E(…)
- *  row's marker. (A curve the site integrates or samples is left out: only its plan is recorded.) */
+ *  through a window), the stems or the polygon a P(…) row selects, a density's curve by whichever tier draws
+ *  it (whole, and as a view deep inside it is given), what its readout would say, and an E(…) row's marker. */
 function drawnOf(plan: { type: string } | undefined, rvs: RVSystem, constEnv: Record<string, number>): unknown {
   const env = { ...constEnv, t: 0 };
   const window = { lo: -2.5, hi: 9.25 };
@@ -135,7 +136,12 @@ function drawnOf(plan: { type: string } | undefined, rvs: RVSystem, constEnv: Re
   };
   const runs = (found: PmfStems[] | null): unknown =>
     found && found.map(s => ({ ks: [...s.ks], ps: [...s.ps], envelope: s.envelope, step: s.step ?? null }));
-  const exactCurve = (rv: string) => (rvs.exactLaw(rv)?.kind === 'usum' ? rvs.curve(rv, env) : undefined);
+  const curveOf = (rv: string, view?: { lo: number; hi: number }) => {
+    const c = rvs.curve(rv, env, view);
+    return (
+      c && { pts: [...c.pts], atoms: c.atoms ?? null, mean: c.mean, sd: c.sd, mass: c.mass, robust: c.robust ?? null }
+    );
+  };
   const cpu = plan as import('../../lib/compiler.ts').CpuPlan | undefined;
   switch (cpu?.type) {
     case 'pmf':
@@ -145,10 +151,16 @@ function drawnOf(plan: { type: string } | undefined, rvs: RVSystem, constEnv: Re
       };
     case 'density':
       return {
-        curve: attempt(() => {
-          const c = exactCurve(cpu.rv);
-          return c === undefined ? 'unrecorded' : c && { pts: [...c.pts], mean: c.mean, sd: c.sd, mass: c.mass };
+        curve: attempt(() => curveOf(cpu.rv)),
+        // A view a twentieth of the curve wide, in its middle: the quadrature tier draws that stretch afresh.
+        zoomed: attempt(() => {
+          const pts = rvs.curve(cpu.rv, env)?.pts ?? [];
+          if (pts.length < 4) return null;
+          const span = pts[pts.length - 2] - pts[0];
+          const view = { lo: pts[0] + 0.47 * span, hi: pts[0] + 0.52 * span };
+          return { view, curve: curveOf(cpu.rv, view) };
         }),
+        moments: attempt(() => rvs.moments(cpu.rv, env)),
       };
     case 'prob': {
       const shade = cpu.shade;
@@ -157,8 +169,7 @@ function drawnOf(plan: { type: string } | undefined, rvs: RVSystem, constEnv: Re
         all: attempt(() => runs(rvs.pmfRuns(shade.rv, env, undefined, shade))),
         window: attempt(() => runs(rvs.pmfRuns(shade.rv, env, window, shade))),
         polygon: attempt(() => {
-          const c = exactCurve(shade.rv);
-          if (c === undefined) return 'unrecorded';
+          const c = rvs.curve(shade.rv, env);
           const lo = shade.lo ? evaluate(shade.lo, env) : undefined;
           const hi = shade.hi ? evaluate(shade.hi, env) : undefined;
           return c && shadePolygon(c, lo, hi);
@@ -1091,6 +1102,7 @@ SURFACE_CASES.forEach((text, k) => docs.push({ name: `case surfaces ${k + 1}`, r
 DEFINE_CASES.forEach((text, k) => docs.push({ name: `case define ${k + 1}`, rows: splitStatements(text) }));
 LEFTOVER_CASES.forEach((text, k) => docs.push({ name: `case leftover ${k + 1}`, rows: splitStatements(text) }));
 INTERVAL_CASES.forEach((text, k) => docs.push({ name: `case intervals ${k + 1}`, rows: splitStatements(text) }));
+SAMPLED_CASES.forEach((text, k) => docs.push({ name: `case sampled ${k + 1}`, rows: splitStatements(text) }));
 randomDocs(Number(process.env.RANDOM_DOCS ?? 600)).forEach((text, k) =>
   docs.push({ name: `case random ${k + 1}`, rows: splitStatements(text) }),
 );

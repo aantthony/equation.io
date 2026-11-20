@@ -29,8 +29,8 @@
 /// share bases are conditioned on the shared ones. Any one product may hold
 /// at most JOINT_MAX points, and one enumeration 2·JOINT_MAX in all.
 ///
-/// Port: past that cap the site's joint sample stands in (a sampled pmf). The
-/// sample is not ported: such a variable is reported as not supported.
+/// Past that cap the joint sample stands in: a sampled pmf, and an event's
+/// frequency over the sample (SampledPmf.swift).
 
 /// Size of the site's joint sample, which caps one enumeration step (lib/dist.ts `SAMPLE_COUNT`).
 let JOINT_MAX = Double(1 << 17)
@@ -54,11 +54,11 @@ private let ATOM_REL = 1.5 * JS.pow(10, Double(1 - ATOM_DIGITS))
 private let FLOAT_REL = JS.pow(2, -50)
 
 /// The enumeration ran past its cap: the site samples from here on.
-private struct PastCap: Error {}
+struct PastCap: Error {}
 
 /// Whether two canonical values are one atom. Whole numbers are exact, and
 /// never merge with each other.
-private func sameAtom(_ a: Double, _ b: Double) -> Bool {
+func sameAtom(_ a: Double, _ b: Double) -> Bool {
   a == b || (a.isNaN && b.isNaN)
     || (a.isFinite && b.isFinite && !(JS.isInteger(a) && JS.isInteger(b))
       && abs(a - b) <= ATOM_REL * JS.max([abs(a), abs(b)]))
@@ -71,7 +71,7 @@ private func cancelled(_ x: Double, _ mag: Double) -> Bool { x != 0 && abs(x) <=
 /// A computed value as the atom it names: rounded to ATOM_DIGITS of `mag`,
 /// the magnitude of what was added up to make it. A whole number is trusted
 /// as it stands. Applied once, to a finished value.
-private func canonical(_ x: Double, _ mag: Double) -> Double {
+func canonical(_ x: Double, _ mag: Double) -> Double {
   if !x.isFinite || JS.isInteger(x) { return x }
   let m = JS.max([abs(x), mag.isFinite ? mag : 0])
   if cancelled(x, m) { return 0 }
@@ -107,7 +107,7 @@ private func magnitude(_ e: Expr) -> Expr? {
 /// Evaluate an expression column-wise over joint points. Inequalities yield
 /// 1/0 masks (NaN where an operand is NaN), matching evaluate() (lib/dist.ts
 /// `evalCols`).
-private func evalCols(_ e: Expr, _ cols: [String: [Double]], _ env: [String: Double], _ n: Int) throws -> [Double] {
+func evalCols(_ e: Expr, _ cols: [String: [Double]], _ env: [String: Double], _ n: Int) throws -> [Double] {
   switch e {
   case .index, .range, .eqtest, .comp, .figure, .lazy, .trail, .label, .hist, .family:
     throw LanguageError(structuralDiagnostic(e))
@@ -190,7 +190,7 @@ private func evalCols(_ e: Expr, _ cols: [String: [Double]], _ env: [String: Dou
 
 /// `e` over columns, unrounded, with the magnitude of each value (see
 /// `canonical`); a sum that cancelled is already 0.
-private func columnOf(_ e: Expr, _ cols: [String: [Double]], _ env: [String: Double], _ count: Int) throws
+func columnOf(_ e: Expr, _ cols: [String: [Double]], _ env: [String: Double], _ count: Int) throws
   -> (vals: [Double], mags: [Double])
 {
   var vals = try evalCols(e, cols, env, count)
@@ -202,7 +202,7 @@ private func columnOf(_ e: Expr, _ cols: [String: [Double]], _ env: [String: Dou
 
 /// Atoms of an intermediate value: ascending, then ±∞ and NaN kept as atoms
 /// of their own (lib/dist.ts `AtomSet`).
-private struct AtomSet {
+struct AtomSet {
   var xs: [Double]
   /// The magnitude of what was added up to make each value (see `canonical`).
   var mag: [Double]
@@ -436,8 +436,7 @@ private func momentVerdict(_ set: AtomSet, _ h: (Double) -> Double) -> Verdict {
   return unseen <= 1e-7 ? .exact : unseen <= 1e-3 ? .estimate : .diverges
 }
 
-/// The pmf of a derived discrete variable (lib/dist.ts `DiscretePmf`), as
-/// enumerated.
+/// The pmf of a derived discrete variable, by either tier (lib/dist.ts `DiscretePmf`).
 public struct DiscretePmf: Equatable, Sendable {
   /// Atoms with a finite value, ascending, and the mass of each.
   public var xs: [Double]
@@ -453,11 +452,23 @@ public struct DiscretePmf: Equatable, Sendable {
   /// Nothing the truncation hid could show in μ (`meanExact`) or in μ and σ both (`certified`).
   var meanExact: Bool
   var certified: Bool
+  /// Enumerated (else: frequencies of the joint sample).
+  var exact = true
+  /// Sampled, with too many distinct values for frequencies to mean anything:
+  /// the histogram on the variable's lattice, heavy atoms apart — or, with no
+  /// lattice, nil and `unresolved`.
+  var binned: Binned? = nil
+  var unresolved = false
+
+  struct Binned: Equatable, Sendable {
+    var bulk: PmfStems
+    var heavy: PmfStems
+  }
 }
 
 /// The smallest gap between neighbouring stems (infinite for a lone one):
 /// the spacing that decides whether these stems have room for dots.
-private func minGap(_ ks: ArraySlice<Double>) -> Double {
+func minGap(_ ks: ArraySlice<Double>) -> Double {
   var step = Double.infinity
   for (a, b) in zip(ks, ks.dropFirst()) { step = JS.min([step, b - a]) }
   return step
@@ -590,7 +601,7 @@ private final class Budget {
 
 extension RVSystem {
   /// A discrete base's atoms at these parameter values; nil while it declares no distribution.
-  private func baseAtomsOf(_ name: String, _ env: [String: Double]) throws -> AtomSet? {
+  func baseAtomsOf(_ name: String, _ env: [String: Double]) throws -> AtomSet? {
     guard let dist = baseDist(name), let law = try discreteLaw(dist, env) else { return nil }
     return try baseAtoms(law)
   }
@@ -766,19 +777,18 @@ extension RVSystem {
     return mergeAtoms(vals, mags, joint.wp, joint.wn, joint.wc, joint.lost, finished: finished)
   }
 
-  /// The pmf of a derived discrete variable at these parameter values,
-  /// enumerated (`pmfOf`) — or nil: not such a variable (a law of its own
-  /// answers through discreteDist), or a base declares no distribution.
-  ///
-  /// Port: past the enumeration's cap the site samples the pmf; here such a
-  /// variable throws `Unsupported`.
+  /// The pmf of a derived discrete variable at these parameter values —
+  /// exact where the enumeration fits, sampled where it does not (`pmfOf`) —
+  /// or nil: not such a variable (a law of its own answers through
+  /// discreteDist), or a base declares no distribution.
   public func pmfOf(_ name: String, _ env: [String: Double]) throws -> DiscretePmf? {
     guard case .derived(_, let expr)? = get(name), isDiscreteVar(name), discreteDist(name) == nil else { return nil }
+    let g = ground(expr)
     do {
-      guard let g = ground(expr) else { throw PastCap() }
+      guard let g else { throw PastCap() }
       return try enumerate(g, env, Budget(), finished: true).flatMap(exactPmf)
     } catch is PastCap {
-      throw Unsupported("a discrete random variable with too many values to enumerate")
+      return try sampledPmfOf(name, g ?? expr, env)
     }
   }
 
@@ -791,6 +801,19 @@ extension RVSystem {
     let all = (i0: 0, i1: pmf.xs.count - 1)
     guard let range = try select.map({ try pmf.range($0, env) }) ?? all else { return [] }
     let ranges = select?.not == true ? [(0, range.i0 - 1), (range.i1 + 1, pmf.xs.count - 1)] : [(range.i0, range.i1)]
+    if let binned = pmf.binned {
+      // The histogram is one shape whatever the window; a selection keeps the
+      // bins (and heavy atoms) whose centres it covers.
+      let from = pmf.xs.indices.contains(range.i0) ? pmf.xs[range.i0] : .infinity
+      let to = pmf.xs.indices.contains(range.i1) ? pmf.xs[range.i1] : -.infinity
+      func keep(_ x: Double) -> Bool { select == nil || (x >= from && x <= to) != (select?.not == true) }
+      return [binned.bulk, binned.heavy].map { run in
+        var kept = run
+        kept.ks = run.ks.filter(keep)
+        kept.ps = zip(run.ks, run.ps).filter { keep($0.0) }.map(\.1)
+        return kept
+      }.filter { !$0.ks.isEmpty }
+    }
     return ranges.map { pmf.window($0.0, $0.1, view: view) }.filter { !$0.ks.isEmpty }
   }
 
@@ -803,8 +826,8 @@ extension RVSystem {
   }
 
   /// The mass of the atoms constant bounds select, of the defined mass.
-  func atomProbability(_ pmf: DiscretePmf, _ bounds: ProbBounds, _ env: [String: Double]) throws -> Double {
-    guard let range = try pmf.range(bounds, env) else { return .nan }
+  func atomProbability(_ pmf: DiscretePmf, _ bounds: ProbBounds, _ env: [String: Double]) throws -> Double? {
+    guard let range = try pmf.range(bounds, env) else { return nil }
     var inside = 0.0
     for i in max(range.i0, 0)..<max(range.i1 + 1, max(range.i0, 0)) { inside += pmf.ps[i] }
     // Where the variable is undefined the event did not happen — nor did
@@ -816,15 +839,17 @@ extension RVSystem {
   /// The probability of an event over discrete variables alone, enumerated
   /// over the joint of their bases (so `P(X > X)` is 0, and `A = X + Y;
   /// B = X - Y; P(A > B)` sees the X they share); nil when the body has no
-  /// such shape (the enumerated half of `eventProbability`).
-  func enumeratedProbability(_ body: Expr, _ env: [String: Double]) throws -> Double? {
+  /// such shape (the discrete half of `eventProbability`). Past the cap: the
+  /// same event, with the same tie rule, over the sample — an estimate.
+  func enumeratedProbability(_ body: Expr, _ env: [String: Double]) throws -> (value: Double, exact: Bool)? {
     guard let shape = eventShape(body) else { return nil }
+    let grounded = shape.terms.map(ground)
     do {
-      let terms = try shape.terms.map { t -> Expr in
-        guard let g = ground(t) else { throw PastCap() }
-        return g
+      let terms = try grounded.map { t -> Expr in
+        guard let t else { throw PastCap() }
+        return t
       }
-      guard let joint = try enumerateTerms(terms, env, Budget()) else { return .nan }
+      guard let joint = try enumerateTerms(terms, env, Budget()) else { return (.nan, true) }
       // The terms are finished values: canonical, as atoms are (mergeAtoms).
       let cols = joint.cols.enumerated().map { k, col in
         zip(col, joint.mags[k]).map { canonical($0, $1) }
@@ -837,22 +862,33 @@ extension RVSystem {
         total += joint.wp[i]
         if mask[i] == 1 { value += joint.wp[i] }
       }
-      return JS.min([1, value / total])
+      return (JS.min([1, value / total]), true)
     } catch is PastCap {
-      throw Unsupported("an event over discrete random variables with too many values to enumerate")
+      let cols = try zip(shape.terms, grounded).map { try sampledColumn($1 ?? $0, env) }
+      let mask = eventMask(cols, shape.ops, SAMPLE_COUNT)
+      var count = 0.0
+      var defined = false
+      for m in mask where !m.isNaN {
+        defined = true
+        if m == 1 { count += 1 }
+      }
+      return (defined ? count / Double(SAMPLE_COUNT) : .nan, false)
     }
   }
 
   /// What a derived discrete row's readout says, read off the enumeration
   /// (the discrete half of `moments`).
   func atomMoments(_ pmf: DiscretePmf) -> Moments {
+    // A sampled pmf is said to be one — loudly where it could not be resolved.
+    let note =
+      pmf.exact ? nil : pmf.unresolved ? "sampled: too many distinct values to resolve the pmf" : "sampled"
     if !pmf.meanOk {
       return .robust(
         median: pmf.quantile(0.5), iqr: pmf.quantile(0.75) - pmf.quantile(0.25), meanOk: false, mass: pmf.mass,
-        note: nil)
+        note: note)
     }
     return pmf.certified
-      ? .exact(mean: pmf.mean, sd: pmf.sd, mass: pmf.mass, note: nil)
-      : .estimate(mean: pmf.mean, sd: pmf.sd, mass: pmf.mass, note: nil)
+      ? .exact(mean: pmf.mean, sd: pmf.sd, mass: pmf.mass, note: note)
+      : .estimate(mean: pmf.mean, sd: pmf.sd, mass: pmf.mass, note: note)
   }
 }

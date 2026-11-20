@@ -127,9 +127,10 @@ struct DistributionRows {
   /// How a variable's row draws (lib/dist.ts `variableRow`, lib/analysis.ts
   /// `classifyVariable`): a pmf as stems when it is built on discrete bases
   /// alone; the exact density `y = pdf(x)`, classified for the shader, when
-  /// its law is a closed-form pdf; else a density drawn on the CPU. `mass`
-  /// scales the curve from a probability to the measure of the row's
-  /// intervals (see `uniformDraws`).
+  /// its law is a closed-form pdf; else a density drawn on the CPU (a uniform
+  /// sum's exact piecewise polynomial, the quadrature curve, the sample
+  /// estimate). `mass` scales what is drawn from a probability to the measure
+  /// of the row's intervals (see uniformDraws).
   private func classifyVariable(_ row: inout RowAnalysis, _ name: String, mass: Expr? = nil) throws {
     let discrete = rvs.isDiscreteVar(name)
     if !discrete, let exact = rvs.exactDist(name) {
@@ -138,13 +139,6 @@ struct DistributionRows {
       if let mass, case .eq(let l, let r) = density { density = .eq(l, .bin(.mul, mass, r)) }
       row.classified = try classify(density, defined: constNames, fields: [:])
       return
-    }
-    // Port: the site draws any other continuous variable too, by
-    // quadrature or from its sample. Here only a law draws.
-    if !discrete {
-      guard case .usum? = rvs.exactLaw(name) else {
-        throw Unsupported("the density of a transformed random variable")
-      }
     }
     let ps = rvs.paramsOf(name)
     row.dist = discrete ? .pmf : .density
@@ -373,6 +367,7 @@ struct DistributionRows {
         known.insert(base.name)
       }
       parsed = draws.expr
+      mass = draws.mass
     }
     let rvRefs = freeVars(parsed).list.filter(known.contains)
     if rvRefs.isEmpty { return false }
