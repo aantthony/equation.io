@@ -24,6 +24,12 @@ targets:
       - path: Data
         type: folder
         buildPhase: resources
+    # Ask's model is Apple's on Private Cloud Compute (Assistant.swift
+    # ChatModel): a capability enabled on the app's identifier.
+    entitlements:
+      path: Equation.entitlements
+      properties:
+        com.apple.developer.private-cloud-compute: true
     dependencies:
       - package: EquationCore
         product: EquationCore

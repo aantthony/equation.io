@@ -43,22 +43,27 @@ struct RowStatus: Decodable, Equatable {
 /// Which language model the chat talks to.
 enum ChatModel {
   /// Apple's server model on Private Cloud Compute, instead of the one on
-  /// the device. Needs the app's com.apple.developer.private-cloud-compute
-  /// entitlement (requested on the developer website, then added to the
-  /// target): turn this on once it is granted.
-  static let usePrivateCloudCompute = false
+  /// the device: it passes 77% of the evals to the device's 49%
+  /// (apple/evals/RESULTS.md). It needs the target's
+  /// com.apple.developer.private-cloud-compute entitlement (project.yml);
+  /// where it isn't available, the chat falls back to the model on the device.
+  static let usePrivateCloudCompute = true
+
+  /// The server model, when the app uses it and it can be reached from here.
+  private static var server: PrivateCloudComputeLanguageModel? {
+    guard usePrivateCloudCompute else { return nil }
+    let server = PrivateCloudComputeLanguageModel()
+    return server.isAvailable ? server : nil
+  }
 
   static func make() -> any LanguageModel {
-    if usePrivateCloudCompute {
-      let server = PrivateCloudComputeLanguageModel()
-      if server.isAvailable { return server }
-    }
-    return SystemLanguageModel.default
+    server ?? SystemLanguageModel.default
   }
 
   /// Why the chat can't run on this device, in words for the person using it.
   static var unavailableReason: String? {
-    switch SystemLanguageModel.default.availability {
+    if server != nil { return nil }
+    return switch SystemLanguageModel.default.availability {
     case .available: nil
     case .unavailable(.deviceNotEligible): "This device can't run Apple Intelligence, which Ask needs."
     case .unavailable(.appleIntelligenceNotEnabled): "Turn on Apple Intelligence in Settings to use Ask."
