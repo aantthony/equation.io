@@ -64,6 +64,9 @@ public enum CpuPlan: Equatable, Sendable {
   case scalar3d(expr: Expr)
   case spacecurve(residuals: [Expr])
   case system(dim: Int, residuals: [Expr], parametric: Bool, angular: [Bool])
+  /// A complex equation's system in x and y, with the equation its roots are
+  /// named from (the TypeScript's `system` plan with a `complexEquation`).
+  case complexSystem(residuals: [Expr], equation: Expr)
   case vfield3d(comps: [Expr])
   /// A `pcurve` in space with its `tube` radius (the TypeScript's plan is one type).
   case tube(comps: [Expr], radius: Expr, d1: [Expr]?, d2: [Expr]?, d3: [Expr]?)
@@ -119,7 +122,7 @@ public enum CpuPlan: Equatable, Sendable {
     case .implicit3d: "implicit3d"
     case .scalar3d: "scalar3d"
     case .spacecurve: "spacecurve"
-    case .system: "system"
+    case .system, .complexSystem: "system"
     case .vfield3d: "vfield3d"
     case .tube: "pcurve"
     case .psurface: "psurface"
@@ -258,6 +261,8 @@ public func compileCpu(_ classified: Classified) throws -> CpuPlan {
     return comps.count == 3 ? .vfield3d(comps: comps) : .vfield2d(comps: comps)
   case .curveTube, .surfaceImplicit, .surfaceParametric, .intersection, .scalarField3D, .system:
     return try compileCpu3D(classified.object)
+  case .complexSystem(let equation):
+    return try compileComplexSystem(equation)
   case .point(let coordinates):
     return .point(dim: coordinates.count, coords: try coordinates.map(real))
   case .complexPoint(let expr):
@@ -395,7 +400,8 @@ public func compileGpu(_ classified: Classified) throws -> GpuPlan {
   case .bifurcation(let expr, let variable, _):
     return plan(.bifurcation(field: try glsl(sub(substVars(expr, [variable: .var("a")])))))
   case .point, .complexPoint, .curveParametric, .complexPath, .value, .note, .label, .figure, .tuple, .sequence,
-    .automaton, .lattice, .curveTube, .intersection, .system, .distribution, .probability, .orbit, .trail,
+    .automaton, .lattice, .curveTube, .intersection, .system, .complexSystem, .distribution, .probability, .orbit,
+    .trail,
     .list, .histogram, .tuples:
     return plan(.none)
   case .family(let members, let shared):

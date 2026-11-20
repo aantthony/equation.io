@@ -39,8 +39,11 @@ import Testing
     let rows = ["X ~ Normal(0, 1)", "Y = sin(X)", "E(X^3)", "P(X > Y)", "D ~ Geometric(0.000001)", "D^2", "L ~ m X + b"]
     let analysis = analyze(rows)
     #expect(analysis.rows.map { $0.unsupported != nil } == [false, true, true, true, false, true, false])
-    // A fit runs over lists.
-    #expect(analyze(["L = 2", "L ~ m x + b", "y = m x"]).rows.map { $0.unsupported != nil } == [true, true, true])
+    // A fit is a definition of its coefficients; one that fails says why, as the site does.
+    let fit = analyze(["L = [1, 2, 4]", "L ~ m [0, 1, 2] + b", "y = m x + b", "L ~ c x"])
+    #expect(fit.rows.map { $0.unsupported != nil } == [false, false, false, false])
+    #expect(fit.rows[1].info?.hasPrefix("m ≈ 1.5 · b ≈ 0.833333") == true)
+    #expect(fit.rows[3].error == "Regression models must be static; x cannot vary during a fit.")
   }
 
   @Test func discreteArithmeticIsEnumerated() throws {

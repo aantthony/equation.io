@@ -17,9 +17,7 @@
 /// random variable's declaration, which the two must agree on — and the fit
 /// itself, over numbers (`fitRegression`, `formatFit`). What hands a fit its
 /// numbers is list lowering (lib/defs.ts `buildDefs`, the 'regression'
-/// case), and the definitions port does not read lists yet: a regression row
-/// is reported as not supported, and so is every row that names one of its
-/// coefficients.
+/// case): RegressionRows.swift.
 
 /// How a row with a `~` reads (lib/regression.ts `tildeRow`).
 struct TildeRow {

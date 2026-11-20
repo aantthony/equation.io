@@ -34,7 +34,7 @@ func distributionKind(_ dist: RowDistribution, _ cpu: CpuPlan?) -> String {
 struct RandomRows {
   var scan = RandomScan()
   /// The rows that fit a model to data (`Y ~ m X + b`).
-  var regressions: Set<Int> = []
+  var regressions: [Int: TildeRow] = [:]
   /// The variable each declaring row names.
   var declares: [Int: String] = [:]
   var built = BuiltRVs()
@@ -45,7 +45,7 @@ struct RandomRows {
   /// `claimed` rows — comments, sequences — are not looked at.
   init(_ texts: [String], claimed: (Int) -> Bool) {
     let fits = scanRegressions(texts)
-    regressions = Set(fits.keys)
+    regressions = fits
     scan = scanRandomRows(
       texts.enumerated().map { i, text in fits[i] != nil || text.isEmpty || claimed(i) ? nil : text })
     for (row, name, _) in scan.base + scan.derived { declares[row] = name }
@@ -63,6 +63,7 @@ func buildRandomVariables(_ scan: RandomScan, _ built: BuiltDefs, _ raw: [Defini
   ropts.comps = { built.points.contains($0) ? pointComps($0, built.pointDims[$0] ?? 2) : nil }
   ropts.documentNames = documentNames
   ropts.complex = { built.complexes[$0] }
+  ropts.interval = { built.intervals[$0] }
   let getFn: GetFn = { name in
     if let fn = built.fns[name] { return fn }
     if fnNames.contains(name) { throw LanguageError("\(name) has an error in its definition.") }
@@ -74,7 +75,7 @@ func buildRandomVariables(_ scan: RandomScan, _ built: BuiltDefs, _ raw: [Defini
     taken: { name in
       built.consts.has(name) || built.fields.has(name) || built.conditions.has(name) || built.fns.has(name)
         || built.points.contains(name) || built.complexes.has(name) || built.mats.has(name)
-        || built.tensors.has(name)
+        || built.tensors.has(name) || built.lists.has(name)
     })
 }
 

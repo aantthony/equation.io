@@ -255,10 +255,13 @@ func prepareDocument(_ sources: [String]) -> PreparedDocument {
       document.comments.insert(i)
     } else if random.declares[i] != nil {
       continue
+    } else if let fit = random.regressions[i] {
+      // A fit is a definition of its coefficients (RegressionRows.swift).
+      scanned[i] = .regression(
+        name: "~\(i)", lhs: String(decoding: fit.lhs, as: UTF16.self), rhs: String(decoding: fit.rhs, as: UTF16.self))
     } else if text.contains("~") {
-      // A fit runs over lists; any other `~` is not a row the port reads.
-      blocked[i] = random.regressions.contains(i) ? "regressions (~ over lists)" : "this use of ~"
-      // A fit defines its coefficients too: every name in the row is its.
+      // Any other `~` is not a row the port reads.
+      blocked[i] = "this use of ~"
       tildeNames.formUnion(writtenNames(text))
     } else if let scan = seqScans[i] {
       // Sequence and recurrence rows (a_n = …, a_{n+1} = …) are plots, not definitions.
@@ -309,6 +312,8 @@ func prepareDocument(_ sources: [String]) -> PreparedDocument {
       guard let what = built.unsupported[d.key] else { continue }
       blocked[owner[d.key]!] = what
       poison.insert(d.name)
+      // (A fit the port cannot read takes its coefficients with it: every name of its row.)
+      if case .regression = d { poison.formUnion(writtenNames(texts[owner[d.key]!])) }
       found = true
     }
     if found { continue }
@@ -350,6 +355,9 @@ public func analyze(_ sources: [String]) -> DocumentAnalysis {
     rows[i].definition = document.scanned[i]
   }
 
+  for (key, fit) in built.fits {
+    if let i = owner[key], blocked[i] == nil { rows[i].info = formatFit(fit) }
+  }
   for (key, text) in built.errors.entries {
     if let i = owner[key], blocked[i] == nil { rows[i].error = text }
   }
@@ -413,6 +421,7 @@ public func analyze(_ sources: [String]) -> DocumentAnalysis {
   ropts.comps = comps
   ropts.documentNames = documentNames
   ropts.complex = { built.complexes[$0] }
+  ropts.interval = { built.intervals[$0] }
   // Σ/Π bounds in plot rows expand against the constants' values at t = 0.
   let boundConsts = NameBox()
   boundConsts.names = built.sumBoundConsts
@@ -788,7 +797,8 @@ public func analyze(_ sources: [String]) -> DocumentAnalysis {
       row.kind = "comment (group heading)"
     } else if let d = row.definition {
       let valued = built.mats.has(d.name) ? "matrix" : built.tensors.has(d.name) ? "tensor" : nil
-      let constant = valued ?? (named ? "point" : built.lists.has(d.name) ? "list" : "const")
+      let interval = built.intervals.has(d.name) ? "interval" : nil
+      let constant = interval ?? valued ?? (named ? "point" : built.lists.has(d.name) ? "list" : "const")
       row.kind = "definition (\(d.kind == "const" ? constant : d.kind))"
     } else if let view = row.view {
       row.kind =

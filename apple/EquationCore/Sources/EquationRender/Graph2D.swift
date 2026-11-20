@@ -40,6 +40,8 @@ public struct Graph2D: Equatable, Sendable {
   let discrete = DiscreteCache()
   /// What each random variable's row last drew (Graph2D+Distributions.swift).
   let lawsDrawn = DrawnLaws()
+  /// What each system row last solved (Graph2D+Systems.swift).
+  let systemsSolved = SolvedSystems()
 
   public struct Window: Equatable, Sendable {
     public var x: [Double]?
@@ -195,6 +197,8 @@ public struct Graph2D: Equatable, Sendable {
       case .density, .pmf, .prob, .expect:
         drawDistribution(
           cpu, row: index, color: color, env: env, window: window, pointsPerUnit: pointsPerUnit, into: &overlay)
+      case .system(2, _, _, _), .complexSystem:
+        drawSystem(cpu, row: index, color: css, env: env, window: window, into: &overlay)
       case .orbit:
         if let pts = orbits[index] { overlay.polylines.append(.init(pts: pts, color: css)) }
       case .trail(2, let coords):

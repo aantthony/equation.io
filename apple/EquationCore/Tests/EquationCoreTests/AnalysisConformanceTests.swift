@@ -61,9 +61,13 @@ import Testing
       // The environment the uniforms read.
       if whole {
         let env = doc["env"] as! [String: Any]
+        // A nonlinear fit iterates through exp and ln, which V8 and the platform's libm round an ulp
+        // apart: its coefficients agree to the fit's own tolerance, not to the last place.
+        let iterated = results.contains { ($0["info"] as? String)?.contains("nonlinear local fit") ?? false }
         for (key, value) in env {
           let v = number(value)
           if let mine = analysis.env[key], close(mine, v) { continue }
+          if iterated, let mine = analysis.env[key], abs(mine - v) <= 1e-9 * max(1, abs(v)) { continue }
           failures.append("\(name): env \(key) is \(String(describing: analysis.env[key])), want \(v)")
         }
         if env.count != analysis.env.count {
@@ -398,8 +402,9 @@ import Testing
     case "scalar3d": return .scalar3d(expr: try expr("expr"))
     case "spacecurve": return .spacecurve(residuals: try exprs("residuals"))
     case "system":
-      if o["complexEquation"] != nil || o["coordinates"] != nil {
-        throw FixtureError(description: "a complex or positional system")
+      if o["coordinates"] != nil { throw FixtureError(description: "a positional system") }
+      if let equation = o["complexEquation"] {
+        return .complexSystem(residuals: try exprs("residuals"), equation: try decode(equation))
       }
       return .system(
         dim: (o["dim"] as! NSNumber).intValue, residuals: try exprs("residuals"),
