@@ -174,7 +174,8 @@ import Testing
       let wanted: ViewSpec? =
         switch view["kind"] as! String {
         case "view":
-          .view(
+          (try? mappedViewSpec(view, like: mine))
+            ?? .view(
             x: pair("x"), y: pair("y"), ratio: view["ratio"].map(number), locked: view["locked"] as? Bool ?? false)
         case "camera":
           .camera(

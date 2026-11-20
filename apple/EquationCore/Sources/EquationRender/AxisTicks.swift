@@ -1,3 +1,4 @@
+import EquationCore
 import Foundation
 
 // `AxisTicks` itself is beside the shader that draws its lines (Frag2D+Ticks.swift).

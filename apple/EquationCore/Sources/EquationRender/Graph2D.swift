@@ -18,6 +18,9 @@ public struct Graph2D: Equatable, Sendable {
   public var grid: Frame2D.Grid = .on
   /// The window a `view(…)` row asks for.
   public var window: Window?
+  /// The axis maps of the panel's view(…) row (`view(x = 10^X)`): the window
+  /// is then the screen's, and what a row places is carried there (Graph2D+Maps.swift).
+  public var maps: AxisMaps?
   /// Something moves with t, so the graph redraws every frame.
   public var animated = false
   /// The sequence rows that plot their partial sums S_N = Σ a_n instead of
@@ -60,6 +63,9 @@ public struct Graph2D: Equatable, Sendable {
       case .view(let x, let y, let ratio, _)?:
         window = Window(x: x, y: y, ratio: ratio)
         if error(row) == nil, written == nil { written = row.viewAxes }
+      case .mappedView(let x, let y, let ratio, _, let mapped)?:
+        window = Window(x: x, y: y, ratio: ratio)
+        maps = mapped
       default: break
       }
       if row.classified?.animated == true { animated = true }
@@ -133,6 +139,9 @@ public struct Graph2D: Equatable, Sendable {
       guard row.error == nil, row.unsupported == nil, index < colors.count, let color = colors[index]
       else { continue }
       let css = CSSColor(color)
+      // A mapped panel carries what the row places to its screen.
+      let mark = markOverlay(overlay)
+      defer { carry(&overlay, row, since: mark) }
       // A named point (`A = (1, 2)`) has no plan of its own: its components
       // are the constants A_x and A_y, and it is drawn with its name.
       if row.cpu == nil, let name = row.definition?.name, let x = env["\(name)_x"], let y = env["\(name)_y"],
@@ -222,6 +231,7 @@ public struct Graph2D: Equatable, Sendable {
     scene.overlay = overlay(
       at: time, bounds: Bounds(view: view, width: width, height: height), theme: theme,
       pointsPerUnit: 1 / (view.upp * dpr))
+    scene.maps = maps
     return scene
   }
 }

@@ -1,3 +1,4 @@
+import EquationCore
 import Foundation
 
 // Carrying a row's overlay geometry from x and y to a mapped panel's screen

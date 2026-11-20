@@ -120,6 +120,38 @@ private func same(_ a: View2D, _ b: View2D?) -> Bool {
     #expect(views[1].cx == -1)
   }
 
+  @Test func aMappedPanelCarriesWhatItPlaces() throws {
+    let document = panels([
+      "y = x", "A = (100, 2)", "---", "view(x = 1..1000, y = 1..100, x = 10^X, y = 10^Y)", "y = x^2", "(100, 10)",
+      "B = (10, 1)", "(-1, 5)", "(10 + 90 u, 10)",
+    ])
+    #expect(document.panels[0].graph.maps == nil)
+    let graph = document.panels[1].graph
+    let maps = try #require(graph.maps)
+    #expect(maps.x?.text == "10^X" && maps.y?.text == "10^Y")
+    // The window is the screen's: X from 0 to 3, Y from 0 to 2.
+    #expect(graph.windowSpec?.x.map { $0.map { ($0 * 1e9).rounded() / 1e9 } } == [0, 3])
+    let frame = document.scene(at: 0, width: 800, height: 600, dpr: 1)
+    // A plain panel's point stays where its row puts it.
+    #expect(frame.panels[0].scene?.overlay?.points.map(\.x) == [100])
+    #expect(frame.panels[0].scene?.maps == nil)
+    let scene = try #require(frame.panels[1].scene)
+    #expect(scene.maps == maps)
+    // Points go to the screen; one the log axis cannot show is dropped.
+    let points = try #require(scene.overlay?.points)
+    #expect(points.count == 2)
+    #expect(abs(points[0].x - 2) < 1e-12 && abs(points[0].y - 1) < 1e-12)
+    #expect(abs(points[1].x - 1) < 1e-12 && abs(points[1].y) < 1e-12 && points[1].label == "B")
+    // A parametric curve is carried sample by sample, from X = 1 to X = 2.
+    let line = try #require(scene.overlay?.polylines.first?.pts)
+    #expect(abs(line[0] - 1) < 1e-12 && abs(line[line.count - 2] - 2) < 1e-12 && abs(line[1] - 1) < 1e-12)
+    // The graph was rewritten for the screen when it was classified.
+    #expect(scene.layers.curves?.count == 1)
+    let metal = try #require(MetalContext())
+    _ = try #require(metal.image(of: frame, width: 800, height: 600, dpr: 1, theme: .dark))
+    #expect(metal.failures == 0)
+  }
+
   @Test func aSplitFrameDraws() throws {
     let metal = try #require(MetalContext())
     let document = panels(["y = sin(x)", "--- right 40%", "x^2 + y^2 < 4", "--- inset bottom left", "(y, -x)"])

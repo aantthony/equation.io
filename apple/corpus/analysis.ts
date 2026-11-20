@@ -41,6 +41,7 @@ import { sliderBounds, sliderForm, sliderValue, writeSlider } from '../../lib/sl
 import { keepNote, noteStart, splitStatements } from '../../lib/statements.ts';
 import { EXAMPLES } from '../../web/examples.ts';
 import { DISCRETE_CASES } from './cases-discrete.ts';
+import { PANEL_CASES } from './cases-panels.ts';
 
 const fixtures = new URL('../EquationCore/Tests/EquationCoreTests/Fixtures/', import.meta.url);
 
@@ -137,6 +138,7 @@ function drawnOf(plan: { type: string } | undefined, rvs: RVSystem, constEnv: Re
 
 /** Targeted documents: one concern each, rows separated as the examples' are. */
 const CASES: string[] = [
+  ...PANEL_CASES,
   // Curves, constants as params, level sets.
   'y = sin(x)',
   'a = 2; y = a sin(x)',

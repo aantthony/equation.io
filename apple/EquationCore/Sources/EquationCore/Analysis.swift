@@ -400,6 +400,8 @@ public func analyze(_ sources: [String]) -> DocumentAnalysis {
   // Each panel's rows are read with its view's maps, its surface and its
   // metric, none of which is ported: a panel that has one is left alone.
   var panelBlocked: Set<Int> = []
+  // Each panel's axis maps, from its view(…) row wherever in the panel it sits (AxisMap.swift).
+  var panelMaps: [Int: AxisMaps] = [:]
   do {
     var at = 0
     for (i, text) in texts.enumerated() where !text.isEmpty && rows[i].definition == nil && !rows[i].comment {
@@ -409,7 +411,11 @@ public func analyze(_ sources: [String]) -> DocumentAnalysis {
         panelBlocked.insert(at)
       } else if let head = viewHead(text), head == "view" || head == "on", !fnNames.contains(head) {
         do {
-          _ = try parseViewRow(text, boundVals)
+          if case .mappedView(_, _, _, _, let maps)? = try parseViewRow(text, boundVals, documentNames: documentNames),
+            panelMaps[at] == nil
+          {
+            panelMaps[at] = maps
+          }
         } catch is Unsupported {
           panelBlocked.insert(at)
         } catch {
@@ -465,7 +471,7 @@ public func analyze(_ sources: [String]) -> DocumentAnalysis {
       if isDividerRow(text) || (head != nil && !fnNames.contains(head!)) {
         if viewsUnknown && !isDividerRow(text) { throw Unsupported("a view row after one that is not supported") }
         var latticeAxes: [String]?
-        if let view = try parseViewRow(text, boundVals, latticeAxes: &latticeAxes) {
+        if let view = try parseViewRow(text, boundVals, documentNames: documentNames, latticeAxes: &latticeAxes) {
           // Each panel frames itself: a divider starts a fresh set.
           if case .split = view {
             panel += 1
@@ -556,6 +562,10 @@ public func analyze(_ sources: [String]) -> DocumentAnalysis {
       let lowered = try lowerObjects(
         resolved, comps: comps, mats: { built.mats[$0] }, tensors: { name, _ in built.tensors[name] })
       var cls = try classify(lowered, defined: constNames, fields: fieldEnv)
+      // A mapped panel draws per-pixel rows in its screen coordinates (AxisMap.swift).
+      if let maps = panelMaps[panel] {
+        cls = try classifyMapped(cls, lowered, maps, defined: constNames, fields: fieldEnv)
+      }
       rows[i].info = curveHint(cls.object, text)
       // `e = 0.6` parsed with e already a number; only the text still says e.
       if let taken, case .note(let expr, let variable, _, let identity) = cls.object {

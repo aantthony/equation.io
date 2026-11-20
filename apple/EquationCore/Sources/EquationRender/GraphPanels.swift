@@ -64,6 +64,7 @@ public struct GraphPanels: Equatable, Sendable {
       var locked = false
       for row in own {
         if case .view(_, _, _, true)? = row.view { locked = true }
+        if case .mappedView(_, _, _, true, _)? = row.view { locked = true }
       }
       return Panel(
         rows: rows, split: index == 0 ? nil : analysis.rows[first].view,
