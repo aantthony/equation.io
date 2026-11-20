@@ -58,6 +58,9 @@ import Testing
       for difference in compareStates(analysis, doc["states"] as? [String: Any]) {
         failures.append("\(name): \(difference)")
       }
+      for difference in compareMetrics(analysis, doc["metrics"]) {
+        failures.append("\(name): \(difference)")
+      }
       // The environment the uniforms read.
       if whole {
         let env = doc["env"] as! [String: Any]
@@ -475,7 +478,9 @@ import Testing
           return FamilyMember(
             classified: classified, cpu: try cpuPlan(member["cpu"] as! [String: Any], like: like?.cpu))
         })
-    default: throw FixtureError(description: "a \(o["type"]!) plan")
+    default:
+      if let plan = try metricPlan(o) { return .metric(plan) }
+      throw FixtureError(description: "a \(o["type"]!) plan")
     }
   }
 }

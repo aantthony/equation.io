@@ -50,9 +50,15 @@ struct StateDraft {
   var names: Set<String> = []
   /// A vector state's scalar component → the row that defines it.
   var vecOwnerKey = OrderedMap<String>()
+  /// Starting values per run of a state family, by owner and component
+  /// (StateFamilies.swift), and the owners whose runs are in order.
+  var familyInits = OrderedMap<[[Expr]]>()
+  var orderedInits: Set<String> = []
+  /// A family run's hidden scalar state → the row that defines it.
+  var familyOwner: [String: String] = [:]
 
   /// The row a scalar state's errors land on.
-  func row(_ name: String) -> String { vecOwnerKey[name] ?? name }
+  func row(_ name: String) -> String { vecOwnerKey[name] ?? familyOwner[name] ?? name }
 }
 
 /// Vector states: a state whose derivative (or starting value) lowers to a
@@ -63,7 +69,7 @@ struct StateDraft {
 /// and `segment((0, 0), om)` both work.
 func lowerVectorStates(
   _ defs: inout BuiltDefs, _ draft: inout StateDraft, defined: (String) -> Bool,
-  comps: @escaping (String) -> [String]?, mats: @escaping GetMat
+  comps: @escaping (String) -> [String]?, mats: @escaping GetMat, listed: (Expr) throws -> Low
 ) {
   // The component names are read with the dimensions as they are found.
   // (`om' = solve(M, f)` is a vector by what the matrix algebra returns.)
@@ -125,6 +131,17 @@ func lowerVectorStates(
   for (name, e) in draft.inits.entries {
     do {
       let low = try lowered(e, defs.vecStates)
+      // A list of starting values is a family: one run of the system each.
+      if let family = try stateFamilyMembers(name, low, defs.vecStates[name], listed) {
+        draft.familyInits[name] = family.members
+        if family.ordered { draft.orderedInits.insert(name) }
+        let dim = defs.vecStates[name]
+        for (k, c) in (dim.map { vecStateComps(name, $0) } ?? [name]).enumerated() {
+          flatInits[c] = family.members[0][k]
+          if dim != nil { draft.vecOwnerKey[c] = name }
+        }
+        continue
+      }
       guard let dim = defs.vecStates[name] else {
         if case .vec(let items) = low {
           throw LanguageError("\(name)(0) has \(items.count) components, but \(name) is a single number.")

@@ -12,6 +12,7 @@
  * the number formatting readouts are written with) beside the parser's
  * fixtures.
  */
+import { createHash } from 'node:crypto';
 import { writeFileSync } from 'node:fs';
 import { analyzeRows } from '../../lib/analysis.ts';
 import { diff } from '../../lib/diff.ts';
@@ -47,6 +48,7 @@ import { FITS_CASES } from './cases-fits.ts';
 import { INTEGRAL_CASES } from './cases-integrals.ts';
 import { PANEL_CASES, recordGridFields, recordStates } from './cases-panels.ts';
 import { SURFACE_CASES } from './cases-surfaces.ts';
+import { LEFTOVER_CASES, recordData, recordMetrics } from './cases-leftovers.ts';
 
 const fixtures = new URL('../EquationCore/Tests/EquationCoreTests/Fixtures/', import.meta.url);
 
@@ -88,6 +90,8 @@ for (const type of ['implicit3d', 'scalar3d', 'spacecurve', 'system', 'vfield3d'
 for (const type of ['density', 'pmf', 'expect', 'prob']) PORTED.add(type);
 // Lists and families (Lists.swift, ObjectLists.swift, ListPlans.swift).
 for (const type of ['vlist', 'plist', 'dlist', 'dscatter', 'histogram', 'family']) PORTED.add(type);
+// A panel's metric and its rows (Metric.swift, MetricObjects.swift).
+for (const type of ['metric', 'geodesic', 'lightcone', 'tidal']) PORTED.add(type);
 function slim(plan: { type: string } | undefined): unknown {
   if (!plan) return null;
   if (!PORTED.has(plan.type)) return { type: plan.type, omitted: true };
@@ -831,6 +835,7 @@ FITS_CASES.forEach((text, k) => docs.push({ name: `case fits ${k + 1}`, rows: sp
 ALGEBRA_CASES.forEach((text, k) => docs.push({ name: `case algebra ${k + 1}`, rows: splitStatements(text) }));
 INTEGRAL_CASES.forEach((text, k) => docs.push({ name: `case integral ${k + 1}`, rows: splitStatements(text) }));
 SURFACE_CASES.forEach((text, k) => docs.push({ name: `case surfaces ${k + 1}`, rows: splitStatements(text) }));
+LEFTOVER_CASES.forEach((text, k) => docs.push({ name: `case leftover ${k + 1}`, rows: splitStatements(text) }));
 randomDocs(Number(process.env.RANDOM_DOCS ?? 600)).forEach((text, k) => docs.push({ name: `case random ${k + 1}`, rows: splitStatements(text) }));
 randomListDocs(Number(process.env.RANDOM_LIST_DOCS ?? 400)).forEach((text, k) =>
   docs.push({ name: `case random list ${k + 1}`, rows: splitStatements(text) }),
@@ -846,6 +851,7 @@ const recorded = docs.map(({ name, rows }) => {
     env: analysis.constEnv,
     gridFields: recordGridFields(analysis),
     states: recordStates(analysis),
+    metrics: recordMetrics(analysis),
     results: analysis.rows.map((row, i) => {
       const def = row.def;
       // web/main.ts sliderOf, sliderRange and moveSlider, without the DOM.
@@ -901,6 +907,10 @@ const recorded = docs.map(({ name, rows }) => {
   };
 });
 writeFileSync(new URL('analysis.json', fixtures), JSON.stringify(recorded, replacer) + '\n');
+writeFileSync(
+  new URL('data.json', fixtures),
+  JSON.stringify(recordData(bytes => createHash('sha256').update(bytes).digest('hex'))) + '\n',
+);
 const rowCount = recorded.reduce((n, d) => n + d.rows.length, 0);
 console.log(`${recorded.length} documents (${EXAMPLES.flatMap(c => c[1]).length} examples), ${rowCount} rows`);
 

@@ -55,7 +55,7 @@ extension Resolver {
   /// What a surface operator acts on, as its components in u and v: a
   /// tuple, a named surface (S = (u, v, u v)) or a function of two
   /// parameters, called at u and v (`surfaceOperand`).
-  private func surfaceOperand(_ name: String, _ arg: Expr) throws -> [Expr] {
+  func surfaceOperand(_ name: String, _ arg: Expr) throws -> [Expr] {
     let usage = "\(name) takes a parametric surface in u and v, like \(name)(S) with S = (u, v, u^2 - v^2)."
     // Port: a surface over the intervals of u and v is read at their values.
     if opts.interval("u") != nil || opts.interval("v") != nil { throw Unsupported("interval(…)") }

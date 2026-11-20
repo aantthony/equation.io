@@ -53,9 +53,9 @@ func classifyOrbit(
       params.insert(n)
     }
   }
-  if !series && path.count == 3 { throw Unsupported("orbits in space") }
   return Classified(
-    object: .orbit(paths: [path], series: series, from: from, to: to), animated: false, needs3D: false,
+    object: .orbit(paths: [path], series: series, from: from, to: to), animated: false,
+    needs3D: !series && path.count == 3,
     params: jsSorted(Array(params)))
 }
 
@@ -222,7 +222,7 @@ extension DocumentAnalysis {
   /// orbit cannot be integrated (a time range that runs backwards, or is too
   /// long). Nil when the row is not an orbit in the plane.
   public func orbit(row index: Int) throws -> [Double]? {
-    guard rows.indices.contains(index), case .orbit(2, let paths, let series, let from, let to)? = rows[index].cpu
+    guard rows.indices.contains(index), case .orbit(_, let paths, let series, let from, let to)? = rows[index].cpu
     else { return nil }
     let input = try orbitInput(
       defs, paths: paths, series: series, from: try evaluate(from, env), to: try evaluate(to, env), env: env)
