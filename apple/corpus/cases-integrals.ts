@@ -2,7 +2,8 @@
  * Targeted documents for integrals (apple/corpus/analysis.ts runs them with
  * its own): every rule of lib/integrate.ts as a row's readout and as a
  * function of x, the notations, the bounds, what a definite integral's row
- * shades (lib/intshade.ts), and integrals inside definitions and other rows.
+ * shades (lib/intshade.ts), integrals inside definitions and other rows, and
+ * the reductions over a continuous set that are integrals (lib/measure.ts).
  * One concern each, rows separated as the examples' are.
  */
 export const INTEGRAL_CASES: string[] = [
@@ -61,4 +62,30 @@ export const INTEGRAL_CASES: string[] = [
   'y < int[0..x] cos(t) dt; int[0..1] x dx = 0.5; int[0..1] x dx < 1; (int[0..1] x dx, 2); y = x int[0..1] t dt',
   'int[0..1] x dx y; sin(x) int[0..y] t dt; P = (int[0..1] x dx, 1); P; [int[0..1] x dx, int[0..2] x dx]',
   'X ~ Normal(0, 1); int[0..1] x dx; f(a) = int[0..a] sin(x)/x dx; f(1); f(2); y = f(x); mean([f(1), f(2)])',
+  // Reductions over a continuous set (lib/measure.ts): products of ranges.
+  'total(u^2); mean(u); count(u); total(u v); mean(u + v); count({0 < x < 1}); total({0 < x < 1: x^2}); mean({0 < x < 2: x})',
+  'count(0 < x < 3); total(0 < x < 1); mean(1 < x < 3); total(u < 0.5); count(x < 1); count(x); total(x); mean(x)',
+  'count({2<x<1}); count({0<x<1, 2<x<3}); total({2<x<1: x}); mean({2<x<1: x}); total({0 < x < 1, x > 0.5: x})',
+  'a = 2; count({0<x<a}); count({0<x<a, 1<x<3}); total({0<x<a: x}); total(a u); mean({0 < x < a: sin(x)}); b = -1; count({0<x<b})',
+  'total({0 < x < 1, 0 < y < 2: x y}); count({0 < x < 1, 0 < y < 2}); mean({0 < x < 1, 0 < y < 1: x + y}); total({0<x<1: u x})',
+  'total({0<x<1: (x, x^2)}); mean({0<x<2: (x, 1)}); total({0 < x < pi: sin(x)}); total({0 < x < 1: exp(-x^2)}); total({0<x<1: cos(x)^2})',
+  // Integrands with singularities or no closed form: adaptive quadrature.
+  'total({0<x<1: 1/sqrt(x)}); total({0<x<1: ln(x)}); total({0<x<1: 1/x}); total(1/u); mean({0<x<1: 1/x}); total({0<x<1: 1/x^2})',
+  'total({0<x<2: 1/(x-1)^2}); total({0<x<1: tan(pi x/2)}); total({-1<x<1: 1/x}); total({1 < x < 2: sin(x)/x}); total({0<x<1: x^x})',
+  'total({0 < x: exp(-x)}); total({x > 1: 1/x^2}); total(exp(-x^2)); count({x > 0}); total({x > 1: 1/x}); mean({x > 0: exp(-x)})',
+  'total({0 < x < 1: sqrt(x)}); total({0<x<1: floor(3 x)}); total({0<x<1: {x < 0.5: 1, 2}}); total({-1 < x < 1: abs(x)}); total({0<x<1: q x})',
+  'total({0 < x < 1: t x}); f(k) = total({0 < x < k: 1/x}); f(2); g(k) = total({0 < x < k: x}); g(3); y = total({0 < u < 1: u x})',
+  // Curves written as a graph over a bounded range: arc length.
+  'count({y = x^2, 0 < x < 1}); count({y = x, 0 < x < 1}); count({x = y, 0 < x < 1}); count({y = x, 0 < y < 1}); count({x = y^3, -1<y<1})',
+  'count({y=sqrt(x),0<x<1}); count({y=sqrt(x),-1<x<1}); count({y=1/x,-1<x<1}); count({y=ln(x),-1<x<1}); count({y = tan(x), 0<x<3})',
+  'count({y = sin(x), 0 < x < pi}); total({y = x^2, 0 < x < 1: x}); mean({y = x^2, 0 < x < 1: y}); a = -1; count({y = x^2, 0<x<a})',
+  'count({y=x^(1/3),-1<x<1}); count({y = sqrt(1-x^2), -1<x<1}); count({y=sign(x),-1<x<1}); count({y = abs(x), -1 < x < 1}); count({y = 2x + 1, 0 < x < 3})',
+  // min and max over a product of ranges.
+  'min({0 < x < 3: (x - 1)^2}); max({0 < x < 3: (x - 1)^2}); max(sin(2 pi u)); min({0<x<1, 0<y<1: x + y}); max({0<x<1, 0<y<1: x y})',
+  'min(x^2); max({0 < x < 1: (x, 1)}); min({2 < x < 1: x}); max({y = x^2, 0 < x < 2: y}); a = 2; max({0 < x < a: x (a - x)}); min(u v w)',
+  // What the reductions refuse, and what is another route's (not ported).
+  'stdev(x); median(u); hist(x); total(x^2 + y^2 < 1); total({x < 1: y < 2}); count({(x, y) = (1, 2)}); count({x: 1}); mean(0 < x < 1, 2)',
+  'int[0..1] total({0 < u < 1: x u}) dx; int[0..1] mean({0 < u < 1: x + u}) dx; int[0..1] count({0 < u < x}) dx; sum(n=1..3, total(u^n))',
+  'count(x^2 + y^2 < 1); count(x^2 < y < 1); count({x^2 + y^2 = 4, x y = 1}); count(sqrt(x) < 1); count({0<x<10, cos(x)=0.3}); count({x^2+y^2+z^2<1})',
+  'L = [1, 2, 3]; total(L x); mean(L); count(L < 2); total({L > 1: L}); w0 = within; within = 0 < x < 1; count(within); total({within: x})',
 ];
