@@ -29,6 +29,8 @@ import {
   substVars,
   TERM_AT_FN,
 } from '../../lib/expr.ts';
+import { ESCAPES, typedEscape } from '../../lib/escapes.ts';
+import { realFourier, reconstructSeries, spectrumPoints } from '../../lib/fourier.ts';
 import { toGLSL } from '../../lib/glsl.ts';
 import { takesColor } from '../../lib/palette.ts';
 import { valueReadout } from '../../lib/plot.ts';
@@ -638,9 +640,69 @@ const NUMBERS = [
   12345.6789, -0.00001, 25, 1e100, 2 ** 53, 0.1 + 0.2, 1e-5, 123.456, -1e21, NaN, Infinity, -Infinity,
 ];
 
+// --- input escapes (lib/escapes.ts) ---
+//
+// Each text is typed a character at a time, and what each keystroke rewrites
+// is recorded (the rewrite is not applied: the next keystroke lands in the
+// text as written).
+
+const TYPED = [
+  '\\pi', '\\pi ', '\\sin(', '\\sinh', '\\sinh(', '\\inf ', '\\infty', '\\in ', '\\int', '\\\\', '\\\\pi',
+  '"C:\\pi"', "f'\\pi", "'a\\pi'", 'x\\theta+', '\\Gamma', '\\gamma', '\\nope ', '\\arcsin(', '\\view(',
+  '\\open(', '\\le', '\\leq', '\\le ', '2\\cdot 3', 'αβ\\pi', '\\', '\\1', '\\sum', '\\Sigma', '"a" \\tau',
+  "x'' \\mu", '\\trail(', '\\rgb(', '\\e', '\\eta', '\\epsilon', '\\varepsilon',
+];
+const typed = TYPED.map(text => ({
+  text,
+  edits: Array.from(text, (_, k) => typedEscape(text.slice(0, k + 1), k + 1, text[k])),
+}));
+
+// --- Fourier analysis (lib/fourier.ts) ---
+
+const SIGNALS: Array<[string, number[], number, number]> = [
+  ['a square wave', Array.from({ length: 256 }, (_, k) => Math.sign(Math.sin((2 * Math.PI * (k + 0.5)) / 256))), 0, 1],
+  ['eight samples', [1, 2, 3, 4, 3, 2, 1, 0], -1, 4],
+  ['five samples', [0, 1, 0, -1, 0.5], 0, 2 * Math.PI],
+  ['twelve samples', Array.from({ length: 12 }, (_, k) => Math.cos((2 * Math.PI * k) / 12) + 0.25 * Math.sin((6 * Math.PI * k) / 12)), 2, 3],
+  ['a hundred samples', Array.from({ length: 100 }, (_, k) => ((k * 37) % 11) - 5 + 1e-3 * k), 0, 10],
+  ['a constant', [2, 2, 2, 2, 2, 2], 0, 1],
+  ['two samples', [1, -1], 0, 1],
+  ['small values', [1e-9, 2e-9, -1e-9, 0, 3e-9, 1e-9, 0], 0, 1],
+  ['one sample', [1], 0, 1],
+  ['a missing sample', [1, NaN, 2, 3], 0, 1],
+  ['an overflow', [1e308, -1e308, 1e308, -1e308], 0, 1],
+];
+const fourier = SIGNALS.map(([name, samples, lo, period]) => {
+  try {
+    const c = realFourier(Float64Array.from(samples));
+    const harmonics = Math.min(c.cosine.length - 1, 12);
+    const count: Expr = { kind: 'var', name: 'N' };
+    const plain = reconstructSeries(c, harmonics, lo, period);
+    const gated = reconstructSeries(c, harmonics, lo, period, count);
+    const xs = [-1.3, 0, 0.21, 1, 2.75];
+    return {
+      name,
+      samples: samples.map(num),
+      lo: num(lo),
+      period: num(period),
+      cosine: Array.from(c.cosine, num),
+      sine: Array.from(c.sine, num),
+      spectrum: spectrumPoints(c, period).map(p => (p as Expr & { kind: 'vec' }).items.map(it => num(evaluate(it, {})))),
+      harmonics,
+      plain: xs.map(x => num(evaluate(plain, { x }))),
+      gated: [0, 1, 2.5, 7, 200].map(N => xs.map(x => num(evaluate(gated, { x, N })))),
+      gatedIsLoop: attempt(() => toGLSL(gated).includes('eq_loop_')),
+    };
+  } catch (err) {
+    return { name, samples: samples.map(num), lo: num(lo), period: num(period), error: (err as Error).message };
+  }
+});
+
 writeFileSync(
   new URL('evaluate.json', fixtures),
   JSON.stringify({
+    escapes: { table: ESCAPES, typed },
+    fourier,
     evals,
     substitution: Object.fromEntries(Object.entries(SUBSTITUTION).map(([name, e]) => [name, tree(e)])),
     structureEnvs: STRUCTURE_ENVS.map(env => Object.fromEntries(Object.entries(env).map(([k, v]) => [k, num(v)]))),
