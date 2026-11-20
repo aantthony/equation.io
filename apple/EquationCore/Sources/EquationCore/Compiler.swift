@@ -48,6 +48,16 @@ public enum CpuPlan: Equatable, Sendable {
   case complexField(form: ComplexForm, expr: Expr)
   case fractal2d(step: Expr, seed: String, maxIter: Int)
   case color2d(space: String, channels: [Expr])
+  /// A sequence's term in its index, evaluated at whole numbers.
+  case sequence(term: Expr, index: String)
+  /// A recurrence's map f in `recVar`, iterated from the constant `a0Name`
+  /// (or 1/2): its cobweb, or its orbit diagram over x.
+  case cobweb(f: Expr, recVar: String, a0Name: String?)
+  case bifurcation(expr: Expr, recVar: String, a0Name: String?)
+  /// An automaton's rule over its neighbours and its seed over the cells.
+  case automaton(rule: Expr, radius: Int, seed: Expr?, dims: Int, axes: [String])
+  /// A table's value over the cells.
+  case lattice(expr: Expr, axes: [String])
 
   /// The plan's `type`, as the TypeScript spells it.
   public var type: String {
@@ -67,6 +77,11 @@ public enum CpuPlan: Equatable, Sendable {
     case .complexField(let form, _): form.planType
     case .fractal2d: "fractal2d"
     case .color2d(let space, _): "\(space)2d"
+    case .sequence: "sequence"
+    case .cobweb: "cobweb"
+    case .bifurcation: "bifurcation"
+    case .automaton: "automaton"
+    case .lattice: "lattice"
     }
   }
 }
@@ -102,6 +117,10 @@ public struct GpuPlan: Equatable, Sendable {
     case color2d(space: String, field: String, locals: String)
     /// A 2×2 matrix field's entries, row-major, each in floats x, y and t.
     case tfield2d(entries: [String], streamlines: Bool)
+    /// A cobweb's curve y = f(x), as an implicit field.
+    case cobweb(curveField: String)
+    /// A recurrence's map in the float `a`, its parameter the pixel's x.
+    case bifurcation(field: String)
   }
 
   public var type: String {
@@ -115,6 +134,8 @@ public struct GpuPlan: Equatable, Sendable {
     case .fractal2d: "fractal2d"
     case .color2d(let space, _, _): "\(space)2d"
     case .tfield2d: "tfield2d"
+    case .cobweb: "cobweb"
+    case .bifurcation: "bifurcation"
     }
   }
 }
@@ -191,6 +212,16 @@ public func compileCpu(_ classified: Classified) throws -> CpuPlan {
     return .fractal2d(step: step, seed: seed, maxIter: maxIter)
   case .colorField(let space, let channels):
     return .color2d(space: space, channels: channels)
+  case .sequence(let term, let index):
+    return .sequence(term: term, index: index)
+  case .cobweb(let expr, let variable, let seedName):
+    return .cobweb(f: expr, recVar: variable, a0Name: seedName)
+  case .bifurcation(let expr, let variable, let seedName):
+    return .bifurcation(expr: expr, recVar: variable, a0Name: seedName)
+  case .automaton(let rule, let radius, let seed, let dims, let axes):
+    return .automaton(rule: rule, radius: radius, seed: seed, dims: dims, axes: axes)
+  case .lattice(let expr, let axes):
+    return .lattice(expr: expr, axes: axes)
   }
 }
 
@@ -266,7 +297,12 @@ public func compileGpu(_ classified: Classified) throws -> GpuPlan {
     return plan(.complexField(form: form, field: try scalar(expr)))
   case .tensorField(let entries, let streamlines):
     return plan(.tfield2d(entries: try entries.map { try glsl(sub($0)) }, streamlines: streamlines))
-  case .point, .complexPoint, .curveParametric, .complexPath, .value, .note, .label, .figure, .tuple:
+  case .cobweb(let expr, let variable, _):
+    return plan(.cobweb(curveField: try glsl(sub(.eq(.var("y"), substVars(expr, [variable: .var("x")]))))))
+  case .bifurcation(let expr, let variable, _):
+    return plan(.bifurcation(field: try glsl(sub(substVars(expr, [variable: .var("a")])))))
+  case .point, .complexPoint, .curveParametric, .complexPath, .value, .note, .label, .figure, .tuple, .sequence,
+    .automaton, .lattice:
     return plan(.none)
   }
 }

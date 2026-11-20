@@ -16,12 +16,19 @@ public struct PanelFrame: Equatable, Sendable {
   /// The constants' values this frame: what the u_<name> uniforms carry.
   public var env: [String: Double]
   public var grid: Frame2D.Grid
+  /// A lattice panel's labels (`Graph2D.cells`): its grid then runs between
+  /// the cells, and the overlay numbers them.
+  public var lattice: LatticeLabels?
 
-  public init(box: PanelBox, content: Content, env: [String: Double] = [:], grid: Frame2D.Grid = .on) {
+  public init(
+    box: PanelBox, content: Content, env: [String: Double] = [:], grid: Frame2D.Grid = .on,
+    lattice: LatticeLabels? = nil
+  ) {
     self.box = box
     self.content = content
     self.env = env
     self.grid = grid
+    self.lattice = lattice
   }
 
   var isSpace: Bool {
@@ -129,7 +136,9 @@ public final class FrameRenderer {
     let size = (width: width, height: height)
     let background = MTLClearColor(
       red: Double(theme.bg.x), green: Double(theme.bg.y), blue: Double(theme.bg.z), alpha: 1)
-    let frame = { (panel: PanelFrame) in Frame2D(vp: panel.box.frame(in: Double(height)), grid: panel.grid) }
+    let frame = { (panel: PanelFrame) in
+      Frame2D(vp: panel.box.frame(in: Double(height)), grid: panel.grid, lattice: panel.lattice == nil ? nil : true)
+    }
 
     var resolved: (any MTLTexture)?
     if panels.contains(where: \.isSpace) {

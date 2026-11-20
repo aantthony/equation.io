@@ -26,6 +26,9 @@ public struct RowAnalysis: Equatable, Sendable {
   public var definition: Definition?
   /// Set for viewport rows: `view(…)`, `camera(…)`, `grid(…)`, and `---`.
   public var view: ViewSpec?
+  /// A lattice view's index axes, `view(i = -60..60, n = 0..80)`: [across,
+  /// down] as written (the second empty when it names only one).
+  public var viewAxes: [String]?
   /// The error the site reports for the row.
   public var error: String?
   /// Why the app cannot show the row yet: the site draws it, the port does
@@ -139,75 +142,6 @@ func usesIndex(_ u: Units, _ index: String) -> Bool {
   return false
 }
 
-/// The letter of a row that may be a sequence, a recurrence, an automaton or
-/// a lattice table (lib/seq.ts `scanSeqRec`), none of which is ported: a
-/// superset of what the site reads as one, so nothing is taken for a constant
-/// that is not.
-private func sequenceLetter(_ text: String) -> String? {
-  var s = RowScanner(text)
-  s.space()
-  guard let c = s.peek, isNameLetter(c) else { return nil }
-  let letter = String(s.u[s.i...s.i])
-  s.i += 1
-  func assigns(_ s: RowScanner) -> String? {
-    var t = s
-    t.space()
-    return t.assignment()
-  }
-  func isLetter(_ c: UInt16?) -> Bool { c.map(isNameLetter) ?? false }
-  // T[i, j] = …
-  var table = s
-  table.space()
-  if table.eat("[") { return text.utf16.contains(unit("=")) ? letter : nil }
-  guard s.eat("_") else { return nil }
-  let conventional: Set<String> = ["n", "k", "m"]
-  func isSequence(_ index: String, _ rhs: String) -> Bool {
-    conventional.contains(index) || (!reservedNames.contains(index) && usesIndex(Array(rhs.utf16), index))
-  }
-  if s.eat("{") || s.eat("(") {
-    s.space()
-    let start = s.i
-    if isLetter(s.peek) {
-      s.i += 1
-      var after = s
-      after.space()
-      if after.eat("}") || after.eat(")") {
-        // a_{n} = …: a sequence by its index, or a subscripted constant.
-        guard let rhs = assigns(after) else { return after.peek == unit("[") ? letter : nil }
-        return isSequence(String(s.u[start..<s.i]), rhs) ? letter : nil
-      }
-      // a_{n+1} = …, and anything else written in the brackets.
-      return letter
-    }
-    // a_{0}: a seed's cells, or the empty tuple a recurrence starts from.
-    while let c = s.peek, isDigit(c) { s.i += 1 }
-    s.space()
-    guard s.eat("}") || s.eat(")") else { return letter }
-    return seedLike(s) ? letter : nil
-  }
-  if isLetter(s.peek) {
-    let start = s.i
-    s.i += 1
-    if let next = s.peek, isWrittenName(next) { return nil }
-    guard let rhs = assigns(s) else { return nil }
-    return isSequence(String(s.u[start..<s.i]), rhs) ? letter : nil
-  }
-  if s.eat("0") {
-    if let next = s.peek, isWrittenName(next) { return nil }
-    return seedLike(s) ? letter : nil
-  }
-  return nil
-}
-
-/// After `a_0`: `[i] = …` (a seed's cells) or `= ()` (the empty tuple).
-private func seedLike(_ at: RowScanner) -> Bool {
-  var s = at
-  s.space()
-  if s.peek == unit("[") { return true }
-  guard let rhs = s.assignment() else { return false }
-  return jsTrimmed(rhs).utf16.filter { !isJSWhitespace($0) }.elementsEqual("()".utf16)
-}
-
 /// `^\s*name\s*\(…\)\s*$`
 private func isWholeCall(_ text: String, _ name: String) -> Bool {
   var s = RowScanner(text)
@@ -260,6 +194,8 @@ struct PreparedDocument {
   var comments: Set<Int> = []
   /// The definition each row scans as, whether or not it is the one that owns the name.
   var scanned: [Definition?]
+  /// Each row's sequence reading, decided across the document (`scanSequences`).
+  var seqScans: [SeqScan?] = []
   /// The rows the port leaves alone, with what stopped it: such a row's
   /// definition is not in `built`.
   var blocked: [Int: String] = [:]
@@ -280,7 +216,9 @@ func prepareDocument(_ sources: [String]) -> PreparedDocument {
   var document = PreparedDocument(texts: texts, scanned: Array(repeating: nil, count: count))
 
   // What each row is by its text alone, and the rows the port leaves alone:
-  // random variables and regressions (`~`), sequences and lattices.
+  // random variables and regressions (`~`), a tuple-valued recurrence's seed.
+  let seqScans = scanSequences(texts)
+  document.seqScans = seqScans
   var blocked: [Int: String] = [:]
   var poison: Set<String> = []
   var tildeNames: Set<String> = []
@@ -292,9 +230,12 @@ func prepareDocument(_ sources: [String]) -> PreparedDocument {
       blocked[i] = "random variables and regressions (~)"
       // A fit defines its coefficients too: every name in the row is its.
       tildeNames.formUnion(writtenNames(text))
-    } else if let letter = sequenceLetter(text) {
-      blocked[i] = "sequences and lattices"
-      poison.insert(letter)
+    } else if let scan = seqScans[i] {
+      // Sequence and recurrence rows (a_n = …, a_{n+1} = …) are plots, not definitions.
+      if scan.emptyTuple {
+        blocked[i] = "tuple-valued recurrences"
+        poison.insert(scan.name)
+      }
     } else {
       scanned[i] = scanDefinition(text)
     }
@@ -326,10 +267,12 @@ func prepareDocument(_ sources: [String]) -> PreparedDocument {
         guard let name = writtenNames(texts[i]).first(where: { touches($0, poison) }) else { continue }
         blocked[i] = "it uses \(name), which is not supported yet"
         if let d = scanned[i], poison.insert(d.name).inserted { grew = true }
+        if let scan = seqScans[i], poison.insert(scan.name).inserted { grew = true }
       }
     }
     let skip = Set(raw.filter { blocked[owner[$0.key]!] != nil }.map(\.key))
-    built = buildDefs(raw, skip: skip)
+    // An automaton's letter names rows of cells, not scalar terms.
+    built = buildDefs(raw, skip: skip, sequences: seqScans.compactMap { $0 }.filter { !$0.lattice && !$0.emptyTuple })
     var found = false
     for d in raw where !skip.contains(d.key) {
       guard let what = built.unsupported[d.key] else { continue }
@@ -355,7 +298,9 @@ func prepareDocument(_ sources: [String]) -> PreparedDocument {
 public func analyze(_ sources: [String]) -> DocumentAnalysis {
   let document = prepareDocument(sources)
   let (texts, blocked, tildeNames) = (document.texts, document.blocked, document.tildeNames)
-  let (raw, owner, duplicates, built) = (document.raw, document.owner, document.duplicates, document.built)
+  let (raw, owner, duplicates) = (document.raw, document.owner, document.duplicates)
+  // (A recurrence's chain of terms is written into the constants as rows resolve.)
+  var built = document.built
   var rows = zip(sources, texts).map { RowAnalysis(text: $1, noteStart: noteStart($0)) }
   let count = rows.count
   for i in 0..<count {
@@ -387,14 +332,18 @@ public func analyze(_ sources: [String]) -> DocumentAnalysis {
   let constEnv = (try? evaluateFrame(built, time: 0)) ?? [:]
   let animated = animatedConstNames(built)
   // Pass 2: viewport rows and plots.
-  let constNames = Set(built.consts.keys)
+  var constNames = Set(built.consts.keys)
   // A named condition is written into a row as a field is.
   var fieldEnv: [String: Expr] = [:]
   for (name, e) in built.fields.entries { fieldEnv[name] = e }
   for (name, e) in built.conditions.entries { fieldEnv[name] = e }
   let fnNames = Set(raw.compactMap { if case .function(let name, _, _) = $0 { name } else { nil } })
   // What parses as an index: the named points (T[2]).
+  let sequences = SequenceResolver(
+    document.seqScans.compactMap { $0 }.filter { !$0.lattice && !$0.emptyTuple }, rawNames: raw.map(\.name))
+  defer { sequences.release() }
   let listNames = Set(built.points).union(built.mats.keys).union(built.tensors.keys)
+    .union(sequences.sequences.keys.map { $0 + "_" })
   let valueNames = shadowedFnNames(raw.filter { $0.kind != "fn" }.map(\.name) + Array(tildeNames))
   let documentNames = Set(raw.map(\.name)).union(tildeNames)
   func getFn(_ name: String) throws -> FnDef? {
@@ -413,6 +362,24 @@ public func analyze(_ sources: [String]) -> DocumentAnalysis {
   ropts.comps = comps
   ropts.documentNames = documentNames
   ropts.complex = { built.complexes[$0] }
+  // Σ/Π bounds in plot rows expand against the constants' values at t = 0.
+  let boundConsts = NameBox()
+  boundConsts.names = built.sumBoundConsts
+  ropts.consts = { boundVals[$0] }
+  ropts.boundConsts = boundConsts
+  if !sequences.sequences.isEmpty {
+    ropts.sequenceTerm = { [unowned sequences] in try sequences.resolve($0, $1, $2) }
+  }
+  sequences.getFn = getFn
+  sequences.opts = ropts
+  sequences.fnNames = { Set(built.fns.keys) }
+  sequences.indexNames = { Set(built.points) }
+  sequences.isKnown = { constNames.contains($0) }
+  sequences.addKnown = { constNames.insert($0) }
+  sequences.protectedNames = Set(raw.map(\.name))
+  sequences.hasConst = { built.consts.has($0) }
+  sequences.defineConstant = { built.consts[$0] = $1 }
+  sequences.setValue = { boundVals[$0] = $1 }
 
   // Each panel's rows are read with its view's maps, its surface and its
   // metric, none of which is ported: a panel that has one is left alone.
@@ -454,7 +421,8 @@ public func analyze(_ sources: [String]) -> DocumentAnalysis {
       let head = viewHead(text)
       if isDividerRow(text) || (head != nil && !fnNames.contains(head!)) {
         if viewsUnknown && !isDividerRow(text) { throw Unsupported("a view row after one that is not supported") }
-        if let view = try parseViewRow(text, boundVals) {
+        var latticeAxes: [String]?
+        if let view = try parseViewRow(text, boundVals, latticeAxes: &latticeAxes) {
           // Each panel frames itself: a divider starts a fresh set.
           if case .split = view {
             panel += 1
@@ -468,6 +436,7 @@ public func analyze(_ sources: [String]) -> DocumentAnalysis {
           }
           seenViewKinds.insert(view.kind)
           rows[i].view = view
+          rows[i].viewAxes = latticeAxes
           continue
         }
       }
@@ -483,6 +452,20 @@ public func analyze(_ sources: [String]) -> DocumentAnalysis {
         if built.fns[letter] != nil { continue }
         if !tildeNames.isEmpty { throw Unsupported("probabilities and expectations") }
         throw LanguageError("Define a random variable first, e.g. X ~ Normal(0, 1).")
+      }
+      if let seq = document.seqScans[i], seq.lattice {
+        // A seed row draws nothing of its own; the rule row carries it.
+        rows[i].classified = try classifyAutomatonRow(
+          document.seqScans, i, fnNames: fnNames, getFn: getFn, constNames: constNames, ropts: ropts)
+        continue
+      }
+      if let seq = document.seqScans[i] {
+        let first = document.seqScans.firstIndex { $0?.name == seq.name && $0?.emptyTuple == false }
+        if let first, first < i { throw LanguageError("Sequence \(seq.name) is already defined.") }
+        rows[i].classified = try classifySeqRec(
+          seq, fnNames: fnNames, getFn: getFn, constNames: { constNames }, ropts: ropts, resolver: sequences,
+          indexNames: Set(built.points))
+        continue
       }
       // `d = 1` is no definition (d starts d/dx).
       let taken = takenDefinitionName(text)
@@ -581,17 +564,62 @@ public func analyze(_ sources: [String]) -> DocumentAnalysis {
     }
   }
 
-  // A slider that is a Σ/Π bound steps in whole numbers. Sums are not
-  // ported, so which sliders those are is not known here: one a row with a
-  // sum in reach names is left alone rather than given the wrong step.
+  // A view naming index axes (one, as a panel sharing the other writes it)
+  // needs a lattice in its panel with those axes; on the plane it is a slip
+  // for x and y: `view(X = -1..1, Y = -2..2)`.
+  do {
+    var panelAt = 0
+    var latticeAxes: [[String]] = [[]]
+    var indexViews: [(row: Int, panel: Int, axes: [String])] = []
+    // (A row the port leaves alone may be the lattice a view names.)
+    var unknown: Set<Int> = []
+    for i in 0..<count {
+      if case .split? = rows[i].view {
+        panelAt += 1
+        latticeAxes.append([])
+      }
+      switch rows[i].cpu {
+      case .automaton(_, _, _, _, let axes)?, .lattice(_, let axes)?: latticeAxes[panelAt] += axes
+      default: break
+      }
+      if rows[i].unsupported != nil, !rows[i].comment { unknown.insert(panelAt) }
+      if case .view? = rows[i].view, let axes = rows[i].viewAxes {
+        indexViews.append((i, panelAt, axes.filter { !$0.isEmpty }))
+      }
+    }
+    for (i, at, axes) in indexViews where !axes.allSatisfy(latticeAxes[at].contains) {
+      rows[i].view = nil
+      rows[i].viewAxes = nil
+      if unknown.contains(at) {
+        rows[i].unsupported = notSupported("a lattice view of a panel with a row that is not supported yet")
+      } else {
+        rows[i].error = "view(…) frames the plane with x and y; an index axis names a lattice in this panel."
+      }
+    }
+  }
+
+  // A slider that is a Σ/Π bound steps in whole numbers. A row the port
+  // leaves alone never expands its sums, so which sliders it bounds one by is
+  // not known here: one such a row names, with a sum in reach, is left alone
+  // rather than given the wrong step.
   let sumGlyphs: Set<UInt16> = [0x03A3, 0x2211, 0x03A0, 0x220F]
   let hasSums = texts.contains { text in
     text.utf16.contains(where: sumGlyphs.contains)
       || writtenNames(text).contains { ["sum", "prod"].contains($0.lowercased()) }
-  }
+    // (A slider a sequence's term is read at, a_k, steps in whole numbers too.)
+  } || document.seqScans.contains { $0 != nil }
   var namedByUnsupported: Set<String> = []
   if hasSums {
-    for i in 0..<count where rows[i].unsupported != nil { namedByUnsupported.formUnion(writtenNames(texts[i])) }
+    for i in 0..<count where rows[i].unsupported != nil {
+      for name in writtenNames(texts[i]) {
+        namedByUnsupported.insert(name)
+        // The slider a term is read at: the k of a_k.
+        let u = Array(name.utf16)
+        if u.count > 2, u[1] == unit("_"), sequences.sequences[String(decoding: u[..<1], as: UTF16.self)] != nil {
+          namedByUnsupported.insert(String(decoding: u[2...], as: UTF16.self))
+        }
+      }
+    }
   }
 
   // What each row shows beside its text.
@@ -601,7 +629,7 @@ public func analyze(_ sources: [String]) -> DocumentAnalysis {
     defer { rows[i] = row }
     if row.unsupported != nil { continue }
     if case .constant(let name, let rhs, false)? = row.definition, namedByUnsupported.contains(name),
-      sliderForm(jsTrimmed(rhs), userFns: userFns) != nil
+      let form = sliderForm(jsTrimmed(rhs), userFns: userFns), !form.whole, !boundConsts.names.contains(name)
     {
       row.unsupported = notSupported("a slider that a sum may step in whole numbers")
       continue
@@ -636,7 +664,7 @@ public func analyze(_ sources: [String]) -> DocumentAnalysis {
       !jsTrimmed(sources[i]).isEmpty && !row.comment && (row.definition == nil || named) && row.view == nil
       && noteColor(sources[i]) == nil && draws
     // A constant whose right-hand side is a number the user wrote is a slider.
-    if case .constant(_, let rhs, false)? = row.definition, row.error == nil,
+    if case .constant(let name, let rhs, false)? = row.definition, row.error == nil,
       let form = sliderForm(jsTrimmed(rhs), userFns: userFns)
     {
       var value = form.literal
@@ -652,11 +680,15 @@ public func analyze(_ sources: [String]) -> DocumentAnalysis {
       }
       // Whole-number sliders step one at a time; otherwise a round step
       // (1, 2 or 5 × 10^k), so round values sit on it.
-      row.slider = Slider(min: lo, max: hi, step: form.whole ? 1 : niceSpacing((hi - lo) / 400, 1).major, value: value)
+      // (A slider that is a Σ/Π bound, or the index a term is read at, steps so too.)
+      let whole = form.whole || boundConsts.names.contains(name)
+      row.slider = Slider(min: lo, max: hi, step: whole ? 1 : niceSpacing((hi - lo) / 400, 1).major, value: value)
     }
   }
+  // The constants once more: a recurrence's chain of terms is among them now.
+  let env = (try? evaluateFrame(built, time: 0)) ?? constEnv
   return DocumentAnalysis(
-    rows: rows, env: constEnv, animated: animated, names: boundNames(document), userFns: userFns,
+    rows: rows, env: env, animated: animatedConstNames(built), names: boundNames(document), userFns: userFns,
     constNames: built.consts.keys,
     constExprs: built.consts.entries.map(\.value))
 }

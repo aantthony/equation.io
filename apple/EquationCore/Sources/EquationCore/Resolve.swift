@@ -49,6 +49,15 @@ struct ResolveOpts {
   /// The value of a name defined as a complex number (`a = e^(iπ/3)`),
   /// written in wherever the name is read.
   var complex: (String) -> Expr? = { _ in nil }
+  /// A constant's value, for a Σ/Π bound at expansion time.
+  var consts: (String) -> Double? = { _ in nil }
+  /// Out: the constants Σ/Π bounds read (their sliders step in whole numbers).
+  var boundConsts: NameBox?
+  /// Names a Σ/Π bound may use without a value: a sequence's index, and the
+  /// index of a sum that could not expand yet. The sum stays a call.
+  var openVars: Set<String> = []
+  /// A sequence term by name (a_3, a_k) or index (a_[…]) (Sequences.swift).
+  var sequenceTerm: ((String, Expr?, Set<String>) throws -> Expr?)?
 }
 
 /// The elementary functions the port evaluates and compiles: a call to any
@@ -69,6 +78,7 @@ private let coordNames = ["x", "y", "z"]
 struct Resolver {
   var getFn: GetFn
   var opts: ResolveOpts
+  var ctx = ResolveCtx()
 
   // MARK: Derivatives (lib/defs.ts dOrder … matchDeriv)
 
@@ -236,19 +246,25 @@ struct Resolver {
     case .num:
       return e
     case .var(let name):
+      if let term = try opts.sequenceTerm?(name, nil, opts.openVars) { return term }
       if let value = opts.complex(name) { return value }
       // What the port cannot write in yet, by the names that ask for it.
-      if name == "int" || name == "sum" || name == "prod" { throw Unsupported("sums and integrals") }
+      if name == "int" { throw Unsupported("integrals") }
       if name == "grad" || name == "div" || name == "curl" || name == "laplacian" {
         throw Unsupported("vector calculus")
       }
-      if isUnitVector(name), let names = opts.documentNames, !names.contains(name) {
+      if isUnitVector(name), let names = opts.documentNames, !names.contains(name), !opts.openVars.contains(name) {
         throw Unsupported("unit vectors")
       }
       return pointCoord(name) ?? e
     case .neg(let a):
       return .neg(try resolve(a))
     case .bin(let op, let lhs, let rhs, let glyph):
+      // Σ/∫ headers capture their trailing product chain before it resolves.
+      if op == .mul || op == .div, let m = splitSumChain(e) {
+        let body = try isSumHeader(m.header) ? expandSum(m.header, m.body) : expandInt(intBounds(m.header), m.body)
+        return try m.coeff.map { .bin(m.op, try resolve($0), body) } ?? body
+      }
       let a = try resolve(lhs)
       let b = try resolve(rhs)
       if op == .div, let d = try matchDeriv(a, b) { return d }
@@ -260,7 +276,8 @@ struct Resolver {
         }
       }
       return .bin(op, a, b)
-    case .index:
+    case .index(let target, let at):
+      if case .var(let name) = target, let term = try opts.sequenceTerm?(name, at, opts.openVars) { return term }
       throw Unsupported("indexing")
     case .range:
       throw LanguageError(structuralDiagnostic(e))
@@ -286,10 +303,11 @@ struct Resolver {
     case .piecewise(let cases, let otherwise):
       for c in cases {
         guard case .eq = c.cond else { continue }
-        // A case testing equality is a lattice row's, or a function body's
-        // for the lattice rows that call it.
-        if opts.inDefinition { throw Unsupported("a case testing equality in a definition") }
-        if !opts.exactConditions {
+        // A lattice row may test equality, and so may a function body for
+        // the lattice rows that call it (life(c, s) = {s = 3: 1, …}); the
+        // lattice rewrites the case (`exactCases`), and any other row
+        // inlining it fails to compile.
+        if !opts.inDefinition && !opts.exactConditions {
           throw LanguageError(equalityCaseMessage)
         }
       }
@@ -311,7 +329,18 @@ struct Resolver {
   }
 
   private func resolveCall(_ name: String, _ rawArgs: [Expr]) throws -> Expr {
-    if name == "sum" || name == "prod" || name == "int" { throw Unsupported("sums and integrals") }
+    if name == "sum" || name == "prod" {
+      if rawArgs.count != 4 {
+        throw LanguageError(
+          "\(name == "sum" ? "Σ" : "Π") needs a body: write \(name)(n=1..N, …) or \(name)[n=1..N] (…).")
+      }
+      return try expandSum(.call(name, rawArgs), rawArgs[3])
+    }
+    if name == "int" {
+      if rawArgs.count == 2 { throw LanguageError("∫ needs a body: write int[a..b] f(x) dx.") }
+      let body = rawArgs[rawArgs.count - 1]
+      return try expandInt(rawArgs.count == 3 ? (rawArgs[0], rawArgs[1]) : nil, body)
+    }
     // A reduction of one argument is over a list, or an integral against a measure.
     if rawArgs.count == 1, ["count", "total", "mean", "min", "max", "stdev", "median", "hist"].contains(name) {
       throw Unsupported("\(name)(…) over a list or a set")

@@ -38,6 +38,7 @@ import { rowKind } from '../../lib/row-kind.ts';
 import { sliderBounds, sliderForm, sliderValue, writeSlider } from '../../lib/slider.ts';
 import { keepNote, noteStart, splitStatements } from '../../lib/statements.ts';
 import { EXAMPLES } from '../../web/examples.ts';
+import { DISCRETE_CASES } from './cases-discrete.ts';
 
 const fixtures = new URL('../EquationCore/Tests/EquationCoreTests/Fixtures/', import.meta.url);
 
@@ -68,6 +69,7 @@ const PORTED = new Set([
 ]);
 // Geometry (lib/geom.ts): figures and labels; matrices and tensors read out, and matrix fields.
 for (const type of ['polygon', 'label', 'tuple', 'tfield2d']) PORTED.add(type);
+for (const type of ['sequence', 'cobweb', 'bifurcation', 'automaton', 'lattice']) PORTED.add(type);
 function slim(plan: { type: string } | undefined): unknown {
   if (!plan) return null;
   if (!PORTED.has(plan.type)) return { type: plan.type, omitted: true };
@@ -471,6 +473,7 @@ const docs: Doc[] = [];
 for (const [category, items] of EXAMPLES)
   for (const [label, text] of items) docs.push({ name: `${category} / ${label}`, rows: splitStatements(text) });
 CASES.forEach((text, k) => docs.push({ name: `case ${k + 1}`, rows: splitStatements(text) }));
+DISCRETE_CASES.forEach((text, k) => docs.push({ name: `case discrete ${k + 1}`, rows: splitStatements(text) }));
 randomDocs(Number(process.env.RANDOM_DOCS ?? 600)).forEach((text, k) => docs.push({ name: `case random ${k + 1}`, rows: splitStatements(text) }));
 
 const recorded = docs.map(({ name, rows }) => {

@@ -454,6 +454,8 @@ struct BuiltDefs {
   var errors = OrderedMap<String>()
   /// Definitions the port cannot read yet, by key, with what stopped it.
   var unsupported: [String: String] = [:]
+  /// The constants a definition's Σ/Π bounds read (`sumBoundConsts`).
+  var sumBoundConsts: Set<String> = []
 }
 
 private let positionVars: Set<String> = ["x", "y", "z", "w"]
@@ -463,7 +465,7 @@ private let paramVars: Set<String> = ["u", "v"]
 /// Those whose key is in `skip` are known not to be supported: they keep
 /// their names, so everything else parses as it does on the site, and are
 /// otherwise left alone.
-func buildDefs(_ raw: [Definition], skip: Set<String>) -> BuiltDefs {
+func buildDefs(_ raw: [Definition], skip: Set<String>, sequences: [SeqScan] = []) -> BuiltDefs {
   var defs = BuiltDefs()
   var byName: [String: Definition] = [:]
   for d in raw { byName[d.name] = d }
@@ -477,6 +479,14 @@ func buildDefs(_ raw: [Definition], skip: Set<String>) -> BuiltDefs {
   /// Derived point component → the point row it belongs to (A_x → A).
   var compOwner = OrderedMap<String>()
   var resolving: [String] = []
+  let boundConsts = NameBox()
+  // Sequence terms a definition reads (a_3, a_k); a recurrence's chain of
+  // terms is written into the constants (lib/seq.ts `sequenceResolver`).
+  let seq = SequenceResolver(sequences, rawNames: raw.map(\.name))
+  defer { seq.release() }
+  var known = Set(raw.map(\.name))
+  // The sequences index too: b_[n+1].
+  let seqIndexNames = Set(seq.sequences.keys.map { $0 + "_" })
 
   func comps(_ name: String) -> [String]? {
     defs.points.contains(name) ? pointComps(name, defs.pointDims[name] ?? 2) : nil
@@ -489,6 +499,10 @@ func buildDefs(_ raw: [Definition], skip: Set<String>) -> BuiltDefs {
     opts.comps = comps
     opts.documentNames = Set(byName.keys)
     opts.complex = { defs.complexes[$0] }
+    // Σ/Π bounds in later definitions may use the constants resolved so far.
+    opts.consts = { numEnv[$0] }
+    opts.boundConsts = boundConsts
+    if !seq.sequences.isEmpty { opts.sequenceTerm = { [unowned seq] in try seq.resolve($0, $1, $2) } }
     return opts
   }
   // List names accumulate in definition order: a point indexes (`T[2]`) only
@@ -496,7 +510,7 @@ func buildDefs(_ raw: [Definition], skip: Set<String>) -> BuiltDefs {
   func parse(_ d: Definition) throws -> Expr {
     if let p = parsed[d.key] { return p }
     var values = valueNames
-    var names = Set(defs.pointDims.keys).union(defs.mats.keys).union(defs.tensors.keys)
+    var names = Set(defs.pointDims.keys).union(defs.mats.keys).union(defs.tensors.keys).union(seqIndexNames)
     if case .function(_, let params, _) = d {
       // A function's parameters are values in its body, and index too.
       values.formUnion(shadowedFnNames(params))
@@ -558,13 +572,23 @@ func buildDefs(_ raw: [Definition], skip: Set<String>) -> BuiltDefs {
     defs.consts[name] = e
     return .var(name)
   }
+  seq.getFn = getFn
+  seq.opts = options()
+  seq.fnNames = { Set(defs.fns.keys) }
+  seq.indexNames = { Set(defs.pointDims.keys) }
+  seq.isKnown = { known.contains($0) }
+  seq.addKnown = { known.insert($0) }
+  seq.protectedNames = known
+  seq.hasConst = { defs.consts.has($0) }
+  seq.defineConstant = { defs.consts[$0] = $1 }
+  seq.setValue = { numEnv[$0] = $1 }
 
   // Named conditions (`within = r < R`), found before anything else resolves:
   // a function body reads one by its shape, and that must not depend on
   // whether the condition's row is above the function's or below.
   for d in raw where !skip.contains(d.key) {
     guard case .constant(let name, let rhs, false) = d else { continue }
-    let above = Set(defs.pointDims.keys)
+    let above = Set(defs.pointDims.keys).union(seqIndexNames)
     guard let source = try? parseExpr(rhs, userFns: fnNames, listNames: above, valueNames: valueNames),
       case .ineq = source
     else { continue }
@@ -739,6 +763,8 @@ func buildDefs(_ raw: [Definition], skip: Set<String>) -> BuiltDefs {
   }
   // A named value's hidden coefficients (M#3) are constants by construction.
   for name in defs.consts.keys where name.utf16.contains(unit("#")) { constNames.insert(name) }
+  // (A recurrence's chain of terms.)
+  for name in defs.consts.keys where name.hasPrefix(seq.prefix + "_") { constNames.insert(name) }
   // Constant point rows resolve to their component constants; a vector
   // field's components are fields, not uniforms.
   for p in defs.points {
@@ -1016,6 +1042,7 @@ func buildDefs(_ raw: [Definition], skip: Set<String>) -> BuiltDefs {
       }
     }
   }
+  defs.sumBoundConsts = boundConsts.names
   return defs
 }
 
