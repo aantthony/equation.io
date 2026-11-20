@@ -71,6 +71,9 @@ public struct DocumentAnalysis: Equatable, Sendable {
   /// The document's random variables, the anonymous ones of its expression
   /// rows among them: what a density, pmf, prob or expect plan's `rv` names.
   public var random = RVSystem()
+  /// The document's planar coordinate fields, whose level sets grid the
+  /// panel each is defined in (Grid.swift).
+  public var gridFields: [GridField] = []
   /// The document's own functions (a slider's `clamp` is not one of these).
   var userFns: Set<String>
   /// Each constant's expression, in the order the rows define them.
@@ -451,6 +454,9 @@ public func analyze(_ sources: [String]) -> DocumentAnalysis {
     }
   }
 
+  // The coordinate fields a grid can draw (Grid.swift).
+  let gridFields = buildGridFields(built, constNames: constNames)
+  let gridNames = Set(gridFields.map(\.name))
   var seenViewKinds: Set<String> = []
   var viewsUnknown = false
   var panel = 0
@@ -482,6 +488,17 @@ public func analyze(_ sources: [String]) -> DocumentAnalysis {
             throw LanguageError(
               "\(view.kind) is already set by another row\(panel > 0 ? " in this panel" : "")"
                 + (panel > 0 ? "." : " — a --- row starts a new panel with its own."))
+          }
+          if case .gridCoords(let names) = view {
+            for name in names {
+              if let problem = gridCoordinateProblem(name, gridFields: gridNames, fields: { built.fields.has($0) }) {
+                // A field the port could not read may be the coordinate meant.
+                if blocked.contains(where: { rows[$0.key].definition?.name == name }) {
+                  throw Unsupported("a grid of \(name), which is not supported yet")
+                }
+                throw LanguageError(problem)
+              }
+            }
           }
           seenViewKinds.insert(view.kind)
           rows[i].view = view
@@ -701,7 +718,7 @@ public func analyze(_ sources: [String]) -> DocumentAnalysis {
       row.kind =
         switch view {
         case .split: "panel divider (the rows below it draw in a panel of their own)"
-        case .grid: "grid (what draws behind its panel's plots)"
+        case .grid, .gridCoords: "grid (what draws behind its panel's plots)"
         default: "viewport (\(view.kind))"
         }
     } else if let dist = row.dist {
@@ -748,7 +765,7 @@ public func analyze(_ sources: [String]) -> DocumentAnalysis {
   let env = (try? evaluateFrame(built, time: 0)) ?? constEnv
   return DocumentAnalysis(
     rows: rows, env: env, animated: animatedConstNames(built), names: boundNames(document),
-    random: distributions.rvs, userFns: userFns,
+    random: distributions.rvs, gridFields: inPanels(gridFields, owner: owner, rows: rows), userFns: userFns,
     constNames: built.consts.keys,
     constExprs: built.consts.entries.map(\.value))
 }

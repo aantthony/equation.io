@@ -48,6 +48,9 @@ import Testing
           failures.append("\(name), row \(i + 1) \(rows[i].debugDescription): \(difference)")
         }
       }
+      for difference in compareGridFields(analysis, doc["gridFields"] as? [[String: Any]] ?? []) {
+        failures.append("\(name): \(difference)")
+      }
       // The environment the uniforms read.
       if whole {
         let env = doc["env"] as! [String: Any]
@@ -186,7 +189,7 @@ import Testing
             place: view["place"] as? String, corner: view["corner"] as? String, size: view["size"].map(number),
             sharedX: (view["shared"] as? [String: Any])?["x"] as? Bool ?? false,
             sharedY: (view["shared"] as? [String: Any])?["y"] as? Bool ?? false)
-        case "grid": .grid(mode: view["mode"] as! String)
+        case "grid": (view["coords"] as? [String]).map { .gridCoords($0) } ?? .grid(mode: view["mode"] as! String)
         default: nil
         }
       // (JSON has no -0: a lattice view's down range from 0 is [-80, -0] on the site too.)

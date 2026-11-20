@@ -41,7 +41,7 @@ import { sliderBounds, sliderForm, sliderValue, writeSlider } from '../../lib/sl
 import { keepNote, noteStart, splitStatements } from '../../lib/statements.ts';
 import { EXAMPLES } from '../../web/examples.ts';
 import { DISCRETE_CASES } from './cases-discrete.ts';
-import { PANEL_CASES } from './cases-panels.ts';
+import { PANEL_CASES, recordGridFields } from './cases-panels.ts';
 
 const fixtures = new URL('../EquationCore/Tests/EquationCoreTests/Fixtures/', import.meta.url);
 
@@ -656,6 +656,7 @@ const recorded = docs.map(({ name, rows }) => {
     name,
     rows,
     env: analysis.constEnv,
+    gridFields: recordGridFields(analysis),
     results: analysis.rows.map((row, i) => {
       const def = row.def;
       // web/main.ts sliderOf, sliderRange and moveSlider, without the DOM.

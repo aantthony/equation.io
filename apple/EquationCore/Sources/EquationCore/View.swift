@@ -8,7 +8,7 @@
 /// expressions, so `pi` and defined constants work.
 ///
 /// Not ported: a view that maps both axes at once (`(x, y) = …`), a
-/// lattice view's index axes, `on(…)` surfaces, and `grid(r, theta)`.
+/// lattice view's index axes, and `on(…)` surfaces.
 public enum ViewSpec: Equatable, Sendable {
   /// [lo, hi] of each axis given (at least one is); `ratio` is pixels per y
   /// unit over pixels per x unit; `locked` pins the window.
@@ -29,13 +29,16 @@ public enum ViewSpec: Equatable, Sendable {
   case split(place: String?, corner: String?, size: Double?, sharedX: Bool, sharedY: Bool)
   /// `grid(off)`, `grid(axes)`, `grid(on)`.
   case grid(mode: String)
+  /// `grid(r, theta)`: exactly those coordinates' level sets (Grid.swift);
+  /// `grid(x, y)` the Cartesian grid even where coordinate fields are defined.
+  case gridCoords([String])
 
   public var kind: String {
     switch self {
     case .view, .mappedView: "view"
     case .camera: "camera"
     case .split: "split"
-    case .grid: "grid"
+    case .grid, .gridCoords: "grid"
     }
   }
 }
@@ -310,7 +313,7 @@ func parseViewRow(
     if args.count == 1, ["off", "none", "axes", "on"].contains(word) {
       return .grid(mode: word == "none" ? "off" : word)
     }
-    throw Unsupported("a grid of named coordinates")
+    return .gridCoords(try parseGridCoords(args))
   }
   let head: String
   let inner: String

@@ -152,6 +152,32 @@ private func same(_ a: View2D, _ b: View2D?) -> Bool {
     #expect(metal.failures == 0)
   }
 
+  @Test func coordinateFieldsGridTheirPanel() throws {
+    let document = panels([
+      "r = sqrt(x^2 + y^2)", "theta = atan2(y, x)", "r = 2", "--- right", "y = x", "--- below", "grid(theta, x)",
+      "---", "grid(x, y)", "---", "grid(r)", "view(x = 10^X)", "---", "grid(axes)", "k = 2", "c = x y", "c = k",
+    ])
+    let frame = document.scene(at: 0, width: 1200, height: 900, dpr: 1)
+    let specs = frame.panels.map { $0.scene?.gridSpecs }
+    // The panel the fields are defined in is gridded by them; the next is Cartesian.
+    #expect(specs[0]?.count == 2 && specs[1] == nil)
+    #expect(specs[0]?[1].major == .pi / 6 || specs[0]?[1].major == .pi / 4 || specs[0]?[1].major == .pi / 12)
+    // Named coordinates, x among them; grid(x, y) is the plain grid.
+    #expect(specs[2]?.map(\.glsl).last == "x" && specs[2]?.count == 2)
+    #expect(specs[3] == nil)
+    // A mapped panel grids at its ticks, and one showing only its axes has no families.
+    #expect(specs[4] == nil && specs[5] == nil)
+    // A level set's contour stack, for the drawer to show.
+    let graph = document.panels[5].graph
+    #expect(graph.levelRows == [16])
+    let view = try #require(frame.panels[5].scene?.view)
+    let stack = graph.levelStacks(rows: [16], at: 0, view: view, width: 300, height: 300)
+    #expect(stack.count == 1 && stack[0].glsl == "(x * y)" && stack[0].major > 0)
+    let metal = try #require(MetalContext())
+    _ = try #require(metal.image(of: frame, width: 1200, height: 900, dpr: 1, theme: .light))
+    #expect(metal.failures == 0)
+  }
+
   @Test func aSplitFrameDraws() throws {
     let metal = try #require(MetalContext())
     let document = panels(["y = sin(x)", "--- right 40%", "x^2 + y^2 < 4", "--- inset bottom left", "(y, -x)"])

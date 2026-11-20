@@ -191,7 +191,7 @@ private func hasAtan2(_ e: Expr) -> Bool {
   return childrenOf(e).contains(where: hasAtan2)
 }
 
-private func compileGridCpu(_ spec: LevelSetSpec) throws -> CpuGrid {
+func compileGridCpu(_ spec: LevelSetSpec) throws -> CpuGrid {
   let expr = try real(spec.expr)
   // (No gradient: the renderer takes finite differences.)
   let gradient = try? [diff(expr, "x"), diff(expr, "y")]
@@ -296,7 +296,7 @@ func uniformSub(_ params: [String]) -> (Expr) -> Expr {
   return { expr in params.isEmpty ? expr : substVars(expr, map) }
 }
 
-private func compileGridGpu(_ spec: LevelSetSpec) throws -> GpuGrid {
+func compileGridGpu(_ spec: LevelSetSpec) throws -> GpuGrid {
   let sub = uniformSub(spec.params)
   var gradGlsl: [String]?
   if let dx = try? diff(spec.expr, "x"), let dy = try? diff(spec.expr, "y") {

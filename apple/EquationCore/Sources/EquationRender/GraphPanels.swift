@@ -140,6 +140,8 @@ extension Graph2D {
   public func scene(at time: Double, width: Double, height: Double, view: View2D) -> Scene2D {
     var scene = scene(at: time, width: width, height: height)
     scene.view = view
+    // The grid's spacing follows the window.
+    scene.gridSpecs = gridSpecs(at: time, view: view, width: width, height: height)
     return scene
   }
 }

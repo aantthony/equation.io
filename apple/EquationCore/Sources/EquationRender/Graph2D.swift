@@ -16,6 +16,8 @@ public struct Graph2D: Equatable, Sendable {
   public var layers = Layers2D()
   /// How much of the grid is drawn (a `grid(…)` row).
   public var grid: Frame2D.Grid = .on
+  /// The coordinates a `grid(r, theta)` row names (Graph2D+Grid.swift).
+  public var gridCoords: [String]?
   /// The window a `view(…)` row asks for.
   public var window: Window?
   /// The axis maps of the panel's view(…) row (`view(x = 10^X)`): the window
@@ -60,6 +62,7 @@ public struct Graph2D: Equatable, Sendable {
     for (index, row) in analysis.rows.enumerated() {
       switch row.view {
       case .grid(let mode)?: grid = Frame2D.Grid(rawValue: mode) ?? .on
+      case .gridCoords(let names)?: gridCoords = names
       case .view(let x, let y, let ratio, _)?:
         window = Window(x: x, y: y, ratio: ratio)
         if error(row) == nil, written == nil { written = row.viewAxes }
@@ -101,7 +104,7 @@ public struct Graph2D: Equatable, Sendable {
       }
     }
     // A vector field's streamlines flow whether or not it reads t.
-    if !vfields.isEmpty { animated = true }
+    if !vfields.isEmpty || gridAnimated { animated = true }
     layers = Layers2D(vfields: vfields, ineqs: ineqs, scalars: scalars, curves: curves)
     complexLayers.write(to: &layers)
     if !tfields.isEmpty { layers.tfields = tfields }
@@ -231,6 +234,7 @@ public struct Graph2D: Equatable, Sendable {
     scene.overlay = overlay(
       at: time, bounds: Bounds(view: view, width: width, height: height), theme: theme,
       pointsPerUnit: 1 / (view.upp * dpr))
+    scene.gridSpecs = gridSpecs(at: time, view: view, width: width, height: height)
     scene.maps = maps
     return scene
   }
