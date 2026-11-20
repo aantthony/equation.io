@@ -70,9 +70,14 @@ extension Graph2D {
     do {
       switch plan {
       case .density(let rv, let mass):
-        guard var c = try rvs.curve(rv, env) else { return }
+        guard var c = try rvs.curve(rv, env, view: view) else { return }
         if let mass { c = c.scaled(try evaluate(mass, env)) }
         if c.pts.count >= 4 { overlay.polylines.append(.init(pts: c.pts, color: css, width: 2)) }
+        // Point masses draw as probability stems (height = mass, not density).
+        for a in c.atoms ?? [] {
+          overlay.polylines.append(.init(pts: [a.x, 0, a.x, a.p], color: css, width: 2))
+          overlay.points.append(.init(x: a.x, y: a.p, color: css, r: 4))
+        }
       case .pmf(let rv, let mass):
         // Stems at the whole numbers in view.
         let scale = try mass.map { try evaluate($0, env) } ?? 1
@@ -89,7 +94,7 @@ extension Graph2D {
           for run in selected { pushStems(run, color, heavy: true, pxPerUnit: stemPx, into: &overlay) }
           return
         }
-        guard let c = try rvs.curve(shade.rv, env) else { return }
+        guard let c = try rvs.curve(shade.rv, env, view: view) else { return }
         let lo = try shade.bounds.lo.map { try evaluate($0, env) }
         let hi = try shade.bounds.hi.map { try evaluate($0, env) }
         if let poly = c.shadePolygon(lo: lo, hi: hi) {
@@ -98,7 +103,7 @@ extension Graph2D {
       case .expect(let rv):
         // The value lives in the row's readout; the plot is a vertical
         // marker at x = E under the variable's density.
-        guard let mark = try rvs.markerHeight(rv, env) else { return }
+        guard let mark = try rvs.markerHeight(rv, env, view: view) else { return }
         if mark.h > 0 { overlay.polylines.append(.init(pts: [mark.x, 0, mark.x, mark.h], color: css, width: 2)) }
         overlay.points.append(.init(x: mark.x, y: mark.h, color: css, r: 4))
       default:
