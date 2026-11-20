@@ -65,4 +65,7 @@ export const SURFACE_CASES: string[] = [
   // tube(…) inside a definition: kept, and drawn by the row that reads it.
   'T = tube((cos(2pi u), sin(2pi u), u), 0.2); T; k(r) = tube((u, u^2, u^3), r); k(0.1); k(0.3) + 1; y = k(1)',
   'c(s) = (cos(s), sin(s), s/4); f(a) = tube(c(2pi u), a); f(0.2); g = tube((u, 0, 1)) + 1; g; h = revolve(sqrt(x)); h; (1, tube((u, u, u)))',
+  // Curve and surface operators beside intervals, which the operands read.
+  'u = interval(0, 2pi); c(q) = (cos(q), sin(q)); curvature(c); curvature(c, 1); osculating(c, 1); S(a, b) = (a, b, a b); gaussian(S); gaussian(S, 1, 1)',
+  's = interval(0, 3); C = (s, s^2); curvature(C); curvature(C, 1); frame((s, sin(s)), 1); v = interval(0, 1); T = (u, v, u v); gaussian(T, 0.5, 0.5)',
 ];

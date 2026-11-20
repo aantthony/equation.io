@@ -139,6 +139,8 @@ extension Resolver {
   private func curveOperand(_ name: String, _ arg: Expr) throws -> [Expr] {
     let usage =
       "\(name) takes a parametric curve in u, like \(curveOpExample[name]!) with C = (cos(2pi u), sin(2pi u))."
+    // Port: a curve over u's own interval is read at that interval's values.
+    if opts.interval("u") != nil { throw Unsupported("interval(…)") }
     var r = arg
     if case .var(let fname) = arg, let fn = try getFn(fname) {
       if fn.params.count != 1 || fn.recursive { throw LanguageError(usage) }
@@ -147,6 +149,8 @@ extension Resolver {
     r = try lowerGeom(r, comps: opts.comps, isList: opts.isList)
     // (A named field over x, y or z is written out too, to be refused.)
     r = throughFields(r, over: ["u", "x", "y", "z"])
+    // Port: nor is the one interval of a curve without u put back for u.
+    if !intervalsIn(r).isEmpty { throw Unsupported("interval(…)") }
     if case .var = r, case .var(let n) = arg {
       let what = opts.consts(n) != nil ? "a number" : opts.isList(n) ? "a list" : nil
       if let what { throw LanguageError("\(name): \(n) is \(what), not a curve in u. \(usage)") }

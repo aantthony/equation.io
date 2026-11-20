@@ -57,6 +57,8 @@ extension Resolver {
   /// parameters, called at u and v (`surfaceOperand`).
   private func surfaceOperand(_ name: String, _ arg: Expr) throws -> [Expr] {
     let usage = "\(name) takes a parametric surface in u and v, like \(name)(S) with S = (u, v, u^2 - v^2)."
+    // Port: a surface over the intervals of u and v is read at their values.
+    if opts.interval("u") != nil || opts.interval("v") != nil { throw Unsupported("interval(…)") }
     var r = arg
     if case .var(let fname) = arg, let fn = try getFn(fname) {
       if fn.params.count != 2 { throw LanguageError(usage) }
