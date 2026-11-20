@@ -309,7 +309,7 @@ final class SequenceResolver {
   private func chained(_ name: String, _ i: Int) -> String { "\(prefix)_\(name)_\(i)" }
 
   private func parse(_ scan: SeqScan) throws -> Expr {
-    try parseExpr(scan.rhs, userFns: fnNames(), listNames: allIndexNames())
+    try parseExpr(scan.rhs, userFns: fnNames(), listNames: allIndexNames(), valueNames: opts.valueNames)
   }
 
   /// What parses as an index in a sequence's row: its tuples and lists
@@ -577,7 +577,8 @@ func classifySeqRec(
   opts.openVars.insert(index)
   let openVars = opts.openVars
   let source = try parseExpr(
-    scan.rhs, userFns: fnNames, listNames: indexNames.union(resolver.sequences.keys.map { $0 + "_" }))
+    scan.rhs, userFns: fnNames, listNames: indexNames.union(resolver.sequences.keys.map { $0 + "_" }),
+    valueNames: ropts.valueNames)
   // A recurrence's own a_n (a_{n}, a_(n)) is its previous term, the variable
   // the map steps: not a lookup into the terms it is defining.
   let recVar = "\(name)_\(index)"
@@ -643,14 +644,14 @@ func classifySeqRec(
     if bifurcation {
       throw LanguageError("A recurrence that reads \(index) or a tuple draws its terms; it cannot also take x.")
     }
-    for v in vars { throw LanguageError("Unknown variable: \(v). Define \"\(v) = 1\" to make a slider.") }
+    for v in vars { throw LanguageError(unknownVariable(v)) }
     guard let term = try lookup?("\(name)_", .var(index), openVars) else {
       throw LanguageError("Recurrence \(name) needs the rest of the document to compute its terms.")
     }
     if let a0Name { params.append(a0Name) }
     return done(.sequence(term: term, index: index))
   }
-  for v in vars { throw LanguageError("Unknown variable: \(v). Define \"\(v) = 1\" to make a slider.") }
+  for v in vars { throw LanguageError(unknownVariable(v)) }
   if let a0Name { params.append(a0Name) }
   return done(
     bifurcation

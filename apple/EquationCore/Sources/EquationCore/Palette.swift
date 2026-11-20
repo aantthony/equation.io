@@ -28,8 +28,6 @@ public let darkPalette: [SIMD3<Float>] = [
 public enum ColorPlan: Equatable, Sendable {
   /// A row that only says something (`e = 2` is a false claim, and says so).
   case note
-  /// A panel's metric row.
-  case metric
   /// A value row shows only its readout, unless it shades a region (an integral's area).
   case value(shade: Bool)
   /// Any plan that draws.
@@ -74,7 +72,7 @@ public func takesColor(_ row: ColorRow) -> Bool {
   let blank = row.text.utf16.allSatisfy(isJSWhitespace)
   if blank || row.comment || (row.def && !row.point) || row.view || noteColor(row.text) != nil { return false }
   switch row.plan {
-  case .note, .metric, .value(shade: false): return false
+  case .note, .value(shade: false): return false
   default: return true
   }
 }

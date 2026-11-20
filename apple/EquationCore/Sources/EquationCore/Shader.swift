@@ -251,11 +251,11 @@ private struct FourierLoop {
   }
 }
 
-/// Recognize the ordinary gated sine/cosine sum emitted by reconstruction
-/// (lib/glsl.ts `fourierLoop`). Keep that AST for CPU evaluation,
-/// substitution and differentiation; only its shader spelling becomes a
-/// coefficient table and a runtime loop.
-private func fourierLoop(_ e: Expr) throws(ShaderError) -> FourierLoop? {
+/// The constant, per-harmonic (gate, rate, cos, sin) rows, position and
+/// count of a gated sine/cosine sum fourierLoop can loop over, or nil
+/// (lib/glsl.ts `fourierSeries`). Pure, so the resolver can ask before
+/// choosing to gate a Σ (Sums.swift `sliderGated`).
+func fourierSeries(_ e: Expr) -> (base: Double, table: [[Double]], position: Expr, count: Expr)? {
   guard case .bin(.add, _, .piecewise, _) = e else { return nil }
   var terms: [Expr] = []
   var base = e
@@ -272,7 +272,7 @@ private func fourierLoop(_ e: Expr) throws(ShaderError) -> FourierLoop? {
   var count: Expr?
   var position: Expr?
   var last = 0.0
-  var table: [Float] = []
+  var table: [[Double]] = []
   for term in terms {
     guard case .piecewise(let cases, .num(0)?) = term, cases.count == 1,
       case .ineq(.ge, let gate, .num(let harmonic), _) = cases[0].cond,
@@ -288,11 +288,24 @@ private func fourierLoop(_ e: Expr) throws(ShaderError) -> FourierLoop? {
     var cosine = 0.0
     var sine = 0.0
     for var component in components {
+      // a·sin(…), sin(…)/b and −sin(…), as a reconstruction or a written Σ
+      // (sin((2k-1)x)/(2k-1)) spells a harmonic's coefficient.
       var coefficient = 1.0
-      if case .bin(.mul, .num(let c), let rest, _) = component {
-        coefficient = c
-        component = rest
+      while true {
+        if case .bin(.mul, .num(let c), let rest, _) = component {
+          coefficient *= c
+          component = rest
+        } else if case .bin(.div, let rest, .num(let c), _) = component {
+          coefficient /= c
+          component = rest
+        } else if case .neg(let rest) = component {
+          coefficient = -coefficient
+          component = rest
+        } else {
+          break
+        }
       }
+      if !coefficient.isFinite { return nil }
       guard case .call(let fn, let args) = component, fn == "cos" || fn == "sin", args.count == 1 else { return nil }
       var angle = args[0]
       var rate = 1.0
@@ -306,9 +319,20 @@ private func fourierLoop(_ e: Expr) throws(ShaderError) -> FourierLoop? {
       position = angle
       if fn == "cos" { cosine += coefficient } else { sine += coefficient }
     }
-    // A NaN is the one JavaScript makes, so the table's bytes — and the name — agree.
-    table += [last, frequency!, cosine, sine].map { $0.isNaN ? Float.nan : Float($0) }
+    table.append([last, frequency!, cosine, sine])
   }
+  return (offset, table, position!, count!)
+}
+
+/// Recognize the ordinary gated sine/cosine sum emitted by reconstruction
+/// (lib/glsl.ts `fourierLoop`). Keep that AST for CPU evaluation,
+/// substitution and differentiation; only its shader spelling becomes a
+/// coefficient table and a runtime loop.
+private func fourierLoop(_ e: Expr) throws(ShaderError) -> FourierLoop? {
+  guard let series = fourierSeries(e) else { return nil }
+  let (offset, position, count) = (series.base, series.position, series.count)
+  // A NaN is the one JavaScript makes, so the table's bytes — and the name — agree.
+  let table = series.table.flatMap { $0.map { $0.isNaN ? Float.nan : Float($0) } }
   // (value, slope, lower, upper): the series and its derivative at the
   // position, and the band it stays in within `reach` of it. Each harmonic
   // moves at most its amplitude times its rate times the reach, and never
@@ -338,7 +362,7 @@ private func fourierLoop(_ e: Expr) throws(ShaderError) -> FourierLoop? {
     }
     """,
     table: table)
-  return FourierLoop(name: name, position: position!, count: count!)
+  return FourierLoop(name: name, position: position, count: count)
 }
 
 /// Only a complete series at an affine position with a spatially constant
@@ -354,16 +378,60 @@ private func fourierLoop(_ e: Expr) throws(ShaderError) -> FourierLoop? {
 public func fourierGraphGLSL(
   _ e: Expr, differentiate: (Expr, String) throws -> Expr = { e, v in try diff(e, v) }
 ) throws(ShaderError) -> (glsl: String, slopeScale: Double)? {
-  guard let loop = try fourierLoop(e) else { return nil }
-  if freeVars(loop.count).contains("x") { return nil }
   do {
+    let (inner, scale, offset) = try affineOf(e)
+    if !scale.isFinite || !offset.isFinite || scale == 0 { return nil }
+    guard let loop = try fourierLoop(inner) else { return nil }
+    if freeVars(loop.count).contains("x") { return nil }
     if case .num(let slope) = try differentiate(loop.position, "x"), slope.isFinite {
-      return (try loop.call("\(try fmt(abs(slope))) * reach"), slope)
+      var glsl = try loop.call("\(try fmt(abs(slope))) * reach")
+      if scale != 1 || offset != 0 {
+        // c·series + o: the value and slope scale, and so does the band, its
+        // ends trading places when c < 0.
+        let band = scale > 0 ? "s.zw" : "s.wz"
+        let (c, o) = (try fmt(scale), try fmt(offset))
+        let helper = declareHelper(
+          "vec4 \(helperSelf)(vec4 s) { return vec4(\(c) * s.x + \(o), \(c) * s.y, \(c) * \(band) + \(o)); }")
+        glsl = "\(helper)(\(glsl))"
+      }
+      return (glsl, slope)
     }
   } catch {
-    // A discontinuous or nonlinear position uses the general curve shader.
+    // A discontinuous or nonlinear position, or a constant factor evaluate()
+    // cannot reduce, uses the general curve shader.
   }
   return nil
+}
+
+/// `e` as scale·inner + offset, peeling numeric factors, divisors, negation
+/// and added constants off the outside ((4/pi)·Σ…, 1 − Σ…) (`affineOf`).
+private func affineOf(_ e: Expr) throws -> (inner: Expr, scale: Double, offset: Double) {
+  func isConstant(_ e: Expr) -> Bool { freeVars(e).isEmpty }
+  var e = e
+  var scale = 1.0
+  var offset = 0.0
+  while true {
+    if case .neg(let a) = e {
+      scale = -scale
+      e = a
+    } else if case .bin(let op, let a, let b, _) = e, op == .mul || op == .div, isConstant(b) {
+      let c = try evaluate(b, [:])
+      scale *= op == .mul ? c : 1 / c
+      e = a
+    } else if case .bin(.mul, let a, let b, _) = e, isConstant(a) {
+      scale *= try evaluate(a, [:])
+      e = b
+    } else if case .bin(let op, let a, let b, _) = e, op == .add || op == .sub, isConstant(b), !isConstant(a) {
+      offset += scale * (try evaluate(b, [:])) * (op == .add ? 1 : -1)
+      e = a
+    } else if case .bin(let op, let a, let b, _) = e, op == .add || op == .sub, isConstant(a), !isConstant(b) {
+      offset += scale * (try evaluate(a, [:]))
+      if op == .sub { scale = -scale }
+      e = b
+    } else {
+      return (e, scale, offset)
+    }
+  }
 }
 
 /// The GLSL identifier for the uniform carrying the constant `p` (lib/glsl.ts

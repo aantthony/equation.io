@@ -152,10 +152,13 @@ public func writeSlider(_ rhs: String, _ form: SliderForm, _ value: String) -> S
 
 /// The range's ends at these values, or nil when either end is not a number
 /// or they are out of order.
-public func sliderBounds(_ form: SliderForm, _ env: [String: Double], userFns: Set<String> = []) -> (Double, Double)? {
+/// `valueNames` are the document's shadowed names: a bound may read a redefined `pi`.
+public func sliderBounds(
+  _ form: SliderForm, _ env: [String: Double], userFns: Set<String> = [], valueNames: Set<String> = []
+) -> (Double, Double)? {
   guard let bounds = form.bounds else { return nil }
-  guard let lo = try? evaluate(try parseExpr(bounds.lo, userFns: userFns), env),
-    let hi = try? evaluate(try parseExpr(bounds.hi, userFns: userFns), env)
+  guard let lo = try? evaluate(try parseExpr(bounds.lo, userFns: userFns, valueNames: valueNames), env),
+    let hi = try? evaluate(try parseExpr(bounds.hi, userFns: userFns, valueNames: valueNames), env)
   else { return nil }
   return lo.isFinite && hi.isFinite && lo < hi ? (lo, hi) : nil
 }

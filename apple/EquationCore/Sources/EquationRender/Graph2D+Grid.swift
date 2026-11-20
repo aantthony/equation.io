@@ -1,7 +1,7 @@
 import EquationCore
 import Foundation
 
-// Coordinate grids (lib/grid.ts), as web/main.ts draws them behind a panel:
+// Coordinate grids (lib/grid.ts), as web/scene.ts draws them behind a panel:
 // the level sets of the coordinate fields defined among the panel's rows
 // (`r = sqrt(x^2 + y^2)`, `theta = atan2(y, x)`), or of those its
 // `grid(r, theta)` row names (`panelGridFields`), spaced by the size of
@@ -17,7 +17,7 @@ extension Graph2D {
 
   /// Which grid families draw behind the panel: those its grid(…) row names,
   /// or else the coordinate fields defined among its rows. Empty is
-  /// Cartesian (web/main.ts `panelGridFields`, without a plane map).
+  /// Cartesian (web/scene.ts `panelGridFields`, without a plane map).
   var gridFamilies: [GridFamily] {
     if let coords = gridCoords {
       // grid(x, y) is the plain grid.
@@ -43,7 +43,7 @@ extension Graph2D {
 
   /// Spacing for any level-set family (custom grids, contour stacks): |∇c|
   /// is sampled around the view to convert the target pixel gap into
-  /// coordinate units (π-based for angles) (web/main.ts `levelSpacing`).
+  /// coordinate units (π-based for angles) (web/scene.ts `levelSpacing`).
   func levelSpacing(
     _ f: CpuGrid, view: View2D, width: Double, height: Double, env: [String: Double]
   ) -> (major: Double, minor: Double) {

@@ -74,14 +74,48 @@ func nameable(_ n: String) -> Bool {
   (!functions.contains(n) || shadowableFunctions.contains(n)) && !reservedNames.contains(n) && !n.hasPrefix("u_")
 }
 
-/// Of the names a document binds as values, the ones a late-addition builtin
-/// would otherwise claim (`shadowedFnNames`).
-func shadowedFnNames<S: Sequence>(_ names: S) -> Set<String> where S.Element == String {
+/// Of the names a document binds as values, the ones the language would
+/// otherwise claim (`shadowedNames`): what parseExpr needs to keep
+/// `total = 3` followed by `total(x + 1)` a product, and to read `e` after
+/// `e := 0.6` (or in the body of `f(e) := …`) as that e.
+func shadowedNames<S: Sequence>(_ names: S) -> Set<String> where S.Element == String {
   var out: Set<String> = []
   for n in names {
+    // A redefined built-in (`e := 0.6`, or a parameter named e) is bound by
+    // its alias; every row of its scope reads the written name as that alias.
+    if n != writtenName(n) { out.insert(writtenName(n)) }
     if let b = builtinFn(n), shadowableFunctions.contains(b) { out.insert(b) }
   }
   return out
+}
+
+/// A row written `name := …` (or `f(x) := …`, `a' := …`): explicitly a definition.
+func isExplicitDefinition(_ text: String) -> Bool { explicitAssignment(Array(text.utf16)) != nil }
+
+/// The row with its `:=` read as `=`, for the scanners that match a row's
+/// shape (definitions, data files, random variables) — the same row either way.
+func asAssignment(_ text: Units) -> Units {
+  guard let at = explicitAssignment(text) else { return text }
+  return Array(text[..<at.lowerBound]) + [unit("=")] + Array(text[at.upperBound...])
+}
+
+func asAssignment(_ text: String) -> String {
+  let u = Array(text.utf16)
+  guard let at = explicitAssignment(u) else { return text }
+  return String(Array(u[..<at.lowerBound]) + [unit("=")] + Array(u[at.upperBound...]))
+}
+
+/// A written name as a definition binds it: a redefined built-in (or
+/// parameter) by its alias, so it reads as what parses there (`redefinable`).
+private func bindable(_ name: String) -> String { redefinable.contains(name) ? reboundName(name) : name }
+
+/// A definition row's left side and assignment as the row wrote them, for
+/// writing it back (`e :=`, `a(0) =`): a slider or drag keeps `:=` and the
+/// written name, never the alias (`definitionHead`).
+public func definitionHead(_ definition: Definition, _ text: String) -> String {
+  var initial = false
+  if case .initial = definition { initial = true }
+  return "\(writtenName(definition.name))\(initial ? "(0)" : "") \(isExplicitDefinition(text) ? ":=" : "=")"
 }
 
 /// Component names a named point expands to: A_x, A_y(, A_z).
@@ -269,7 +303,7 @@ private func scanOpen(_ text: Units) -> (name: String, wellFormed: Bool)? {
 /// The name of a row that means to open a file, whether or not it succeeds
 /// at saying so: `^\s*(NAME)\s*=\s*open\s*\(\s*["']`.
 func scanOpenHead(_ text: String) -> String? {
-  scanOpen(Array(text.utf16))?.name
+  scanOpen(asAssignment(Array(text.utf16)))?.name
 }
 
 /// A subscript written in braces, as a recurrence row is: `a_{0} = 1`
@@ -331,7 +365,12 @@ private func mentionsIntervalCall(_ rhs: String) -> Bool {
 
 /// Detect a definition row before parsing (so calls to it parse everywhere).
 public func scanDefinition(_ source: String) -> Definition? {
-  let text = unbraceTerm(Array(source.utf16))
+  // `a := …` says outright what `a = …` leaves to the name: this is a
+  // definition, so it may claim e, i, w, pi or t too.
+  let units = Array(source.utf16)
+  let explicit = explicitAssignment(units) != nil
+  func claimable(_ n: String) -> Bool { nameable(n) || (explicit && redefinable.contains(n)) }
+  let text = unbraceTerm(explicit ? asAssignment(units) : units)
   // Primes first: `a' = …` is a state, but the reserved coordinate names keep
   // their ODE meaning, so `y' = x - y` stays a slope field.
   var s = RowScanner(text)
@@ -339,7 +378,7 @@ public func scanDefinition(_ source: String) -> Definition? {
   if let written = s.name(), s.eat("'") {
     s.space()
     let name = canonicalName(written)
-    if let rhs = s.assignment(), nameable(name) { return .state(name: name, rhs: rhs) }
+    if let rhs = s.assignment(), claimable(name) { return .state(name: bindable(name), rhs: rhs) }
   }
   s = RowScanner(text)
   s.space()
@@ -352,7 +391,7 @@ public func scanDefinition(_ source: String) -> Definition? {
         if s.eat(")") {
           s.space()
           let name = canonicalName(written)
-          if let rhs = s.assignment(), nameable(name) { return .initial(name: name, rhs: rhs) }
+          if let rhs = s.assignment(), claimable(name) { return .initial(name: bindable(name), rhs: rhs) }
         }
       }
     }
@@ -362,29 +401,34 @@ public func scanDefinition(_ source: String) -> Definition? {
   // a constant either: its own row explains what is wrong with it.
   if let open = scanOpen(text) {
     let name = canonicalName(open.name)
-    return open.wellFormed && nameable(name) ? .table(name: name) : nil
+    return open.wellFormed && claimable(name) ? .table(name: bindable(name)) : nil
   }
+  // Only as a value: the parser reads `e(2)` as e · 2 wherever e is not the
+  // document's value, so `e(x) := …` would define a function no row calls.
   if let m = scanFn(text), nameable(canonicalName(m.name)) {
-    return .function(name: canonicalName(m.name), params: m.params.map(canonicalName), rhs: m.rhs)
+    return .function(
+      name: canonicalName(m.name), params: m.params.map { bindable(canonicalName($0)) }, rhs: m.rhs)
   }
   if let m = scanConst(text) {
     let name = canonicalName(m.name)
-    if nameable(name) { return .constant(name: name, rhs: m.rhs) }
+    if claimable(name) { return .constant(name: bindable(name), rhs: m.rhs) }
     // `u = interval(0, 2pi)` sets the range u runs over, (0, 1) by default.
     if name == "u" || name == "v", mentionsIntervalCall(m.rhs) { return .constant(name: name, rhs: m.rhs) }
   }
-  if let m = scanDraw(text), nameable(canonicalName(m.name)) {
-    return .constant(name: canonicalName(m.name), rhs: m.rhs, draw: true)
+  if let m = scanDraw(text), claimable(canonicalName(m.name)) {
+    return .constant(name: bindable(canonicalName(m.name)), rhs: m.rhs, draw: true)
   }
   return nil
 }
 
 /// Why a row that reads as a binder, `p ∈ A`, binds no name: the name is the
 /// language's. Nil when it is not such a row.
-func takenBinder(_ text: String) -> String? {
+func takenBinder(_ text: String, _ valueNames: Set<String> = []) -> String? {
   guard let m = scanDraw(Array(text.utf16)) else { return nil }
   let n = canonicalName(m.name)
   if nameable(n) { return nil }
+  // After `i := 3`, i is the document's, defined once already.
+  if redefinable.contains(n) && valueNames.contains(n) { return "\(n) is already defined." }
   let why =
     n.hasPrefix("u_")
     ? "names starting u_ are"
@@ -404,8 +448,96 @@ func takenDefinitionName(_ text: String) -> String? {
 /// Why a name from takenDefinitionName (other than `d`) names no value.
 func takenNameHint(_ name: String) -> String {
   name == "i"
-    ? "i is the imaginary unit; name it something else, like k"
-    : "\(name) is a constant; name a slider something else"
+    ? "i is the imaginary unit; name it something else, like k (i := … replaces it across the whole graph)"
+    : "\(name) is a constant; name a slider something else, like k (\(name) := … replaces \(name) across the "
+      + "whole graph)"
+}
+
+/// What each reserved name is, where a row tried to call or redefine it (`RESERVED_FN_MEANING`).
+private let reservedFnMeaning: [String: String] = [
+  "x": "a plot axis", "y": "a plot axis", "z": "a plot axis", "t": "animation time",
+  "u": "a curve/surface parameter", "v": "a curve/surface parameter, like u",
+  "w": "the complex variable x + iy",
+]
+
+/// The arguments of a row shaped like a function definition, as written:
+/// FN_RE's second group, from the first parameter to the last.
+private func scanFnArgs(_ text: Units) -> (name: String, args: String)? {
+  var s = RowScanner(text)
+  s.space()
+  guard let name = s.name() else { return nil }
+  s.space()
+  guard s.eat("(") else { return nil }
+  s.space()
+  let start = s.i
+  guard s.name() != nil else { return nil }
+  var end = s.i
+  while true {
+    let mark = s.i
+    s.space()
+    guard s.eat(",") else {
+      s.i = mark
+      break
+    }
+    s.space()
+    guard s.name() != nil else { return nil }
+    end = s.i
+  }
+  s.space()
+  guard s.eat(")") else { return nil }
+  s.space()
+  guard s.assignment() != nil else { return nil }
+  return (name, String(text[start..<end]))
+}
+
+/// Why a row that failed and is shaped like a function definition on a
+/// reserved name is no definition: `u(x, y) = …` reads as u times a point
+/// (`reservedFnHint`). Nil for any other row.
+func reservedFnHint(_ text: String) -> String? {
+  guard let m = scanFnArgs(Array(text.utf16)) else { return nil }
+  let n = canonicalName(m.name)
+  guard let meaning = reservedFnMeaning[n] else { return nil }
+  return "\(n)(\(m.args)) reads as \(n) times (\(m.args)), since \(n) is \(meaning). To define a function, use "
+    + "another name, like f(\(m.args)) = …"
+}
+
+/// Why a `:=` row defines nothing: it claims a name the language keeps even
+/// from an explicit definition (`redefinable` says which it gives up), or its
+/// left side names nothing (`explicitDefinitionError`). Nil for a row that
+/// is no `:=`, or defines.
+func explicitDefinitionError(_ text: String) -> String? {
+  let units = Array(text.utf16)
+  guard explicitAssignment(units) != nil, scanDefinition(text) == nil else { return nil }
+  let row = asAssignment(units)
+  // (A row that means to open a file and does not say so explains itself: `badTableRow`.)
+  if scanOpen(row) != nil { return nil }
+  let fn = scanFn(row)
+  var written = fn?.name ?? scanConst(row)?.name
+  if written == nil {
+    // STATE_RE: `a' = …`.
+    var s = RowScanner(row)
+    s.space()
+    if let name = s.name(), s.eat("'") {
+      s.space()
+      if s.assignment() != nil { written = name }
+    }
+  }
+  guard let written else { return "The left side of := names what it defines, like a := 2 or f(x) := x^2." }
+  let n = canonicalName(written)
+  if fn != nil && redefinable.contains(n) { return "\(n) can be redefined as a value, not a function." }
+  let why =
+    n == "d"
+    ? "d starts derivatives (d/dx)"
+    : reservedFnMeaning[n].map { "\(n) is \($0)" }
+      ?? (n.hasPrefix("u_") ? "names starting u_ are kept for sliders" : "\(n) is a built-in function")
+  if n == "u" || n == "v" {
+    return "\(n) is \(reservedFnMeaning[n]!), so it is redefined as the interval it runs over, like "
+      + "\(n) := interval(0, 2pi)."
+  }
+  let params =
+    ["x", "y", "z"].contains(n)
+    ? " A function's parameters may still be called \(n), like f(\(n)) := \(n)^2." : ""
+  return "\(n) cannot be redefined: \(why).\(params)"
 }
 
 // MARK: - Building
@@ -491,7 +623,7 @@ func buildDefs(_ raw: [Definition], skip: Set<String>, sequences: [SeqScan] = []
   let fnNames = Set(raw.compactMap { if case .function(let name, _, _) = $0 { name } else { nil } })
   // Names this document binds as values shadow a late-addition builtin of
   // the same name, so `total = 3` still reads `total(x + 1)` as a product.
-  let valueNames = shadowedFnNames(raw.filter { $0.kind != "fn" }.map(\.name))
+  let valueNames = shadowedNames(raw.filter { $0.kind != "fn" }.map(\.name))
   // Numeric values of constants resolved so far.
   var numEnv: [String: Double] = [:]
   var parsed: [String: Expr] = [:]
@@ -518,6 +650,7 @@ func buildDefs(_ raw: [Definition], skip: Set<String>, sequences: [SeqScan] = []
   }
   func options() -> ResolveOpts {
     var opts = ResolveOpts()
+    opts.valueNames = valueNames
     opts.inDefinition = true
     // Live: definitions above this one (a point's components included).
     // A state stands for itself: defined, and constant across space.
@@ -546,7 +679,7 @@ func buildDefs(_ raw: [Definition], skip: Set<String>, sequences: [SeqScan] = []
       .union(defs.lists.keys)
     if case .function(_, let params, _) = d {
       // A function's parameters are values in its body, and index too.
-      values.formUnion(shadowedFnNames(params))
+      values.formUnion(shadowedNames(params))
       names.formUnion(params)
     }
     let p = try parseExpr(d.rhs ?? "", userFns: fnNames, listNames: names, valueNames: values)

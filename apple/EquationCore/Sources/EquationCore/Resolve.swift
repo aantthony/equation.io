@@ -33,6 +33,9 @@ typealias GetFn = (String) throws -> FnDef?
 /// What resolution reads of the document (lib/defs.ts `ResolveOpts`), for
 /// the parts ported.
 struct ResolveOpts {
+  /// The document's shadowed names (`shadowedNames`), for every parse of its
+  /// rows' parts: `e` after `e := 2` reads as that e in a sequence too.
+  var valueNames: Set<String> = []
   /// Definition values cannot contain row-only forms.
   var inDefinition = false
   /// A piecewise case may test equality (a row not drawn over the plane).
@@ -375,7 +378,7 @@ struct Resolver {
       // The coordinates of point parameters the body reads, `p.x`, as the
       // argument's own (`coordParams`).
       for (key, value) in try coordParams(name, fn.body, Array(zip(fn.params, args))) { env[key] = value }
-      let inlined = substVars(freshLists(fn.body, replacing: Set(env.keys)), env)
+      let inlined = try expandClosedSums(substVars(freshLists(fn.body, replacing: Set(env.keys)), env))
       // The body's named conditions, now that its parameters are its
       // arguments and cannot capture their variables.
       return opts.params != nil ? inlined : writeConditions(inlined, namedCondition)

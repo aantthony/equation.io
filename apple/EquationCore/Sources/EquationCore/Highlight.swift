@@ -114,7 +114,9 @@ private func isDifferential(_ name: String) -> Bool {
   name == "d" || (name.utf16.count == 2 && name.hasPrefix("d") && coords.contains(String(name.dropFirst())))
 }
 
-private func nameClass(_ name: String, _ names: BoundNames, called: Bool) -> SpanClass? {
+private func nameClass(_ written: String, _ names: BoundNames, called: Bool) -> SpanClass? {
+  // A redefined built-in (`e := 0.6`) is the document's, under its alias (lib/env.ts `boundIn`).
+  let name = names.values.contains(reboundName(written)) ? reboundName(written) : written
   if names.functions.contains(name) { return .fn }
   if names.values.contains(name) { return .name }
   if let dot = name.firstIndex(of: "."), dot > name.startIndex {
@@ -337,6 +339,9 @@ private func scanBoundNames(_ texts: [[UInt16]], rows: Set<Int>, into names: ino
   let live = texts.map { !$0.isEmpty && $0[0] != 0x23 && !isViewportText(String($0)) }
   // lib/seq.ts scanSequences: a letter can be a sequence once. Beside
   // `a_n = 1/n`, a row like `a_k = 7` that never uses its k is the constant a_k.
+  // (The row-shape scanners read `a_n := …` as they read `=`: lib/analysis.ts prepareDocument.)
+  let written = texts
+  let texts = texts.map { asAssignment($0) }
   let scans = scanSequences(texts.map { String(decoding: $0, as: UTF16.self) })
   // lib/regression.ts declaredNames: names some row defines, by text alone.
   var declared = Set<String>()
@@ -372,7 +377,7 @@ private func scanBoundNames(_ texts: [[UInt16]], rows: Set<Int>, into names: ino
         continue
       }
     }
-    guard let def = scanDefinition(String(text)) else { continue }
+    guard let def = scanDefinition(String(written[k])) else { continue }
     // A tuple is a vector, and a vector owns its components: A_x, A_y for
     // a point, r_1, r_2 for a state (lib/geom.ts pointComps, vecStateComps).
     let dim = def.rhs.map { tupleLength(Array($0.utf16)) } ?? 0

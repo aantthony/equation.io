@@ -6,8 +6,8 @@
 /// `paintedSurface`).
 ///
 /// Not ported: a surface over intervals (`u = interval(0, 2pi)`), the
-/// surface of a panel's on(…) row and a panel's metric (`gaussian(x, y)`),
-/// geodesics, and the rest of lib/surface-geometry.ts.
+/// surface of a panel's on(…) row (`gaussian(x, y)`), geodesics, and the
+/// rest of lib/surface-geometry.ts.
 
 /// `[paint](S, f)`: the surface S coloured by f, a scalar in the same u and
 /// v — gaussian(S) alone on a row, which classify unwraps (lib/geom.ts).
@@ -95,7 +95,7 @@ extension Resolver {
 
   /// gaussian(S) and meancurvature(S): K and H of the surface, functions of
   /// u and v, or read at a point of it, gaussian(S, u0, v0)
-  /// (`surfaceGeometry`, for a panel with neither a surface nor a metric).
+  /// (`surfaceGeometry`, for a panel with no surface).
   func surfaceGeometry(_ name: String, _ args: [Expr]) throws -> Expr {
     let example = "\(name)(S) or \(name)(S, 0.5, 0.25)"
     if args.isEmpty || args.count > 3 {
@@ -113,8 +113,8 @@ extension Resolver {
     }
     if pointOnly {
       throw LanguageError(
-        "\(name)(x, y) reads the surface of its panel's on(…) row, or its metric (a ds^2 row), and this panel "
-          + "has neither: write \(name)(S) with S = (u, v, u^2 - v^2).")
+        "\(name)(x, y) reads the surface of its panel's on(…) row, and this panel has none: write \(name)(S) "
+          + "with S = (u, v, u^2 - v^2).")
     }
     let r = try surfaceOperand(name, args[0])
     let point = args.count > 1 ? try pointArgs(name, Array(args.dropFirst()), example) : nil
@@ -154,4 +154,38 @@ func paintedSurface(_ args: [Expr], defined: Set<String>, fields: [String: Expr]
   return Classified(
     object: .surfaceParametric(coordinates: coordinates, paint: paint),
     animated: cls.animated || vars.contains("t"), needs3D: cls.needs3D, params: jsSorted(params))
+}
+
+private let GEODESIC_USAGE =
+  "geodesic takes a surface, where to start on it and which way: geodesic(S, (0.5, 0.5), (1, 0)) with "
+  + "S = (u, v, u^2 - v^2), and optionally how far, geodesic(S, P, (1, 0), 4)."
+
+/// A geodesic row: geodesic(S, (u0, v0), (du, dv)[, L]), or on a panel drawn
+/// on a surface geodesic((x0, y0), (dx, dy)[, L]) (lib/analysis.ts
+/// `classifyGeodesic`). What the site refuses is refused in its words; a
+/// geodesic it would trace is not ported.
+func classifyGeodesic(_ args: [Expr], onSurface: Bool, surfaceOperand: (Expr) throws -> Void) throws -> Never {
+  var operand = false
+  var failure: Error?
+  if args.count >= 3 {
+    do {
+      try surfaceOperand(args[0])
+      operand = true
+    } catch let error as Unsupported {
+      throw error
+    } catch {
+      failure = error
+    }
+  }
+  let panelForm = !operand && (args.count == 2 || args.count == 3)
+  if !operand && !(panelForm && onSurface) {
+    if args.count == 2 {
+      throw LanguageError(
+        "geodesic(P, d) draws on its panel's surface (an on(…) row), and this panel has none. \(GEODESIC_USAGE)")
+    }
+    if let failure, args.count >= 3 { throw failure }
+    throw LanguageError(GEODESIC_USAGE)
+  }
+  if operand && args.count > 4 { throw LanguageError(GEODESIC_USAGE) }
+  throw Unsupported("geodesic(…)")
 }

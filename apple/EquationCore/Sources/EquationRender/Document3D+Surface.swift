@@ -3,12 +3,12 @@ import Foundation
 
 // A panel drawing its 2D rows on a surface (an on(…) row, the core's
 // SurfaceMap.swift): the surface first, then each 2D row painted on it or
-// carried onto it (web/main.ts `renderPanel`, where a panel has a surface).
+// carried onto it (web/scene.ts `renderPanel`, where a panel has a surface).
 //
 // Port: a vector field's arrows are worked out every frame; the site keeps
 // them until a value the field reads changes.
 
-/// A panel's surface as the shaders take it (web/main.ts `surfaceGLSL`),
+/// A panel's surface as the shaders take it (web/scene.ts `surfaceGLSL`),
 /// made once for the document.
 struct SurfaceMesh: Equatable, Sendable {
   var map: SurfaceMap
@@ -221,7 +221,7 @@ extension Document3D {
         env["\(name)_z"] == nil, x.isFinite, y.isFinite
       else { continue }
       let mark = SceneMark(scene)
-      scene.points.append(Scene3D.Point(pos: SIMD3(x, y, 0), color: color, label: name))
+      scene.points.append(Scene3D.Point(pos: SIMD3(x, y, 0), color: color, label: writtenName(name)))
       carryOntoSurface(&scene, since: mark, mesh.map, camera)
     }
   }

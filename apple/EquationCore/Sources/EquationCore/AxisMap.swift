@@ -127,13 +127,14 @@ private func hasSum(_ e: Expr) -> Bool {
 /// map is plain numbers from here on. `documentNames` are the names the
 /// document defines, which a bare function name may be one of.
 public func parseAxisMap(
-  _ axis: AxisMap.Axis, _ src: String, env: [String: Double] = [:], documentNames: Set<String> = []
+  _ axis: AxisMap.Axis, _ src: String, env: [String: Double] = [:], documentNames: Set<String> = [],
+  valueNames: Set<String> = []
 ) throws -> AxisMap {
   let screen = axis.screen
   let text = jsTrimmed(src)
   let usage =
     "An axis map writes \(axis.rawValue) in terms of the screen's \(screen), like \(axis.rawValue) = 10^\(screen)."
-  guard var forward = try? parseExpr(src) else { throw LanguageError(usage) }
+  guard var forward = try? parseExpr(src, valueNames: valueNames) else { throw LanguageError(usage) }
   if hasSum(forward) { throw Unsupported("sums in a view's map") }
   // A bare function name (`cos X`) would otherwise read as a name with no value (`expandMapSums`).
   for v in freeVars(forward).list where builtinFn(v) == v && env[v] == nil && !documentNames.contains(v) {

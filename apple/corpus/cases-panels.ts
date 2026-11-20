@@ -36,7 +36,7 @@ const text = (v: number) => (Number.isSafeInteger(v) ? v : String(v));
 
 /**
  * A document's state system as the site runs it: where each state starts,
- * where a run stepped frame by frame (60 a second, as web/main.ts
+ * where a run stepped frame by frame (60 a second, as web/session.ts
  * currentConstEnv steps it) has them after half a second and after two, and
  * each orbit row's polyline, thinned to a few of its points (lib/orbit.ts).
  */

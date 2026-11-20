@@ -30,7 +30,7 @@ public enum Graph {
 }
 
 /// From what the language makes of a document (EquationCore `analyze`) to
-/// what the 3D renderer draws: web/main.ts `renderPanel` for a panel in
+/// what the 3D renderer draws: web/scene.ts `renderPanel` for a panel in
 /// space, between a row's plans and the renderer's `Scene3D`. `Graph2D`'s
 /// counterpart; the app and metal-shot both draw through here.
 ///
@@ -135,7 +135,7 @@ public struct Document3D: Equatable, Sendable {
       guard row.error == nil, row.unsupported == nil, let cpu = row.cpu, index < colors.count,
         let color = colors[index]
       else { continue }
-      // A family draws member by member, each a shade lighter (web/main.ts `renderMembers`).
+      // A family draws member by member, each a shade lighter (web/scene.ts `renderMembers`).
       for (member, shade) in Graph2D.familyMembers(row, cpu, color) {
         if let surface,
           drawOnSurface(surface, member.cpu!, member, index, shade, env, time, camera, into: &scene)
@@ -158,7 +158,7 @@ public struct Document3D: Equatable, Sendable {
     // (A family member's index into the program its family shares.)
     let uniforms = Graph2D.shaderUniforms(row.gpu)
     // The box the solvers search: the camera's, padded a quarter each way so
-    // small pans and zooms stay inside it (web/main.ts solveFor).
+    // small pans and zooms stay inside it (web/scene.ts solveFor).
     let target = [camera.target.x, camera.target.y, camera.target.z]
     let view = TraceCache.Box(lo: target.map { $0 - cameraBoxR(camera) }, hi: target.map { $0 + cameraBoxR(camera) })
     let r = cameraBoxR(camera) * 1.5
@@ -251,7 +251,8 @@ public struct Document3D: Equatable, Sendable {
       // A named point (`A = (1, 2, 3)`) is drawn with its name.
       scene.points.append(
         Scene3D.Point(
-          pos: SIMD3(p[0], p[1], p.count > 2 ? p[2] : 0), color: color, label: row.definition?.name, group: index))
+          pos: SIMD3(p[0], p[1], p.count > 2 ? p[2] : 0), color: color,
+          label: (row.definition?.name).map(writtenName), group: index))
     case .label(_, let coords, let text):
       let p = coords.map { value($0, env) }
       guard p.count >= 2, p.allSatisfy(\.isFinite) else { break }
@@ -340,13 +341,13 @@ public struct Document3D: Equatable, Sendable {
       }
     default:
       // 2D-only plots (regions, planar fields, dot plots and bars) a 3D
-      // scene leaves out (web/main.ts SKIPPED_IN_3D), and readouts, which
+      // scene leaves out (web/scene.ts SKIPPED_IN_3D), and readouts, which
       // draw nothing.
       break
     }
   }
 
-  /// A curve's samples as flat xyz floats, u from 0 to 1 (web/main.ts
+  /// A curve's samples as flat xyz floats, u from 0 to 1 (web/scene.ts
   /// `sampleSpaceCurve`): a sample the curve has no value at is a gap in the line.
   static func sample(_ comps: [Expr], _ env: [String: Double]) -> [Float] {
     var out = [Float](repeating: 0, count: curveSamples * 3)
@@ -391,7 +392,7 @@ final class TraceCache: @unchecked Sendable {
   }
 
   /// The paths kept under `key` while the box they were traced over still
-  /// holds `view` and is not more than six times as wide (web/main.ts
+  /// holds `view` and is not more than six times as wide (web/scene.ts
   /// solveFor's bargain); else `trace`'s, made over `box` and kept.
   func paths(_ key: String, view: Box, box: Box, _ trace: () -> [[[Double]]]) -> [[[Double]]] {
     lock.lock()

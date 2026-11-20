@@ -15,6 +15,7 @@
 import { createHash } from 'node:crypto';
 import { writeFileSync } from 'node:fs';
 import { analyzeRows } from '../../lib/analysis.ts';
+import { definitionHead } from '../../lib/defs.ts';
 import { diff } from '../../lib/diff.ts';
 import { type PmfStems, type RVSystem, markerHeight, shadePolygon } from '../../lib/dist.ts';
 import { runPaths, shadeNames, shadeRuns } from '../../lib/intshade.ts';
@@ -40,9 +41,10 @@ import { valueReadout } from '../../lib/plot.ts';
 import { fitRegression, formatFit } from '../../lib/regression.ts';
 import { rowKind } from '../../lib/row-kind.ts';
 import { sliderBounds, sliderForm, sliderValue, writeSlider } from '../../lib/slider.ts';
-import { keepNote, noteStart, splitStatements } from '../../lib/statements.ts';
+import { keepNote, noteStart, splitStatements, stripNote } from '../../lib/statements.ts';
 import { EXAMPLES } from '../../web/examples.ts';
 import { ALGEBRA_CASES } from './cases-algebra.ts';
+import { DEFINE_CASES } from './cases-define.ts';
 import { DISCRETE_CASES } from './cases-discrete.ts';
 import { FITS_CASES } from './cases-fits.ts';
 import { INTEGRAL_CASES } from './cases-integrals.ts';
@@ -115,7 +117,7 @@ function slim(plan: { type: string } | undefined): unknown {
   return text.length > 20_000 ? { type: plan.type, omitted: true } : plan;
 }
 
-/** What web/main.ts draws of a random variable's plan, from lib/dist.ts: a pmf's stems (the whole law, and
+/** What web/scene.ts draws of a random variable's plan, from lib/dist.ts: a pmf's stems (the whole law, and
  *  through a window), the stems or the polygon a P(…) row selects, a uniform sum's exact curve, and an E(…)
  *  row's marker. (A curve the site integrates or samples is left out: only its plan is recorded.) */
 function drawnOf(plan: { type: string } | undefined, rvs: RVSystem, constEnv: Record<string, number>): unknown {
@@ -1083,6 +1085,7 @@ FITS_CASES.forEach((text, k) => docs.push({ name: `case fits ${k + 1}`, rows: sp
 ALGEBRA_CASES.forEach((text, k) => docs.push({ name: `case algebra ${k + 1}`, rows: splitStatements(text) }));
 INTEGRAL_CASES.forEach((text, k) => docs.push({ name: `case integral ${k + 1}`, rows: splitStatements(text) }));
 SURFACE_CASES.forEach((text, k) => docs.push({ name: `case surfaces ${k + 1}`, rows: splitStatements(text) }));
+DEFINE_CASES.forEach((text, k) => docs.push({ name: `case define ${k + 1}`, rows: splitStatements(text) }));
 LEFTOVER_CASES.forEach((text, k) => docs.push({ name: `case leftover ${k + 1}`, rows: splitStatements(text) }));
 randomDocs(Number(process.env.RANDOM_DOCS ?? 600)).forEach((text, k) =>
   docs.push({ name: `case random ${k + 1}`, rows: splitStatements(text) }),
@@ -1110,7 +1113,7 @@ const recorded = docs.map(({ name, rows }) => {
         const rhs = def.rhs.trim();
         const form = sliderForm(rhs, fns);
         if (form) {
-          const bounds = sliderBounds(form, analysis.constEnv, fns);
+          const bounds = sliderBounds(form, analysis.constEnv, fns, analysis.document.valueNames);
           let value = form.literal;
           let lo: number, hi: number;
           if (bounds) {
@@ -1126,7 +1129,10 @@ const recorded = docs.map(({ name, rows }) => {
           // Where the slider lands when dragged to a third of the way along.
           const target = lo + (hi - lo) / 3;
           const held = sliderValue(form, target, bounds);
-          moved = keepNote(rows[i], `${def.name} = ${writeSlider(rhs, form, fmtNum(held))}`);
+          moved = keepNote(
+            rows[i],
+            `${definitionHead(def, stripNote(rows[i]))} ${writeSlider(rhs, form, fmtNum(held))}`,
+          );
         }
       }
       return {

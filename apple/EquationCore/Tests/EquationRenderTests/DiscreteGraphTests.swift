@@ -5,7 +5,7 @@ import Testing
 @testable import EquationRender
 
 /// What Graph2D makes of the discrete plans (Graph2D+Discrete.swift), held to
-/// what web/main.ts draws of the same rows.
+/// what web/scene.ts draws of the same rows.
 @Suite struct DiscreteGraph {
   private func graph(_ rows: [String]) -> Graph2D {
     let analysis = analyze(rows)

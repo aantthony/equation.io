@@ -12,7 +12,7 @@ extension Graph2D {
   private static let openStemPx = 40.0
 
   /// A run of a discrete variable's stems (or the run a P(…) row selects,
-  /// drawn `heavy`) as overlay geometry (web/main.ts `pushStems`). What to
+  /// drawn `heavy`) as overlay geometry (web/session.ts `pushStems`). What to
   /// draw is the language's (`stemGeometry`).
   private func pushStems(
     _ run: PmfStems, _ color: RGB, heavy: Bool, pxPerUnit: Double, into overlay: inout Overlay2D
@@ -38,7 +38,7 @@ extension Graph2D {
   /// a convolution is not run again (the site keeps them per variable, in
   /// its `RVSystem`). `window` is the part of the plane in view, whose
   /// stretch of the x-axis says which stems are drawn; `pointsPerUnit` how
-  /// far apart consecutive whole numbers stand on it (web/main.ts `stemPx`),
+  /// far apart consecutive whole numbers stand on it (web/scene.ts `stemPx`),
   /// which says how.
   func drawDistribution(
     _ plan: CpuPlan, row: Int, color: RGB, env: [String: Double], window: Bounds?, pointsPerUnit: Double?,

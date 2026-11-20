@@ -4,7 +4,8 @@
 /// Names in `userFns` parse as function calls (`f(x+1)`) instead of
 /// products; `listNames` index (`L[2]`) instead of multiplying; names in
 /// `valueNames` that a late-addition builtin would claim stay variables, so
-/// an older graph keeps the meaning it was shared with.
+/// an older graph keeps the meaning it was shared with; and a built-in name
+/// the document has redefined (`e := 0.6`, `redefinable`) reads as its alias.
 public func parseExpr(
   _ text: String,
   userFns: Set<String> = [],
@@ -83,6 +84,9 @@ struct ParseContext {
       return .popen(bracket: token.str, call: token.call)
     case .symbol:
       if token.str == emptyList { return .expr(.list([])) }
+      if redefinable.contains(token.str) && valueNames.contains(token.str) {
+        return .expr(.var(reboundName(token.str)))
+      }
       if let value = constants[token.str] { return .expr(.num(value)) }
       return .expr(.var(token.str))
     default:
@@ -105,6 +109,10 @@ struct ParseContext {
         throw ParseError("Mismatched brackets: \"\(bracket)\" closed by \"\(bracketClose[open]!)\".")
       }
       return try finish(open, a, call: call)
+    case .define:
+      // `a := 2` is a definition, which the definition scanner reads before
+      // any expression parse (explicitAssignment); one met here is somewhere else.
+      throw ParseError(":= defines a name, at the start of a row of its own, like a := 2.")
     case .equals:
       // Either side may be a tuple: (x', y') = (y, -sin(x)).
       if holdsConditions(a) || holdsConditions(b) { return .peq(a, b) }
@@ -418,7 +426,7 @@ private func shunting(_ tokens: [Token], _ output: (Token) throws(ParseError) ->
 // MARK: - Operator table
 
 enum OpKind {
-  case eof, close(String), equals, comma, colon, eqtest(EqTestOp), ineq(IneqOp), range
+  case eof, close(String), define, equals, comma, colon, eqtest(EqTestOp), ineq(IneqOp), range
   case bin(BinOp), product(ProductGlyph), neg, factorial, apply, at, column
 }
 
@@ -437,6 +445,7 @@ let operatorList: [(String, OpKind, n: Int, right: Bool)] = [
   ("}", .close("{"), 2, false),
   (")", .close("("), 2, false),
   ("]", .close("["), 2, false),
+  (":=", .define, 2, false),
   ("=", .equals, 2, false),
   (",", .comma, 2, false),
   (":", .colon, 2, false),
@@ -513,9 +522,8 @@ let functions: Set<String> = [
   "square", "circle", "hull", "det", "trace", "solve", "transpose", "outer", "wedge", "contract", "gp", "rev",
   "grade", "dual", "quat", "slerp", "vec", "meet", "join", "plane", "project", "reflect", "motor", "action",
   "streamlines", "qjulia", "sum", "prod", "int", "grad", "div", "curl", "laplacian", "jacobian", "hessian",
-  "curvature", "torsion", "osculating", "frame", "gaussian", "meancurvature", "geodesic", "lightray", "lightcone",
-  "tidal", "fourier", "reconstruct", "domain", "conformal", "iter", "rgb", "hsl", "oklch", "tube", "trail", "label",
-  "revolve",
+  "curvature", "torsion", "osculating", "frame", "gaussian", "meancurvature", "geodesic", "fourier", "reconstruct",
+  "domain", "conformal", "iter", "rgb", "hsl", "oklch", "tube", "trail", "label", "revolve",
 ]
 
 /// Builtins added after graphs existed in the wild, which a document's own
@@ -525,11 +533,80 @@ let shadowableFunctions: Set<String> = [
   "div", "curl", "laplacian", "polyline", "vector", "distance", "angle", "revolve", "label", "rgb", "hsl", "oklch",
   "outer", "wedge", "contract", "interval", "gp", "rev", "grade", "dual", "quat", "slerp", "action", "streamlines",
   "jacobian", "hessian", "qjulia", "vec", "transpose", "curvature", "torsion", "osculating", "frame", "gaussian",
-  "meancurvature", "geodesic", "lightray", "lightcone", "tidal", "log2", "fourier", "reconstruct", "meet", "join",
-  "plane", "project", "reflect", "motor", "push", "pop", "top",
+  "meancurvature", "geodesic", "log2", "fourier", "reconstruct", "meet", "join", "plane", "project", "reflect",
+  "motor", "push", "pop", "top",
 ]
 
 let constants: [String: Double] = ["pi": Double.pi, "e": 2.718281828459045]
+
+/// Built-in names a definition may still claim with `:=` (or a function its
+/// parameter): `e := 0.6` is a slider, `i := 3` an index, `w := x - iy` a
+/// field, `t := 2` holds time still (lib/expr.ts `REDEFINABLE`). A name bound
+/// so parses to its alias, a name no row can write, so the code that knows
+/// `i` as the imaginary unit or `w` as x + iy never mistakes the document's
+/// value for the built-in. The rest stay the language's: x, y and z are what
+/// every other row plots against, u and v take only an interval, and d
+/// starts d/dx.
+let redefinable: Set<String> = ["e", "i", "w", "pi", "t"]
+
+/// The internal name of a redefined built-in: `#` starts no written name.
+func reboundName(_ name: String) -> String { "#\(name)" }
+
+/// A name as its row wrote it, undoing reboundName.
+public func writtenName(_ name: String) -> String { name.hasPrefix("#") ? String(name.dropFirst()) : name }
+
+/// Every `#name` alias in a message, as written (`unaliased`: /#(?=[A-Za-z])/).
+public func unaliased(_ text: String) -> String {
+  let u = Array(text.utf16)
+  guard u.contains(0x23) else { return text }
+  var out: Units = []
+  for (k, c) in u.enumerated() {
+    if c == 0x23, k + 1 < u.count, isASCIILetter(u[k + 1]) { continue }
+    out.append(c)
+  }
+  return String(out)
+}
+
+/// Why a free name has no value. An alias only parses where a row defines
+/// it, so an unbound one is a definition that failed (`unknownVariable`).
+func unknownVariable(_ name: String, _ place: String = "") -> String {
+  name == writtenName(name)
+    ? "Unknown variable\(place): \(name). Define \"\(name) = 1\" to make a slider."
+    : "\(writtenName(name)) has an error in its definition."
+}
+
+/// A written name as a document binding `valueNames` reads it: a redefined
+/// built-in's alias, any other name itself (`boundName`).
+public func boundName(_ name: String, _ valueNames: Set<String>) -> String {
+  redefinable.contains(name) && valueNames.contains(name) ? reboundName(name) : name
+}
+
+/// Where a row's `:=` is, when the row is an explicit definition: the first
+/// assignment, outside text and brackets (`explicitAssignment`). Read from
+/// tokens, so `:=` inside a quoted label is text, and `a == b := …` is no
+/// definition. In UTF-16 units.
+func explicitAssignment(_ text: Units) -> Range<Int>? {
+  // Most rows have no `:=` at all; the scanners ask of every row, often.
+  guard text.count >= 2 else { return nil }
+  // (The TypeScript reads tokens lazily and stops at the first assignment,
+  // so what follows it need not tokenize: read up to each `:=` in turn.)
+  for k in 0..<(text.count - 1) where text[k] == 0x3A && text[k + 1] == 0x3D {
+    // Not tokenizable: no definition, explicit or otherwise.
+    guard let tokens = try? tokenize(String(text[...(k + 1)]), raw: true) else { return nil }
+    var depth = 0
+    for token in tokens {
+      switch token.type {
+      case .parenopen: depth += 1
+      case .parenclose: depth -= 1
+      case .operator where depth == 0:
+        if token.str == ":=" { return token.loc.0..<token.loc.1 }
+        if token.str == "=" || token.str == "==" { return nil }
+      default: break
+      }
+    }
+  }
+  return nil
+}
 
 /// JavaScript's Number() over a number token: `1.` is 1, and the `0.5.` a
 /// half-typed `[.5..2]` leaves is NaN.

@@ -895,7 +895,7 @@ extension Resolver {
         env[p] = .comp(value: arg, index: k, arity: n, functionName: name)
       }
     }
-    return substVars(freshLists(fn.body, replacing: Set(env.keys)), env)
+    return try expandClosedSums(substVars(freshLists(fn.body, replacing: Set(env.keys)), env))
   }
 
   /// The coordinates of point parameters a body reads, `p.x`, as the

@@ -131,7 +131,7 @@ private func checkFree(_ e: Expr, _ own: Set<String>, _ constNames: Set<String>,
     } else if constNames.contains(v) {
       params.append(v)
     } else {
-      throw LanguageError("Unknown variable in the \(what): \(v). Define \"\(v) = 1\" to make a slider.")
+      throw LanguageError(unknownVariable(v, " in the \(what)"))
     }
   }
   return (params, animated)
@@ -192,7 +192,7 @@ private func classifyRule(
   let row = "\(name)_\(index)"
   let at = cell2.map { "\(cell), \($0)" } ?? cell
   let example = cell2.map { "\(row)[\(cell)+1, \($0)]" } ?? "\(row)[\(cell)-1] or \(row)[\(cell)+2]"
-  let parsed = try parseExpr(scan.rhs, userFns: fnNames, listNames: [row])
+  let parsed = try parseExpr(scan.rhs, userFns: fnNames, listNames: [row], valueNames: ropts.valueNames)
   var radius = 0
   func reads(_ e: Expr) throws -> Expr {
     if let unrolled = unrollSum(e) { return try reads(unrolled) }
@@ -240,10 +240,12 @@ private func classifyRule(
 
 /// `L_0 = [(0, 0), (1, 0)]` as an expression in the cells: each listed cell
 /// adds 1 where it is, so a cell listed twice is worth 2.
-private func seedFromCells(_ rhs: String, _ dims: Int, _ fnNames: Set<String>) throws -> Expr {
+private func seedFromCells(_ rhs: String, _ dims: Int, _ fnNames: Set<String>, _ valueNames: Set<String>) throws
+  -> Expr
+{
   let usage =
     dims == 2 ? "List live cells as points: [(0, 0), (1, 0), (2, 1)]." : "List live cells by index: [0, 3, 4]."
-  let list = try parseExpr(rhs, userFns: fnNames)
+  let list = try parseExpr(rhs, userFns: fnNames, valueNames: valueNames)
   // A bracket around one item is that item: [(0, 0)] parses as the point.
   let items: [Expr] = if case .list(let items) = list { items } else { [list] }
   let terms = try items.map { item -> Expr in
@@ -272,7 +274,7 @@ private func classifySeed(
   let dims = rule.cell2 != nil ? 2 : 1
   let parsed: Expr
   if scan.seedList {
-    parsed = try seedFromCells(scan.rhs, dims, fnNames)
+    parsed = try seedFromCells(scan.rhs, dims, fnNames, ropts.valueNames)
   } else {
     if (scan.cell2 != nil) != (rule.cell2 != nil) {
       throw LanguageError(
@@ -283,7 +285,7 @@ private func classifySeed(
       )
     }
     // A 2D seed's first index is its row: down, CELL_VAR2.
-    let source = try parseExpr(scan.rhs, userFns: fnNames)
+    let source = try parseExpr(scan.rhs, userFns: fnNames, valueNames: ropts.valueNames)
     parsed = substVars(
       source,
       scan.cell2.map { [scan.cell!: .var(CELL_VAR2), $0: .var(CELL_VAR)] } ?? [scan.cell!: .var(CELL_VAR)])
@@ -300,7 +302,8 @@ private func classifyTable(
   let (name, cell, cell2) = (scan.name, scan.cell!, scan.cell2!)
   if cell == cell2 { throw LanguageError("Name the two indices differently, like \(name)[i, j].") }
   let parsed = substVars(
-    try parseExpr(scan.rhs, userFns: fnNames), [cell: .var(CELL_VAR2), cell2: .var(CELL_VAR)])
+    try parseExpr(scan.rhs, userFns: fnNames, valueNames: ropts.valueNames),
+    [cell: .var(CELL_VAR2), cell2: .var(CELL_VAR)])
   let own: Set<String> = [CELL_VAR, CELL_VAR2]
   let expr = try resolveCells(parsed, own, getFn, ropts)
   let free = try checkFree(expr, own, constNames, "table")
@@ -742,7 +745,7 @@ public func cellShades(_ grid: CellGrid) -> [UInt8] {
   return out
 }
 
-/// A cell's value as a lattice panel prints it (web/main.ts `latticeValues`):
+/// A cell's value as a lattice panel prints it (web/scene.ts `latticeValues`):
 /// a whole number as it is, anything else to three significant figures.
 public func cellText(_ v: Double) -> String {
   JS.isInteger(v) ? JS.string(v) : JS.string(JS.number(JS.toPrecision(v, 3)))

@@ -23,7 +23,7 @@ public struct Camera3D: Equatable, Codable, Sendable {
   /// Elevation from the XY plane.
   public var phi: Double
 
-  /// The camera a graph opens with (web/main.ts `defaultCamera`).
+  /// The camera a graph opens with (web/session.ts `defaultCamera`).
   public init(
     target: SIMD3<Double> = .zero, radius: Double = 14, theta: Double = -.pi / 3, phi: Double = .pi / 5.5
   ) {

@@ -275,7 +275,7 @@ public final class FrameRenderer {
 /// What is drawn over a frame's panels with a 2D context (in points, y
 /// down, `dpr` device pixels to the point): each panel's labels and overlay
 /// clipped to its box, in panel order, then the edges between panels
-/// (web/main.ts `drawPanelEdges`). `edges` is the whole layout when some
+/// (web/scene.ts `drawPanelEdges`). `edges` is the whole layout when some
 /// panels are not among `panels` (one with no room draws nothing).
 public func drawPanelLabels(
   _ ctx: CGContext, _ panels: [PanelFrame], size: CGSize, dpr: Double, theme: GraphTheme,

@@ -6,7 +6,7 @@ import Foundation
 // What is drawn over the shader passes with a 2D context: web/render2d.ts
 // from `drawLatticeLabels` on (the site's overlay canvas). The axis numbers,
 // a lattice panel's labels, and the geometry the CPU samples: points,
-// polylines, clouds, bars, regions, glyphs, a graph's vertices, and text.
+// polylines, clouds, bars, regions, a graph's vertices, and text.
 //
 // The context is in points with y down, as a canvas has it: the app's views
 // hand one over as they are, and a bitmap context is flipped first. It must
@@ -228,34 +228,6 @@ public struct Overlay2D: Equatable, Codable, Sendable {
     }
   }
 
-  /// Many small glyphs, each list one path (light cones, lib/light-cone.ts
-  /// coneGlyphs): `rings` closed, filled with `fill` and outlined; `lines`
-  /// stroked thinly; runs of both end with NaN, NaN. `dots` are x, y pairs,
-  /// drawn as discs. `lineWidth` and `lineAlpha` make the strokes bolder
-  /// (tidal glyphs, lib/tidal.ts: solid bars).
-  public struct Glyph: Equatable, Codable, Sendable {
-    @JSNumbers public var rings: [Double]
-    @JSNumbers public var lines: [Double]
-    @JSNumbers public var dots: [Double]
-    public var color: CSSColor
-    public var fill: CSSColor
-    public var lineWidth: Double?
-    public var lineAlpha: Double?
-
-    public init(
-      rings: [Double] = [], lines: [Double] = [], dots: [Double] = [], color: CSSColor, fill: CSSColor,
-      lineWidth: Double? = nil, lineAlpha: Double? = nil
-    ) {
-      self.rings = rings
-      self.lines = lines
-      self.dots = dots
-      self.color = color
-      self.fill = fill
-      self.lineWidth = lineWidth
-      self.lineAlpha = lineAlpha
-    }
-  }
-
   public var points: [Point]
   public var clouds: [Cloud]?
   public var polylines: [Polyline]
@@ -266,11 +238,10 @@ public struct Overlay2D: Equatable, Codable, Sendable {
   public var nodes: [Node]?
   /// Small text centred on a math point, haloed: a graph edge's labels.
   public var tags: [Text]?
-  public var glyphs: [Glyph]?
 
   public init(
     points: [Point] = [], clouds: [Cloud]? = nil, polylines: [Polyline] = [], regions: [Region]? = nil,
-    bars: [Bar]? = nil, texts: [Text]? = nil, nodes: [Node]? = nil, tags: [Text]? = nil, glyphs: [Glyph]? = nil
+    bars: [Bar]? = nil, texts: [Text]? = nil, nodes: [Node]? = nil, tags: [Text]? = nil
   ) {
     self.points = points
     self.clouds = clouds
@@ -280,11 +251,10 @@ public struct Overlay2D: Equatable, Codable, Sendable {
     self.texts = texts
     self.nodes = nodes
     self.tags = tags
-    self.glyphs = glyphs
   }
 
   private enum CodingKeys: String, CodingKey {
-    case points, clouds, polylines, regions, bars, texts, nodes, tags, glyphs
+    case points, clouds, polylines, regions, bars, texts, nodes, tags
   }
 
   // The site's `points` and `polylines` are always there; a scene written by
@@ -299,7 +269,6 @@ public struct Overlay2D: Equatable, Codable, Sendable {
     texts = try c.decodeIfPresent([Text].self, forKey: .texts)
     nodes = try c.decodeIfPresent([Node].self, forKey: .nodes)
     tags = try c.decodeIfPresent([Text].self, forKey: .tags)
-    glyphs = try c.decodeIfPresent([Glyph].self, forKey: .glyphs)
   }
 }
 
@@ -561,33 +530,6 @@ private func drawAxisNumbers(_ ctx: CGContext, screen s: Screen, dpr: Double, ma
   }
 }
 
-/// A glyph list as one path: runs end at a NaN, and a ring is closed by a
-/// line back to its start.
-private func trace(_ pts: [Double], close: Bool, screen s: Screen) -> CGPath {
-  let path = CGMutablePath()
-  var pen = false
-  var start = CGPoint.zero
-  var i = 0
-  while i + 1 < pts.count {
-    defer { i += 2 }
-    if pts[i].isNaN {
-      if pen, close { path.addLine(to: start) }
-      pen = false
-      continue
-    }
-    let p = CGPoint(x: s.x(pts[i]), y: s.y(pts[i + 1]))
-    if pen {
-      path.addLine(to: p)
-    } else {
-      path.move(to: p)
-      start = p
-    }
-    pen = true
-  }
-  if pen, close { path.addLine(to: start) }
-  return path
-}
-
 /// Up to this many points a cloud is filled a square at a time.
 private let cloudMaskFrom = 2000
 
@@ -683,41 +625,6 @@ private func drawExtras(_ ctx: CGContext, _ extras: Overlay2D, screen s: Screen,
     ctx.addPath(path)
     ctx.setFillColor(region.fill.cgColor)
     ctx.fillPath(using: .winding)
-  }
-
-  for glyph in extras.glyphs ?? [] {
-    // One path each, so a lattice of hundreds costs a fill and two strokes.
-    ctx.setLineJoin(.round)
-    ctx.setLineCap(.round)
-    if !glyph.rings.isEmpty {
-      let rings = trace(glyph.rings, close: true, screen: s)
-      ctx.addPath(rings)
-      ctx.setFillColor(glyph.fill.cgColor)
-      ctx.fillPath()
-      ctx.addPath(rings)
-      ctx.setStrokeColor(glyph.color.cgColor)
-      ctx.setLineWidth(1.25)
-      ctx.strokePath()
-    }
-    if !glyph.lines.isEmpty {
-      ctx.setAlpha(glyph.lineAlpha ?? 0.55)
-      ctx.addPath(trace(glyph.lines, close: false, screen: s))
-      ctx.setStrokeColor(glyph.color.cgColor)
-      ctx.setLineWidth(glyph.lineWidth ?? 1)
-      ctx.strokePath()
-      ctx.setAlpha(1)
-    }
-    if !glyph.dots.isEmpty {
-      var i = 0
-      while i + 1 < glyph.dots.count {
-        let (sx, sy) = (s.x(glyph.dots[i]), s.y(glyph.dots[i + 1]))
-        if sx.isFinite, sy.isFinite { ctx.addEllipse(in: CGRect(x: sx - 1.75, y: sy - 1.75, width: 3.5, height: 3.5)) }
-        i += 2
-      }
-      ctx.setFillColor(glyph.color.cgColor)
-      ctx.fillPath()
-    }
-    ctx.setLineCap(.butt)
   }
 
   for line in extras.polylines {

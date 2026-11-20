@@ -106,11 +106,6 @@ private func close(_ a: [Double], _ b: [Double]) -> Bool {
     #expect(ink(Overlay2D(regions: [.init(tris: [0, 0, 2, 0, 0, 2], fill: blue)]), 0.5, 0.5) == 255)
     #expect(ink(Overlay2D(bars: [.init(x: 1, y: 2, halfWidth: 0.5, color: blue)]), 1, 1) == 77)
     #expect(ink(Overlay2D(bars: [.init(x: 1, y: 2, halfWidth: 0.5, color: blue, base: -.infinity)]), 1, -5.9) == 77)
-    let glyph = Overlay2D.Glyph(
-      rings: [0, 0, 2, 0, 2, 2, 0, 2, .nan, .nan], lines: [-2, -1, 2, -1], dots: [-1, 1], color: blue, fill: blue)
-    #expect(ink(Overlay2D(glyphs: [glyph]), 1, 1) == 255)
-    #expect(ink(Overlay2D(glyphs: [glyph]), -1, 1) == 255)
-    #expect(ink(Overlay2D(glyphs: [glyph]), 0, -1) > 100)
     // A vertex is a ring: its rim is ink and so is its middle (the page's color, or its own when marked).
     #expect(ink(Overlay2D(nodes: [.init(x: 0, y: 0, text: "", color: blue)]), 13.0 / 25, 0) > 200)
     #expect(ink(Overlay2D(nodes: [.init(x: 0, y: 0, text: "7", color: blue, mark: true)]), 0.3, 0.3) == 255)
@@ -171,7 +166,7 @@ private func close(_ a: [Double], _ b: [Double]) -> Bool {
     #expect(CSSColor(css: "#fff") == CSSColor(r: 1, g: 1, b: 1))
     #expect(CSSColor(css: "#16181d") == CSSColor(r: 0x16 / 255, g: 0x18 / 255, b: 0x1d / 255))
     #expect(CSSColor(css: "blue") == nil)
-    // web/main.ts cssColor and cssColorA.
+    // web/session.ts cssColor and cssColorA.
     #expect(CSSColor(GraphTheme.light.palette[0]).css == "rgb(45, 112, 179)")
     #expect(CSSColor(GraphTheme.light.palette[2], alpha: 0.16).css == "rgba(56, 140, 70, 0.16)")
   }

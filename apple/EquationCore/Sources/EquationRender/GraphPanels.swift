@@ -52,7 +52,7 @@ public struct GraphPanels: Equatable, Sendable {
   /// Some panel moves with t, so the graph redraws every frame.
   public var animated: Bool
 
-  /// The gap between an inset and its host's edges, in points (web/main.ts `syncPanels`).
+  /// The gap between an inset and its host's edges, in points (web/session.ts `syncPanels`).
   public static let insetMargin = 12.0
 
   public init(_ analysis: DocumentAnalysis, colors: [RGB?]) {
@@ -85,7 +85,7 @@ public struct GraphPanels: Equatable, Sendable {
     layoutPanels(panels.compactMap(\.split), width, height, margin: (Self.insetMargin * dpr).rounded())
   }
 
-  /// Each panel's opening window (web/main.ts `syncPanels`, then
+  /// Each panel's opening window (web/session.ts `syncPanels`, then
   /// `applyViewportRows` and `syncLinks`): 12 units across the shorter side
   /// of its box (a lattice with no view row opens on its cells), then what
   /// its view(…) row frames, with shared axes taken from the panels that own
@@ -191,7 +191,7 @@ private let PANEL_CLEAR_FRAG = """
 
 extension Renderer2D {
   /// Draw every 2D panel of a frame into `encoder`, each in its box, in
-  /// panel order (web/main.ts `render`).
+  /// panel order (web/scene.ts `render`).
   public func render(
     _ encoder: any MTLRenderCommandEncoder, target: (width: Int, height: Int), scene: PanelScene, theme: GraphTheme
   ) {
@@ -251,7 +251,7 @@ public func drawPanelLabels(
   drawPanelLabels(ctx, scene.frames, size: size, dpr: dpr, theme: theme, edges: scene.panels.map(\.layout))
 }
 
-/// Hairlines between tiled panels, and a frame round each inset (web/main.ts `drawPanelEdges`).
+/// Hairlines between tiled panels, and a frame round each inset (web/scene.ts `drawPanelEdges`).
 public func drawPanelEdges(_ ctx: CGContext, _ layout: [PanelLayout], dpr: Double, theme: GraphTheme) {
   ctx.saveGState()
   defer { ctx.restoreGState() }

@@ -257,7 +257,7 @@ func fieldScale(_ expr: Expr, _ env: [String: Double], _ center: SIMD3<Double>, 
 }
 
 /// What brings a surface's paint (its curvature) to about 1 where it is
-/// typical (web/main.ts `paintGain`): 1.5 over the 90th percentile of |f| at
+/// typical (web/scene.ts `paintGain`): 1.5 over the 90th percentile of |f| at
 /// a lattice of points of the unit square of u and v — the largest few are
 /// left out, as curvature runs off to infinity at a cusp — or 1 when f is
 /// rounding everywhere, or nowhere defined (lib/surface-geometry.ts

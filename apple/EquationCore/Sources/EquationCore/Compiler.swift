@@ -101,9 +101,6 @@ public enum CpuPlan: Equatable, Sendable {
   case flat(values: [Expr], dim: Int, grade: Int, count: Int?)
   /// One plan per list element.
   indirect case family(members: [FamilyMember])
-  /// A panel's metric row's readout, or what a geodesic, light-cone or
-  /// tidal row draws of it on the CPU as the view changes (MetricObjects.swift).
-  case metric(MetricPlan)
 
   /// The plan's `type`, as the TypeScript spells it.
   public var type: String {
@@ -149,7 +146,6 @@ public enum CpuPlan: Equatable, Sendable {
     case .histogram: "histogram"
     case .tuples, .blades, .flat: "tuple"
     case .family: "family"
-    case .metric(let plan): plan.type
     }
   }
 }
@@ -336,8 +332,6 @@ public func compileCpu(_ classified: Classified) throws -> CpuPlan {
     return .flat(values: try values.map(real), dim: dim, grade: grade, count: count)
   case .list, .histogram, .tuples, .family:
     return try compileListCpu(classified.object)
-  case .metric(let object):
-    return .metric(compileMetricCpu(object))
   }
 }
 
@@ -428,7 +422,7 @@ public func compileGpu(_ classified: Classified) throws -> GpuPlan {
   case .point, .complexPoint, .curveParametric, .complexPath, .value, .note, .label, .figure, .tuple, .sequence,
     .automaton, .lattice, .curveTube, .intersection, .system, .complexSystem, .distribution, .probability, .orbit,
     .trail,
-    .list, .histogram, .tuples, .blades, .flat, .metric:
+    .list, .histogram, .tuples, .blades, .flat:
     return plan(.none)
   case .family(let members, let shared):
     return try compileFamilyGpu(members, shared, params: params)
@@ -509,8 +503,6 @@ public func plotReadout(_ plan: CpuPlan, _ env: [String: Double]) throws -> Stri
     return try algebraReadout(plan, env)
   case .vlist, .tuples, .family:
     return try listReadout(plan, env)
-  case .metric(.row(let text)):
-    return text
   default:
     return nil
   }

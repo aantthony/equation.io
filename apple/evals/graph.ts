@@ -1,9 +1,9 @@
 /**
  * The graph the evals' tools act on: the app's renderer (web/main.ts) without
  * the renderer. Rows go through the real analyzer (lib/analysis.ts), and
- * get_graph / set_graph answer with voice mode's GraphState, each row's status
- * and meaning built as web/main.ts `rowStatus` builds them. The camera and
- * sliders are simulated: their arguments are checked as the app checks them,
+ * get_graph / set_graph answer with a GraphState (as the site's voice mode,
+ * since removed, had it), each row's status and meaning built by
+ * lib/assistant-tools.ts describeRow. The camera and sliders are simulated: their arguments are checked as the app checks them,
  * and the result is what the app would answer once the move had finished.
  *
  * Left out: a row's notable points (intercepts in view), which need the
@@ -68,7 +68,7 @@ export interface MoveViewTarget {
 /** The window a fresh 2D graph opens on in the app's window (12 units on the short side). */
 export const START_WINDOW = { x: [-8, 8] as [number, number], y: [-6, 6] as [number, number] };
 const ASPECT = 16 / 12;
-/** web/main.ts defaultCamera. */
+/** web/session.ts defaultCamera. */
 const START_CAMERA = { theta: -Math.PI / 3, phi: Math.PI / 5.5, radius: 14, target: [0, 0, 0], spin: 0 };
 
 const round6 = (v: number) => parseFloat(v.toPrecision(6));
@@ -115,7 +115,7 @@ export class EvalGraph {
     return is3D(this.analysis) ? '3d' : '2d';
   }
 
-  /** voice mode's get_graph (web/main.ts voiceGraph). */
+  /** get_graph (the voiceGraph of the site's former voice mode). */
   graph(): GraphState {
     const mode = this.mode;
     const colors = this.colors();
@@ -141,7 +141,7 @@ export class EvalGraph {
     };
   }
 
-  /** What the app's editor shows under each row (web/main.ts nativeRowStatus): what each prompt starts with. */
+  /** What the app's editor shows under each row: what each prompt starts with. */
   nativeStatus(): { error: string | null; info: string | null; comment: boolean; view: boolean; divider: boolean }[] {
     return this.analysis.rows.map(row => ({
       error: row.error ?? null,
@@ -185,7 +185,7 @@ export class EvalGraph {
   }
 
   /**
-   * animate_slider (web/main.ts animateSlider), finished at once: the
+   * animate_slider (the site's former voice mode's animateSlider), finished at once: the
    * slider's row is left at the value it glides to.
    */
   animateSlider(name: string, to: number, seconds: number, from?: number): object {
@@ -210,7 +210,7 @@ export class EvalGraph {
     return { slider: name, from: start, to: end, seconds };
   }
 
-  /** move_view (web/main.ts movePanelView), answered as though the move had finished. */
+  /** move_view (the site's former voice mode's movePanelView), answered as though the move had finished. */
   moveView(target: MoveViewTarget, seconds: number): object {
     if (this.mode === '2d') {
       if (target.spin !== undefined) return { error: 'spin turns the 3D camera; this graph is 2D' };

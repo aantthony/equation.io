@@ -8,7 +8,7 @@
  *
  * Writes Scenes/3D/documents.json beside the renderer's scene fixtures: per
  * document its rows, the time, and the Graph3D apple/tools/scene3d.ts makes
- * of them (which follows web/main.ts renderPanel).
+ * of them (which follows web/scene.ts renderPanel).
  */
 import { writeFileSync } from 'node:fs';
 import { splitStatements } from '../../lib/statements.ts';

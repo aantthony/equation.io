@@ -83,6 +83,9 @@ public struct DocumentAnalysis: Equatable, Sendable {
   public var initialState: [String: Double] = [:]
   /// The document's own functions (a slider's `clamp` is not one of these).
   var userFns: Set<String>
+  /// The document's shadowed names (`shadowedNames`), for a caller's own
+  /// parses of its rows: a slider's bounds may read a redefined `pi`.
+  public var valueNames: Set<String> = []
   /// Each constant's expression, in the order the rows define them.
   var constNames: [String]
   var constExprs: [Expr]
@@ -121,12 +124,14 @@ public struct DocumentAnalysis: Equatable, Sendable {
   /// written (with its note).
   public func settingSlider(row index: Int, to value: Double, in source: String) -> String? {
     guard rows.indices.contains(index), rows[index].slider != nil,
-      case .constant(let name, let rhs, false)? = rows[index].definition
+      let definition = rows[index].definition, case .constant(_, let rhs, false) = definition
     else { return nil }
     let trimmed = jsTrimmed(rhs)
     guard let form = sliderForm(trimmed, userFns: userFns) else { return nil }
-    let held = sliderValue(form, value, sliderBounds(form, env, userFns: userFns))
-    return keepNote(source, "\(name) = \(writeSlider(trimmed, form, formatSliderNumber(held)))")
+    let held = sliderValue(form, value, sliderBounds(form, env, userFns: userFns, valueNames: valueNames))
+    // (`:=` and the written name are kept: `definitionHead`.)
+    let head = definitionHead(definition, stripNote(source))
+    return keepNote(source, "\(head) \(writeSlider(trimmed, form, formatSliderNumber(held)))")
   }
 }
 
@@ -225,10 +230,13 @@ func prepareDocument(_ sources: [String]) -> PreparedDocument {
   let texts = sources.map { jsTrimmed(stripNote($0)) }
   let count = texts.count
   var document = PreparedDocument(texts: texts, scanned: Array(repeating: nil, count: count))
+  // The row-shape scanners read `a_n := …` and `Y := 2X` as they read `=`;
+  // only scanDefinition asks which a row wrote (`e := …` may claim e).
+  let shaped = texts.map { asAssignment($0) }
 
   // What each row is by its text alone, and the rows the port leaves alone:
   // random variables and regressions (`~`), a tuple-valued recurrence's seed.
-  let seqScans = scanSequences(texts)
+  let seqScans = scanSequences(shaped)
   document.seqScans = seqScans
   var blocked: [Int: String] = [:]
   var poison: Set<String> = []
@@ -236,7 +244,7 @@ func prepareDocument(_ sources: [String]) -> PreparedDocument {
   var scanned: [Definition?] = Array(repeating: nil, count: count)
   // Random-variable rows (`X ~ …`, and `Y = X^2` referencing one) resolve
   // outside the definition system.
-  var random = RandomRows(texts) { texts[$0].hasPrefix("#") || seqScans[$0] != nil }
+  var random = RandomRows(shaped) { texts[$0].hasPrefix("#") || seqScans[$0] != nil }
   for (i, text) in texts.enumerated() where !text.isEmpty {
     if text.hasPrefix("#") {
       document.comments.insert(i)
@@ -287,7 +295,10 @@ func prepareDocument(_ sources: [String]) -> PreparedDocument {
       for i in 0..<count where blocked[i] == nil && !document.comments.contains(i) {
         guard let name = writtenNames(texts[i]).first(where: { touches($0, poison) }) else { continue }
         blocked[i] = "it uses \(name), which is not supported yet"
-        if let defined = scanned[i]?.name ?? random.declares[i], poison.insert(defined).inserted { grew = true }
+        // (A redefined built-in is out of reach by the name rows write.)
+        if let defined = scanned[i]?.name ?? random.declares[i], poison.insert(writtenName(defined)).inserted {
+          grew = true
+        }
         if let scan = seqScans[i], poison.insert(scan.name).inserted { grew = true }
       }
     }
@@ -298,7 +309,7 @@ func prepareDocument(_ sources: [String]) -> PreparedDocument {
     for d in raw where !skip.contains(d.key) {
       guard let what = built.unsupported[d.key] else { continue }
       blocked[owner[d.key]!] = what
-      poison.insert(d.name)
+      poison.insert(writtenName(d.name))
       // (A fit the port cannot read takes its coefficients with it: every name of its row.)
       if case .regression = d { poison.formUnion(writtenNames(texts[owner[d.key]!])) }
       found = true
@@ -353,12 +364,14 @@ public func analyze(_ sources: [String]) -> DocumentAnalysis {
     // `r = sqrt(x^2 + y^2); r = 2` is a level set of r. A field over u, v
     // has no level sets in the plane, so a second `k = …` is a redefinition.
     let levelSet = d.kind == "fn" && built.fns[d.name] != nil && texts[i] != texts[first]
+    // `f(x) := x^3` says outright it is a definition, never a level set.
+    let explicit = isExplicitDefinition(texts[i])
     var planar = false
     if let field = built.fields[d.name] {
       let vars = freeVars(field)
       planar = !vars.contains("u") && !vars.contains("v")
     }
-    if planar || levelSet {
+    if !explicit && (planar || levelSet) {
       rows[i].definition = nil
     } else {
       rows[i].error = "\(d.key) is already defined."
@@ -385,7 +398,7 @@ public func analyze(_ sources: [String]) -> DocumentAnalysis {
   defer { sequences.release() }
   let listNames = Set(built.points).union(built.mats.keys).union(built.tensors.keys)
     .union(sequences.sequences.keys.map { $0 + "_" }).union(built.lists.keys)
-  let valueNames = shadowedFnNames(raw.filter { $0.kind != "fn" }.map(\.name) + Array(tildeNames))
+  let valueNames = shadowedNames(raw.filter { $0.kind != "fn" }.map(\.name) + Array(tildeNames))
   let documentNames = Set(raw.map(\.name)).union(tildeNames)
   func getFn(_ name: String) throws -> FnDef? {
     if let fn = built.fns[name] { return fn }
@@ -401,6 +414,7 @@ public func analyze(_ sources: [String]) -> DocumentAnalysis {
       ? pointComps(name, built.pointDims[name] ?? 2) : built.vecStates[name].map { vecStateComps(name, $0) }
   }
   var ropts = ResolveOpts()
+  ropts.valueNames = valueNames
   // A state stands for itself: defined, and constant across space.
   ropts.definition = {
     built.fields[$0] ?? built.conditions[$0] ?? built.consts[$0] ?? (built.states.has($0) ? .var($0) : nil)
@@ -434,21 +448,6 @@ public func analyze(_ sources: [String]) -> DocumentAnalysis {
   sequences.defineConstant = { built.consts[$0] = $1 }
   sequences.setValue = { boundVals[$0] = $1 }
 
-  // Each panel's metric, from its ds^2 row (AnalysisMetrics.swift).
-  let metrics = PanelMetrics(
-    texts: texts, parse: { try parseExpr($0, userFns: fnNames, listNames: listNames, valueNames: valueNames) },
-    lower: { try lowerObjects(try Resolver(getFn: getFn, opts: ropts).resolve($0), built, ropts).e },
-    fieldEnv: fieldEnv, fieldNames: built.fields.keys, documentNames: documentNames, fnNames: fnNames,
-    constNames: { constNames },
-    values: { stateSystem.flatMap { try? evaluateFrame(built, time: 0, states: initialState(built, $0)) } ?? constEnv },
-    moving: { animated.union(built.states.keys) },
-    surfaceOperand: { arg in
-      var written = arg
-      if case .var(let name) = arg, try getFn(name) != nil {} else {
-        written = try Resolver(getFn: getFn, opts: ropts).resolve(arg)
-      }
-      _ = try Resolver(getFn: getFn, opts: ropts).surfaceOperand("geodesic", written)
-    })
   // Each panel's rows are read with its view's maps and its surface, which
   // are not ported where they map (x, y) together: such a panel is left alone.
   var panelBlocked: Set<Int> = []
@@ -461,11 +460,9 @@ public func analyze(_ sources: [String]) -> DocumentAnalysis {
     for (i, text) in texts.enumerated() where !text.isEmpty && rows[i].definition == nil && !rows[i].comment {
       if isDividerRow(text) {
         at += 1
-      } else if metrics.isMetricRow(text) {
-        metrics.rows[at, default: []].append(i)
       } else if let head = viewHead(text), head == "view" || head == "on", !fnNames.contains(head) {
         do {
-          let spec = try parseViewRow(text, boundVals, documentNames: documentNames)
+          let spec = try parseViewRow(text, boundVals, documentNames: documentNames, valueNames: valueNames)
           if case .mappedView(_, _, _, _, let maps)? = spec, panelMaps[at] == nil { panelMaps[at] = maps }
           if case .surface(let surface)? = spec, panelSurfaces[at] == nil { panelSurfaces[at] = surface }
         } catch is Unsupported {
@@ -475,8 +472,6 @@ public func analyze(_ sources: [String]) -> DocumentAnalysis {
         }
       }
     }
-    metrics.mapped = Set(panelMaps.keys)
-    metrics.surfaces = Set(panelSurfaces.keys)
   }
 
   // Random variables next, so P(…) and bare-expression rows can reference
@@ -528,7 +523,9 @@ public func analyze(_ sources: [String]) -> DocumentAnalysis {
       if isDividerRow(text) || (head != nil && !fnNames.contains(head!)) {
         if viewsUnknown && !isDividerRow(text) { throw Unsupported("a view row after one that is not supported") }
         var latticeAxes: [String]?
-        if let view = try parseViewRow(text, boundVals, documentNames: documentNames, latticeAxes: &latticeAxes) {
+        if let view = try parseViewRow(
+          text, boundVals, documentNames: documentNames, valueNames: valueNames, latticeAxes: &latticeAxes)
+        {
           // Each panel frames itself: a divider starts a fresh set.
           if case .split = view {
             panel += 1
@@ -567,11 +564,6 @@ public func analyze(_ sources: [String]) -> DocumentAnalysis {
       if panelBlocked.contains(panel) {
         throw Unsupported("a panel with (x, y) mapped together or a surface")
       }
-      // ds^2 = …, lightcones, tidal: the panel's metric and what is drawn of it.
-      if let cls = try metrics.row(text, index: i, panel: panel) {
-        rows[i].classified = cls
-        continue
-      }
       // `P(…)` shades an area under a declared density — unless the user
       // has defined P themselves. With no random variable there is none.
       if try distributions.probabilityRow(&rows[i], text, index: i) { continue }
@@ -592,8 +584,11 @@ public func analyze(_ sources: [String]) -> DocumentAnalysis {
           indexNames: Set(built.points).union(built.lists.keys))
         continue
       }
+      // `x := 3` claims what := cannot have; the parser only sees a stray `:`.
+      if let unclaimable = explicitDefinitionError(text) { throw LanguageError(unclaimable) }
       // `d = 1` is no definition (d starts d/dx).
-      let taken = takenDefinitionName(text)
+      // (`e = 2` after `e := 1` is a claim about the document's e, which needs no advice about Euler's.)
+      let taken = takenDefinitionName(text).flatMap { valueNames.contains($0) ? nil : $0 }
       if taken == "d" {
         throw LanguageError(
           "d is taken by derivatives (d/dx), so it cannot name a slider or function. Pick another name, like k.")
@@ -601,7 +596,7 @@ public func analyze(_ sources: [String]) -> DocumentAnalysis {
       for call in ["graph", "mark"] where !fnNames.contains(call) && viewHeadIs(text, call) {
         throw Unsupported("\(call)(…)")
       }
-      if let takenName = takenBinder(text) { throw LanguageError(takenName) }
+      if let takenName = takenBinder(text, valueNames) { throw LanguageError(takenName) }
       let rawParsed = try parseExpr(text, userFns: fnNames, listNames: listNames, valueNames: valueNames)
       // `p(50..400)`: where p goes over that time.
       if case .bin(.mul, let value, .range(let from, let to), _) = rawParsed {
@@ -615,14 +610,15 @@ public func analyze(_ sources: [String]) -> DocumentAnalysis {
           try lower(value), from: try lower(from), to: try lower(to), built, constNames: constNames)
         continue
       }
-      // geodesic(P, d), lightray(P, d), lightcone(P), tidal(P) under the panel's metric.
-      if let cls = try metrics.call(rawParsed, panel: panel) {
-        rows[i].classified = cls
-        continue
-      }
-      // (gaussian(x, y) under a metric is its curvature, shaded to its own size: not ported.)
-      if metrics.rows[panel] != nil, writtenNames(text).contains(where: ["gaussian", "meancurvature"].contains) {
-        throw Unsupported("the curvature of a panel's metric (gaussian(x, y))")
+      // geodesic(S, start, direction): traced as it is drawn.
+      if case .call("geodesic", let args) = rawParsed, !fnNames.contains("geodesic") {
+        try classifyGeodesic(args, onSurface: panelSurfaces[panel] != nil) { arg in
+          var written = arg
+          if case .var(let name) = arg, try getFn(name) != nil {} else {
+            written = try Resolver(getFn: getFn, opts: ropts).resolve(arg)
+          }
+          _ = try Resolver(getFn: getFn, opts: ropts).surfaceOperand("geodesic", written)
+        }
       }
       // A row not drawn over the plane may test equality in a case: `f(2)`
       // with f(m) = {mod(m, 2) = 0: …}.
@@ -703,10 +699,11 @@ public func analyze(_ sources: [String]) -> DocumentAnalysis {
       rows[i].unsupported = notSupported(error.what)
       if viewHead(text) != nil { viewsUnknown = true }
     } catch {
-      var text = errorMessage(error)
+      // (`u(x, y) = …` read as u times a point: say so.)
+      var text = reservedFnHint(texts[i]) ?? errorMessage(error)
       // `i = 3` fails as a claim about i; the author meant a definition, so
       // say why it is not one.
-      if let taken = takenDefinitionName(texts[i]), taken != "d" {
+      if let taken = takenDefinitionName(texts[i]), !valueNames.contains(taken), taken != "d" {
         if text.hasSuffix(".") { text.removeLast() }
         text = "\(text) — \(takenNameHint(taken))."
       }
@@ -800,7 +797,7 @@ public func analyze(_ sources: [String]) -> DocumentAnalysis {
   for i in 0..<count where rows[i].unsupported != nil && (hasSums || mayBindWholeNumbers(texts[i])) {
     do {
       for name in writtenNames(texts[i]) {
-        namedByUnsupported.insert(name)
+        namedByUnsupported.insert(boundName(name, valueNames))
         // The slider a term is read at: the k of a_k.
         let u = Array(name.utf16)
         if u.count > 2, u[1] == unit("_"), sequences.sequences[String(decoding: u[..<1], as: UTF16.self)] != nil {
@@ -858,7 +855,7 @@ public func analyze(_ sources: [String]) -> DocumentAnalysis {
     // usually a curve being typed.
     var draws = true
     switch row.cpu {
-    case .note, .value(_, nil), .metric(.row): draws = false
+    case .note, .value(_, nil): draws = false
     default: break
     }
     row.takesColor =
@@ -871,7 +868,7 @@ public func analyze(_ sources: [String]) -> DocumentAnalysis {
       var value = form.literal
       let lo: Double
       let hi: Double
-      if let bounds = sliderBounds(form, frameEnv, userFns: userFns) {
+      if let bounds = sliderBounds(form, frameEnv, userFns: userFns, valueNames: valueNames) {
         (lo, hi) = bounds
         value = sliderValue(form, value, bounds)
       } else {
@@ -887,12 +884,17 @@ public func analyze(_ sources: [String]) -> DocumentAnalysis {
       row.slider = Slider(min: lo, max: hi, step: whole ? 1 : niceSpacing((hi - lo) / 400, 1).major, value: value)
     }
   }
+  // Messages name a redefined built-in (`#e`, internally) as its row wrote it.
+  for i in 0..<count {
+    if let error = rows[i].error { rows[i].error = unaliased(error) }
+    if let info = rows[i].info { rows[i].info = unaliased(info) }
+  }
   // The constants once more: a recurrence's chain of terms is among them now.
   let env = (try? evaluateFrame(built, time: 0, states: initial)) ?? frameEnv
   return DocumentAnalysis(
     rows: rows, env: env, animated: animatedConstNames(built), names: boundNames(document),
     random: distributions.rvs, gridFields: inPanels(gridFields, owner: owner, rows: rows),
-    stateSystem: stateSystem, initialState: initial, userFns: userFns,
+    stateSystem: stateSystem, initialState: initial, userFns: userFns, valueNames: valueNames,
     constNames: built.consts.keys,
     constExprs: built.consts.entries.map(\.value))
 }

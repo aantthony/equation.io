@@ -107,7 +107,7 @@ private let DIST_HINT: String = {
 /// Parse the right side of `name ~ …` (`parseDistribution`). Family names
 /// are matched case-insensitively and live in their own namespace, so they
 /// collide with nothing a document defines.
-func parseDistribution(_ rhs: String, fnNames: Set<String>) throws -> BaseDist {
+func parseDistribution(_ rhs: String, fnNames: Set<String>, valueNames: Set<String> = []) throws -> BaseDist {
   // `^\s*(NAME)\s*(?:\(([\s\S]*)\))?\s*$`
   var s = RowScanner(rhs)
   s.space()
@@ -141,7 +141,7 @@ func parseDistribution(_ rhs: String, fnNames: Set<String>) throws -> BaseDist {
   }
   let args: Expr
   do {
-    args = try parseExpr("(\(inner))", userFns: fnNames)
+    args = try parseExpr("(\(inner))", userFns: fnNames, valueNames: valueNames)
   } catch {
     if error.message.contains("vector components") { throw arityError }
     throw error

@@ -1,7 +1,7 @@
 import EquationCore
 import Foundation
 
-/// Systems of equations in the plane (web/main.ts `solveFor`, and its
+/// Systems of equations in the plane (web/scene.ts `solveFor`, and its
 /// 'system' case of the overlay): `(f, g) = (a, b)` and a complex equation
 /// in w are solved over the window, a quarter wider each way, and each
 /// solution is a dot; with u the solutions trace a curve.

@@ -80,8 +80,10 @@ private struct PairRow {
 /// The pair a point row holds: `(1, 2)` itself, or the right-hand side of `A = (1, 2)`.
 private func pairRow(_ row: RowAnalysis) -> PairRow? {
   guard row.error == nil, row.unsupported == nil else { return nil }
-  if case .constant(let name, let rhs, false)? = row.definition {
-    return PairRow(pair: rhs.trimmingCharacters(in: .whitespacesAndNewlines)) { "\(name) = \($0)" }
+  if let definition = row.definition, case .constant(_, let rhs, false) = definition {
+    // (`:=` and the written name are kept: lib/defs.ts `definitionHead`.)
+    let head = definitionHead(definition, row.text)
+    return PairRow(pair: rhs.trimmingCharacters(in: .whitespacesAndNewlines)) { "\(head) \($0)" }
   }
   guard row.definition == nil, case .point(2, _)? = row.cpu else { return nil }
   return PairRow(pair: row.text) { $0 }
@@ -100,8 +102,9 @@ private func dragAxes(_ pair: String, _ analysis: DocumentAnalysis) -> (parts: [
   guard let (a, b) = splitPair(pair) else { return nil }
   let axes = [a, b].map { part -> DragAxis? in
     if isNumberLiteral(part) { return .literal }
-    // Sliders live under canonical names: (r₁, 2) drags r_1's row.
-    let name = canonicalName(part)
+    // Sliders live under canonical names: (r₁, 2) drags r_1's row; a
+    // redefined built-in's under its alias (lib/env.ts `boundIn`).
+    let name = boundName(canonicalName(part), analysis.valueNames)
     let row = analysis.rows.firstIndex { row in
       if case .constant(name, _, false)? = row.definition { return row.slider != nil && row.error == nil }
       return false

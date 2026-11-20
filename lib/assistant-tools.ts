@@ -18,7 +18,7 @@ import { type Analysis, type RowInfo, analyzeRows } from './analysis.ts';
 import { mvOfNode } from './clifford.ts';
 import type { CpuPlan } from './compiler.ts';
 import { type Definition, animatedConstNames, definitionDependencies } from './defs.ts';
-import { canonicalName } from './expr.ts';
+import { canonicalName, unaliased, writtenName } from './expr.ts';
 import type { PublicKind } from './math-object.ts';
 import { publicKind } from './plot.ts';
 import { LOOKUP_HINT, type Variant } from './assistant-instructions.ts';
@@ -92,7 +92,7 @@ export const KIND_MEANINGS: Record<PublicKind, string> = {
   expect: 'expected value readout, marked on the density',
 };
 
-/** 2D-only plots a 3D scene leaves out (web/main.ts SKIPPED_IN_3D). */
+/** 2D-only plots a 3D scene leaves out (web/scene.ts SKIPPED_IN_3D). */
 export const SKIPPED_IN_3D: ReadonlySet<CpuPlan['type']> = new Set([
   'scalar2d',
   'complex2d',
@@ -147,7 +147,7 @@ export function sliderOf(analysis: Analysis, eq: RowInfo) {
   return form ? { def, rhs, form } : null;
 }
 
-/** Row `index` of `texts`, as web/main.ts rowStatus reports it; a hint names the `variant`'s lookup. */
+/** Row `index` of `texts`, as get_graph, set_graph and check report it; a hint names the `variant`'s lookup. */
 export function describeRow(
   analysis: Analysis,
   texts: readonly string[],
@@ -207,10 +207,13 @@ export function describeRow(
   ) {
     row.warning = `this defines ${def.name}, but no other row uses it, so nothing is drawn`;
   }
+  // A redefined built-in (`e := 0.6`, `#e` internally) is named as its row wrote it.
+  if (row.meaning) row.meaning = unaliased(row.meaning);
+  if (row.warning) row.warning = unaliased(row.warning);
   return row;
 }
 
-/** web/main.ts usedElsewhere: whether any other row reads `name`. */
+/** Whether any other row reads `name`. */
 function usedElsewhere(analysis: Analysis, texts: readonly string[], index: number, name: string): boolean {
   const others = analysis.rows.filter((other, i) => i !== index && !other.comment && !other.view);
   const read = definitionDependencies(
@@ -218,13 +221,17 @@ function usedElsewhere(analysis: Analysis, texts: readonly string[], index: numb
     analysis.defs,
   );
   if (read.has(name)) return true;
-  const word = new RegExp(`(?<![\\p{L}_])${name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?![\\p{L}\\p{N}_])`, 'u');
+  // (Rows write a redefined built-in by its own name, not its alias.)
+  const word = new RegExp(
+    `(?<![\\p{L}_])${writtenName(name).replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?![\\p{L}\\p{N}_])`,
+    'u',
+  );
   return texts
     .filter((_, i) => i !== index && !analysis.rows[i].comment && !analysis.rows[i].view)
     .some(other => word.test(canonicalName(stripNote(other).replace(/"[^"]*"/g, '""'))));
 }
 
-/** web/main.ts definitionMeaning: what a definition row makes. */
+/** What a definition row makes. */
 function definitionMeaning(analysis: Analysis, def: Definition, eq: RowInfo, animated: ReadonlySet<string>): string {
   const { name } = def;
   const { defs } = analysis;

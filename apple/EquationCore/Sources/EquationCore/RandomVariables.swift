@@ -1043,7 +1043,7 @@ func buildRVDeclarations(
   for (i, name, rhs) in scan.base {
     if !claim(i, name) { continue }
     do {
-      var d = try parseDistribution(rhs, fnNames: fnNames)
+      var d = try parseDistribution(rhs, fnNames: fnNames, valueNames: ropts.valueNames)
       d.args = try d.args.map(resolver.resolve)
       for a in d.args {
         for f in freeVars(a) where built.names.contains(f) {
@@ -1059,7 +1059,7 @@ func buildRVDeclarations(
   for (i, name, rhs) in scan.derived {
     if !claim(i, name) { continue }
     do {
-      let expr = try resolver.resolve(try parseExpr(rhs, userFns: fnNames))
+      let expr = try resolver.resolve(try parseExpr(rhs, userFns: fnNames, valueNames: ropts.valueNames))
       try checkDerived(expr, built.names, constNames)
       declare(.derived(name: name, expr: expr))
     } catch {

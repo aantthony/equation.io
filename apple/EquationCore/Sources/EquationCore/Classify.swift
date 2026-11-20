@@ -115,9 +115,6 @@ public indirect enum MathObject: Equatable, Sendable {
   /// One copy of the row per list element. `shared`: the one program its
   /// members are drawn with, each choosing itself by the uniform `index`.
   case family(members: [Classified], shared: FamilyShared?)
-  /// A panel's metric (`ds^2 = …`) and the rows that follow it: geodesics,
-  /// light cones, tidal forces (MetricObjects.swift).
-  case metric(MetricObject)
 
   /// The kind as the site's tools name it (`publicKind`).
   public var publicKind: String {
@@ -158,7 +155,6 @@ public indirect enum MathObject: Equatable, Sendable {
     case .histogram: "histogram"
     case .tuples, .blades, .flat: "tuple"
     case .family: "family"
-    case .metric(let object): object.publicKind
     }
   }
 }
@@ -380,7 +376,7 @@ func classify(_ lowered: Expr, defined: Set<String>, fields: [String: Expr]) thr
     if let fn = builtinFn(v) {
       throw LanguageError("\(v) is a function — write it with parentheses, e.g. \(fn)(x).")
     }
-    throw LanguageError("Unknown variable: \(v). Define \"\(v) = 1\" to make a slider.")
+    throw LanguageError(unknownVariable(v))
   }
   let animated = vars.contains("t")
   let hasParam = vars.contains("u") || vars.contains("v")

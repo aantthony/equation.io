@@ -50,9 +50,11 @@ private func writesSum(_ e: Expr) -> Bool {
 /// as a view map reads them, so moving one reanalyses. `documentNames` are
 /// the names the document defines, which a bare function name may be one of.
 func parseSurfaceMap(
-  _ src: String, x: [Double], y: [Double], env: [String: Double] = [:], documentNames: Set<String> = []
+  _ src: String, x: [Double], y: [Double], env: [String: Double] = [:], documentNames: Set<String> = [],
+  valueNames: Set<String> = []
 ) throws -> SurfaceMap {
-  guard let parsed = try? parseExpr(src), case .vec(let items) = parsed, items.count == 3 else {
+  guard let parsed = try? parseExpr(src, valueNames: valueNames), case .vec(let items) = parsed, items.count == 3
+  else {
     throw LanguageError(surfaceUsage)
   }
   // Port: the site writes a map's sums out term by term (`expandMapSums`).
@@ -212,7 +214,7 @@ public func surfaceOver(_ map: SurfaceMap, _ coordinates: [Expr]) -> [Expr] {
 }
 
 /// A parametric region carried onto a surface: the GLSL of its mesh there,
-/// in the region's u and v, its sliders read as uniforms (web/main.ts
+/// in the region's u and v, its sliders read as uniforms (web/scene.ts
 /// `surfaceRegionGLSL`).
 public func surfaceRegionGLSL(_ map: SurfaceMap, _ comps: [Expr], params: [String]) throws
   -> (comps: [String], du: [String]?, dv: [String]?)
@@ -232,7 +234,7 @@ public func surfaceInUV(_ map: SurfaceMap) -> (comps: [Expr], uv: (x: Expr, y: E
 }
 
 /// The surface's mesh as the shaders take it, and its x and y in the mesh's
-/// u and v (web/main.ts `surfaceGLSL`).
+/// u and v (web/scene.ts `surfaceGLSL`).
 public func surfaceGLSL(_ map: SurfaceMap) throws -> (comps: [String], du: [String]?, dv: [String]?, xy: [String]) {
   let (comps, uv) = surfaceInUV(map)
   let mesh = try parametricGLSL(comps, { $0 })

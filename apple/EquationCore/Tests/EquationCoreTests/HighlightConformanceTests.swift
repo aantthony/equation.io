@@ -57,7 +57,6 @@ private struct Fixture: Decodable {
         switch self.plan {
         case nil: nil
         case "note": .note
-        case "metric": .metric
         case "value": .value(shade: shade)
         default: .other
         }

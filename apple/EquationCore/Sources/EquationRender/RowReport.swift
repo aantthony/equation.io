@@ -2,8 +2,8 @@ import EquationCore
 import Foundation
 
 // A row as the tools describe it: lib/assistant-tools.ts `describeRow`,
-// which voice mode's get_graph, the app's Ask and `check` answer with
-// (web/main.ts `rowStatus`). The text is what a model reads, and the Ask
+// which the app's Ask and `check` answer with (first the `rowStatus` of the
+// site's voice mode, since removed). The text is what a model reads, and the Ask
 // evals depend on it, so each sentence is the TypeScript's to the letter; a
 // fixture (apple/corpus/reports.ts) holds this port to it.
 //
@@ -117,11 +117,13 @@ extension DocumentAnalysis {
     if others.contains(where: { rows[$0].classified?.params.contains(name) == true }) { return true }
     for k in others where k < texts.count && rows[k].unsupported == nil {
       let bare = withoutStrings(stripNote(texts[k]))
-      if namesWord(canonicalName(bare), name) { return true }
+      // (Rows write a redefined built-in by its own name, not its alias.)
+      if namesWord(canonicalName(bare), writtenName(name)) { return true }
       let units = Array(texts[k].utf16)
       for span in highlightRows([texts[k]], names: names)[0] where span.cls == .name || span.cls == .fn {
         guard span.start >= 0, span.end <= units.count, span.start < span.end else { continue }
-        if canonicalName(String(decoding: units[span.start..<span.end], as: UTF16.self)) == name { return true }
+        let written = canonicalName(String(decoding: units[span.start..<span.end], as: UTF16.self))
+        if written == writtenName(name) { return true }
       }
     }
     return others.contains { rows[$0].unsupported != nil } ? nil : false
@@ -180,8 +182,8 @@ extension DocumentAnalysis {
     }
   }
 
-  /// Row `index` of `texts` (the rows as written), as web/main.ts
-  /// `rowStatus` reports it (`describeRow`). `kindMeanings` is lib/row-kind.ts
+  /// Row `index` of `texts` (the rows as written), as lib/assistant-tools.ts
+  /// `describeRow` reports it. `kindMeanings` is its
   /// `KIND_MEANINGS` (the app bundles it in language.json); `lookupHint`
   /// what an unknown function's hint says to do (`LOOKUP_HINT`).
   ///
@@ -260,6 +262,9 @@ extension DocumentAnalysis {
       }
     default: break
     }
+    // A redefined built-in (`e := 0.6`, `#e` internally) is named as its row wrote it.
+    out.meaning = out.meaning.map(unaliased)
+    out.warning = out.warning.map(unaliased)
     return out
   }
 }

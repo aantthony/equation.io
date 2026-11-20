@@ -5,7 +5,7 @@ import Testing
 @testable import EquationRender
 
 /// What Graph2D makes of the list plans (Graph2D+Lists.swift), held to what
-/// web/main.ts draws of the same rows.
+/// web/scene.ts draws of the same rows.
 @Suite struct ListGraph {
   private func graph(_ rows: [String]) -> Graph2D {
     let analysis = analyze(rows)

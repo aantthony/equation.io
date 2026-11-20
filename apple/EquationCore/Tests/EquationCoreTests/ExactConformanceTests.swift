@@ -193,10 +193,8 @@ import Testing
     for c in corpus["polyPairs"] as! [[String: Any]] {
       let (a, b) = (poly(c["a"]), poly(c["b"]))
       let (q, r) = fpdivmod(a, b)
-      let ext = fpextgcd(a, b)
-      let wanted = c["ext"] as! [String: Any]
-      let got = [spell(q), spell(r), spell(fpgcd(a, b)), spell(ext.g), spell(ext.s), spell(ext.t)]
-      let want = [c["q"], c["r"], c["gcd"], wanted["g"], wanted["s"], wanted["t"]].map { $0 as! [String] }
+      let got = [spell(q), spell(r), spell(fpgcd(a, b))]
+      let want = [c["q"], c["r"], c["gcd"]].map { $0 as! [String] }
       if got != want { failures.append("\(spell(a)) and \(spell(b)): got \(got), want \(want)") }
     }
     #expect(failures.isEmpty, "\(failures.count) differ:\n\(failures.prefix(10).joined(separator: "\n"))")

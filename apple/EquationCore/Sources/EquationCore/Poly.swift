@@ -142,22 +142,6 @@ func fpgcd(_ a: FPoly, _ b: FPoly) -> FPoly {
   return x
 }
 
-/// Extended Euclid: g = gcd(a, b) with s·a + t·b = g (g as fpgcd computes it,
-/// up to a rational scale absorbed into s and t). Exact Frac arithmetic, no
-/// primitive-part shortcuts — the cofactors are the point.
-func fpextgcd(_ a: FPoly, _ b: FPoly) -> (g: FPoly, s: FPoly, t: FPoly) {
-  var (r0, r1) = (a, b)
-  var (s0, s1): (FPoly, FPoly) = ([F1], [])
-  var (t0, t1): (FPoly, FPoly) = ([], [F1])
-  while !r1.isEmpty {
-    let (q, r) = fpdivmod(r0, r1)
-    (r0, r1) = (r1, r)
-    (s0, s1) = (s1, fpadd(s0, fpscale(fpmul(q, s1), FMinus1)))
-    (t0, t1) = (t1, fpadd(t0, fpscale(fpmul(q, t1), FMinus1)))
-  }
-  return (r0, s0, t0)
-}
-
 // MARK: - Expression → polynomial coefficients
 
 private let MAX_DEGREE = 128

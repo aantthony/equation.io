@@ -30,7 +30,7 @@ extension View2D {
   /// The window showing the given ranges in a box `width` × `height` pixels:
   /// one range alone keeps the other axis's center, and the scale is the one
   /// that shows every range asked for (lib/view.ts `fitView2D`, as
-  /// web/main.ts `movePanelView` uses it).
+  /// the site's former voice mode's `movePanelView` uses it).
   public func fitting(x: (Double, Double)?, y: (Double, Double)?, width: Double, height: Double) -> View2D {
     var to = self
     guard width > 0, height > 0 else { return to }

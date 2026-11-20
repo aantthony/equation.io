@@ -3,7 +3,7 @@ import Foundation
 
 // A panel's window: the one its view(…) row frames, and the axes it shares
 // with the panel it split from (`--- below, shared x`). lib/view.ts
-// `fitView2D`, `linkedWindow` and `fitPanelWindow`, and web/main.ts
+// `fitView2D`, `linkedWindow` and `fitPanelWindow`, and web/session.ts
 // `syncLinks`, on the renderer's `View2D`.
 
 /// What a view(…) row asks for: [lo, hi] of each axis it names, and the
@@ -89,7 +89,7 @@ private func sameWindow(_ a: View2D, _ b: View2D) -> Bool {
   a.cx == b.cx && a.cy == b.cy && a.upp == b.upp && (a.ratio ?? 1) == (b.ratio ?? 1)
 }
 
-/// Carry shared axes between panels (web/main.ts `syncLinks`). A panel a
+/// Carry shared axes between panels (web/session.ts `syncLinks`). A panel a
 /// gesture `moved` first pushes its shared axes up to the panels that own
 /// them; then every sharing panel takes them from there, in panel order, so
 /// an owner (always earlier) is settled before the panels that follow it.

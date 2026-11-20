@@ -1,12 +1,12 @@
 import EquationCore
 import Foundation
 
-/// What web/main.ts draws of the discrete plans and of an integral's row:
+/// What web/scene.ts draws of the discrete plans and of an integral's row:
 /// a sequence's dots, a cobweb's path, an orbit diagram's seed, the area a
 /// definite integral shades. These read the window, which the shader passes
 /// get as uniforms but the overlay must be told (`Graph2D.Bounds`).
 extension Graph2D {
-  /// The part of the plane a frame shows (web/main.ts `xmin`, `xmax`,
+  /// The part of the plane a frame shows (web/scene.ts `xmin`, `xmax`,
   /// `view.cy ± halfH`).
   public struct Bounds: Equatable, Sendable {
     public var xmin: Double
@@ -30,12 +30,12 @@ extension Graph2D {
   }
 
   /// A recurrence's seed: the constant a_0 when the document defines one,
-  /// else 1/2 (web/main.ts `seedOf`).
+  /// else 1/2 (web/scene.ts `seedOf`).
   static func seed(_ a0Name: String?, _ env: [String: Double]) -> Double {
     a0Name.flatMap { env[$0] } ?? 0.5
   }
 
-  /// A sequence's dots at the whole n in view (web/main.ts, case 'sequence').
+  /// A sequence's dots at the whole n in view (web/scene.ts, case 'sequence').
   /// In partial-sum mode they are S_N = Σ a_n, accumulated from n = 0; terms
   /// that are not finite, like 1/0², are skipped. A term that throws (a
   /// Σ(s=1..n, …) past its term limit) is skipped, and a partial sum stops
@@ -78,7 +78,7 @@ extension Graph2D {
     return points
   }
 
-  /// A cobweb's overlay (web/main.ts, case 'cobweb'): the diagonal y = x the
+  /// A cobweb's overlay (web/scene.ts, case 'cobweb'): the diagonal y = x the
   /// orbit reflects off, the path from the seed, and the seed's dot. (The
   /// curve y = f(x) is a shader layer.)
   static func cobweb(
@@ -108,7 +108,7 @@ extension Graph2D {
 // MARK: - The integer lattice
 
 extension Graph2D {
-  /// The lattice a panel is (web/main.ts `syncPanels`): its view row names
+  /// The lattice a panel is (web/session.ts `syncPanels`): its view row names
   /// the index axes, or every row it draws is an automaton's or a table's.
   /// The rows say which index runs across; a view row naming the same two in
   /// the other order still frames them. Nil for the plane.
@@ -159,10 +159,10 @@ extension Graph2D {
     return ([-y[1], -y[0]], [-x[1], -x[0]])
   }
 
-  /// Generations a board catches up by in one frame (web/main.ts `BOARD_CATCH_UP`).
+  /// Generations a board catches up by in one frame (web/scene.ts `BOARD_CATCH_UP`).
   static let boardCatchUp = 40.0
 
-  /// The cells this frame draws (web/main.ts, cases 'automaton' and
+  /// The cells this frame draws (web/scene.ts, cases 'automaton' and
   /// 'lattice'), and the lattice's labels: its axes, the values of the cells
   /// in view once they are big enough to print, a board's generation.
   /// `view` shows `width` × `height` of its pixels, `dpr` to a point.
@@ -251,7 +251,7 @@ extension Graph2D {
     return (layers, lattice == nil ? nil : labels, behind)
   }
 
-  /// Cells for the renderer, coloured where drawn (web/main.ts `cellsOf`).
+  /// Cells for the renderer, coloured where drawn (web/scene.ts `cellsOf`).
   static func cellsOf(_ g: CellGrid, runs: Cells2D.Runs, shades: [UInt8]) -> Cells2D {
     Cells2D(
       shades: CellShades(shades), width: g.width, rows: g.rows, x0: Double(g.x0), y0: Double(g.y0), runs: runs,

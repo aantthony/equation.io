@@ -65,7 +65,7 @@ struct AssistantData: Decodable, Sendable {
 /// lib/assistant-tools.ts reads from the language rather than the reference.
 struct LanguageData: Decodable, Sendable {
   var builtins: Table
-  /// lib/row-kind.ts `KIND_MEANINGS`: what each kind draws.
+  /// lib/assistant-tools.ts `KIND_MEANINGS`: what each kind draws.
   var kindMeanings: [String: String]
   /// Each kind's smallest form as rows (lib/statements.ts `splitStatements`).
   var forms: [String: [String]]

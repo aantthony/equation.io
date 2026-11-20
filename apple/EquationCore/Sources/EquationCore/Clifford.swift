@@ -169,8 +169,6 @@ private func product(_ a: Multivector, _ b: Multivector, _ keep: (Int, Int) -> B
 func geometric(_ a: Multivector, _ b: Multivector) -> Multivector { product(a, b) { _, _ in true } }
 /// The outer product: the part of the geometric product whose grades add.
 func outerMv(_ a: Multivector, _ b: Multivector) -> Multivector { product(a, b) { i, j in i & j == 0 } }
-/// The left contraction a ⌋ b: the part of grade grade(b) − grade(a).
-func innerMv(_ a: Multivector, _ b: Multivector) -> Multivector { product(a, b) { i, j in i & j == i } }
 
 /// Flip each grade k whose sign(k) is −1.
 private func gradeSigns(_ a: Multivector, _ flips: (Int) -> Bool) -> Multivector {

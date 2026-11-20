@@ -247,7 +247,7 @@ private let groupedCalls: Set<String> = [
   // A curve, whole: curvature((cos(u), sin(u)), 0.5).
   "curvature", "torsion", "osculating", "frame",
   // A surface, whole: gaussian((u, v, u v), (0.5, 0.5)), and a geodesic's start and direction.
-  "gaussian", "meancurvature", "geodesic", "lightray", "lightcone", "tidal",
+  "gaussian", "meancurvature", "geodesic",
   // sort((s, sin(s)), s): the points to order, then their key.
   "sort", "fourier", "reconstruct",
   // A stack is a tuple, whole: push((1, 2), 3) is (1, 2, 3).

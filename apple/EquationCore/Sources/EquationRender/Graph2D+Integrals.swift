@@ -1,7 +1,7 @@
 import EquationCore
 import Foundation
 
-/// What the CPU draws of a definite integral's row (web/main.ts, the `value`
+/// What the CPU draws of a definite integral's row (web/scene.ts, the `value`
 /// case of its plan switch): the number lives in the row's readout; the plot
 /// is the area it measures. Parts that add to the value take the row color,
 /// parts that subtract its complement.

@@ -141,6 +141,21 @@ import Testing
     #expect(analysis.movingPoint(row: 0, to: 1, 2, upp: upp, in: rows) == nil)
   }
 
+  @Test func aDragKeepsAnExplicitDefinition() throws {
+    // `:=` and the written name are kept; a redefined built-in's slider is found by the name rows write.
+    let rows = ["A := (e, 3) # here", "e := clamp(0.6, 0, 4)", "P := (1, 2)"]
+    let analysis = analyze(rows)
+    let upp = (x: 0.01, y: 0.01)
+    let moved = try #require(analysis.movingPoint(row: 0, to: 9, 0.5, upp: upp, in: rows))
+    #expect(moved[0] == "A := (e, 0.5) # here" && moved[1] == "e := clamp(4, 0, 4)")
+    #expect(analysis.movingPoint(row: 2, to: 2, 3, upp: upp, in: rows)?[2] == "P := (2, 3)")
+    #expect(analysis.settingSlider(row: 1, to: 1.5, in: rows[1]) == "e := clamp(1.5, 0, 4)")
+    // The point is labelled as written.
+    var env = analysis.environment(at: 0)
+    env["t"] = 0
+    #expect(analysis.grabPoints(rows: 0..<rows.count, env: env).map(\.row) == [0, 2])
+  }
+
   @Test func pointsThatCanMoveAreTheOnesGrabbed() {
     let rows = ["(1, 2)", "A = (a, 3)", "a = 1.5", "(2cos(t), 2sin(t))", "B = (1, 2, 3)"]
     let analysis = analyze(rows)

@@ -1,7 +1,7 @@
 import EquationCore
 import Foundation
 
-// States on the drawing side (web/main.ts `currentConstEnv`, `orbitFor`).
+// States on the drawing side (web/session.ts `currentConstEnv`, `orbitFor`).
 //
 // A graph is a pure function of its rows; a state system's run is not. The
 // run is an EquationCore `StateStepper`, owned by whoever draws frames: each

@@ -62,6 +62,12 @@ const CASES: string[] = [
   'n = 5; sum(k, 1, n, k^2)',
   'a = [1..33]; y = a x',
   'y = a x',
+  // Explicit definitions, and built-ins they redefine: named as written.
+  'a := 2; y = a x; f(x) := x^2; b := 3',
+  'e := 0.6; y = e x',
+  'e := 0.6; pi := 3; i := 2 + e; t := 1; w := x - y',
+  'f(e) := e^2; f(3); g(t) := t + 1',
+  'e := (1, 2); e; x := 3; e(x) := x',
 ];
 
 const docs = [

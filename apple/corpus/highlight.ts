@@ -73,6 +73,12 @@ A = (1, 2);;A = (3, 4);;(1, 2);;(1, 2) # dot;;B = (t, 2)
 sin;;sin(;;sin (x);;f (x);;N (0, 1);;P (X);;view (1)
 r = sqrt(x^2 + y^2);;r = 2;;theta = atan2(y, x);;r = 1 + cos(theta)
 x_1 = 2;;y = x_1 + x_2;;v_x = 3;;u_time
+a := 2;;f(x) := x^2;;y = f(x) + a;;b' := -b;;b(0) := 1;;A := (1, 2);;A.x
+e := 0.6;;y = e x + e^x;;pi := 3;;y = sin(pi x) + π;;2e
+i := 3;;w := x - y;;t := 2;;y = i x + w + t;;e + pi
+f(e) := e^2;;f(3) + e;;g(i, t) := i t;;x := 3;;e(x) := x
+a_n := n^2;;a_3;;b_0 := 1;;b_{n+1} := 2 b_n;;X ~ Normal(0, 1);;Y := 2X
+label((0, 0), "a := b");;y = 1 + (a := 2);;a := "x := y";;c :=;;:= 2
 `
   .trim()
   .split('\n')

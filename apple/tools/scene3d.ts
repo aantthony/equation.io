@@ -10,7 +10,7 @@
  *   --dark     the dark theme's row colors
  *   --time 1   seconds since the graph opened (t)
  *
- * It follows web/main.ts renderPanel for the rows a document can draw
+ * It follows web/scene.ts renderPanel for the rows a document can draw
  * without the page: surfaces, planes, clouds, parametric surfaces and
  * curves (tubes too), points, polygons and hulls, vector fields
  * (streamlines when the row's note says `# streamlines`, arrows for
@@ -54,7 +54,7 @@ export function graphJSON(
   const { rows, constEnv, defs } = analyzeRows(texts, { backend: 'both', readouts: false });
   const env = { ...constEnv, t: time };
 
-  // web/main.ts defaultCamera, and the camera row over it.
+  // web/session.ts defaultCamera, and the camera row over it.
   const camera = { target: [0, 0, 0], radius: 14, theta: -Math.PI / 3, phi: Math.PI / 5.5 };
   for (const row of rows) {
     if (row.view?.kind !== 'camera') continue;
@@ -80,7 +80,7 @@ export function graphJSON(
   };
 
   /** A point on a surface moved a hair toward the eye, so the surface does
-   *  not hide what lies exactly on it: web/main.ts towardEye. */
+   *  not hide what lies exactly on it: web/scene.ts towardEye. */
   const lifted = (p: readonly number[]): [number, number, number] => {
     const cp = Math.cos(camera.phi);
     const eye = [
@@ -99,7 +99,7 @@ export function graphJSON(
     segments: scene.segments.length,
   });
   /** What a 2D row added to the scene since `mark`, placed in the plane
-   *  z = 0, carried onto the surface: web/main.ts carryOntoSurface. */
+   *  z = 0, carried onto the surface: web/scene.ts carryOntoSurface. */
   const carryOntoSurface = (mark: ReturnType<typeof markScene>, surface: SurfaceMap) => {
     const SURFACE_PIECES = 24;
     const onto = (x: number, y: number) => lifted(surfacePoint(surface, x, y));
@@ -148,7 +148,7 @@ export function graphJSON(
   const TUBE_SEGMENTS = 24;
 
   /** What brings a surface's paint (its curvature) to about 1 where it is
-   *  typical: web/main.ts paintGain. */
+   *  typical: web/scene.ts paintGain. */
   function paintGain(comps: readonly Expr[], paint: Expr): number {
     const unit: [[number, number], [number, number]] = [
       [0, 1],
@@ -167,7 +167,7 @@ export function graphJSON(
     const params = gpu?.params ?? [];
     const uniforms = gpu?.uniforms;
     const bindings = { params, uniforms };
-    // The box solvers search, padded as web/main.ts solveFor pads it.
+    // The box solvers search, padded as web/scene.ts solveFor pads it.
     const lo = camera.target.map(c => c - 1.5 * boxR);
     const hi = camera.target.map(c => c + 1.5 * boxR);
     /** A polyline, as the floats the page uploads; `lift` between two paths lifts the pen. */

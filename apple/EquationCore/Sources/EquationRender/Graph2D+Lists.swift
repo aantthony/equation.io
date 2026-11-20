@@ -8,7 +8,7 @@ import Foundation
 /// each a shade lighter than the last.
 extension Graph2D {
   /// Above this many points, a packed list draws as a bulk cloud rather than
-  /// as individual outlined points (web/main.ts `CLOUD_MIN`).
+  /// as individual outlined points (web/session.ts `CLOUD_MIN`).
   static let cloudMin = 400
   /// Dot diameters in points: a listed point (r 4) and a cloud dot.
   static let pointDotPx = 8.0
@@ -23,7 +23,7 @@ extension Graph2D {
 
   /// A row as the rows that draw it: itself, or — a family — one row per
   /// member with the member's plans and its shade of the row's color
-  /// (web/main.ts `renderMembers`).
+  /// (web/scene.ts `renderMembers`).
   static func familyMembers(_ row: RowAnalysis, _ cpu: CpuPlan, _ color: RGB) -> [(row: RowAnalysis, color: RGB)] {
     guard case .family(let members) = cpu else { return [(row, color)] }
     var shaders: [GpuPlan] = []
@@ -70,7 +70,7 @@ extension Graph2D {
   /// A list of numbers as its dot plot (lib/plot.ts `dotPlot`), stacked in
   /// columns one dot wide at the current zoom: dots that would overlap share
   /// a column, and values at least a dot apart keep their exact place, so a
-  /// small list stacks exact copies (web/main.ts `columnStacks`).
+  /// small list stacks exact copies (web/session.ts `columnStacks`).
   /// `pointsPerUnit` is the zoom; without it nothing is gathered.
   static func columnStacks(_ values: [Double], dotPx: Double, pointsPerUnit: Double?) -> (xs: [Double], ys: [Double]) {
     let width = pointsPerUnit.map { dotPx / $0 } ?? 0

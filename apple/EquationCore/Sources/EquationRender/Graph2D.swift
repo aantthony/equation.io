@@ -44,8 +44,6 @@ public struct Graph2D: Equatable, Sendable {
   let systemsSolved = SolvedSystems()
   /// Each parametric region's triangles (Graph2D+ParametricRegions.swift).
   let sampledRegions = SampledRegions()
-  /// What each row of a panel's metric last drew (Graph2D+Metrics.swift).
-  let metricsDrawn = DrawnMetrics()
 
   public struct Window: Equatable, Sendable {
     public var x: [Double]?
@@ -167,16 +165,10 @@ public struct Graph2D: Equatable, Sendable {
       if row.cpu == nil, let name = row.definition?.name, let x = env["\(name)_x"], let y = env["\(name)_y"],
         env["\(name)_z"] == nil, x.isFinite, y.isFinite
       {
-        overlay.points.append(.init(x: x, y: y, color: css, label: name))
+        overlay.points.append(.init(x: x, y: y, color: css, label: writtenName(name)))
         continue
       }
       guard let cpu = row.cpu else { continue }
-      // A geodesic, light cones or tidal forces of the panel's metric.
-      if drawMetrics(
-        cpu, row: index, env, color: color, bounds: bounds, pointsPerUnit: pointsPerUnit, into: &overlay)
-      {
-        continue
-      }
       switch cpu {
       case .point(2, let coords) where coords.count == 2:
         guard let x = try? evaluate(coords[0], env), let y = try? evaluate(coords[1], env), x.isFinite, y.isFinite

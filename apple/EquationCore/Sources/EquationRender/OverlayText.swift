@@ -8,7 +8,7 @@ import Foundation
 // `textAlign` and `textBaseline`, and the fonts the site names.
 
 /// A color the overlay is handed: on the site a CSS string, `rgb(45, 112,
-/// 179)` or `rgba(45, 112, 179, 0.16)` (web/main.ts `cssColor`, `cssColorA`),
+/// 179)` or `rgba(45, 112, 179, 0.16)` (web/session.ts `cssColor`, `cssColorA`),
 /// or a hex one from the theme. Kept as numbers here, and written down as the
 /// string, so an overlay in JSON is the site's.
 public struct CSSColor: Equatable, Sendable, Codable, ExpressibleByStringLiteral {
@@ -25,7 +25,7 @@ public struct CSSColor: Equatable, Sendable, Codable, ExpressibleByStringLiteral
     self.a = a
   }
 
-  /// web/main.ts `cssColor` and `cssColorA`: a row's color, rounded to the
+  /// web/session.ts `cssColor` and `cssColorA`: a row's color, rounded to the
   /// 255ths a CSS string carries.
   public init(_ c: RGB, alpha: Double = 1) {
     self.init(

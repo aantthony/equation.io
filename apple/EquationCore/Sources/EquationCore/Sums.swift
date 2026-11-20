@@ -298,20 +298,23 @@ extension Resolver {
     // A bound that names a list is one sum per element (ObjectLists.swift).
     let body = markedLists(body)
     if let listed = try sumOverList(name, sym, args, body) { return listed }
-    // A bound that uses an open name (the sequence index) cannot be expanded
-    // here: the sum stays a call and evaluate() runs it once that name is a number.
+    // A bound that uses an open name (the sequence index, or a function's
+    // parameter) cannot be expanded here: the sum stays a call and evaluate()
+    // runs it once that name is a number.
     func bound(_ b: Expr) throws -> (expr: Expr, value: Double?) {
       let r = try resolve(b)
       var env: [String: Double] = [:]
       var open = false
       for fv in freeVars(r) {
+        // A function's parameter is its argument, never the document's name of
+        // the same spelling: the bound stays open until the call substitutes it.
+        if opts.params?.contains(fv) == true || opts.openVars.contains(fv) {
+          open = true
+          continue
+        }
         if let v = opts.consts(fv) {
           opts.boundConsts?.names.insert(fv)
           env[fv] = v
-          continue
-        }
-        if opts.openVars.contains(fv) {
-          open = true
           continue
         }
         if fv == "t" || reservedNames.contains(fv) { throw LanguageError("\(sym) bounds cannot depend on \(fv).") }
@@ -323,6 +326,7 @@ extension Resolver {
       return (r, v)
     }
     let lo = try bound(args[1])
+    if let loValue = lo.value, let gated = try sliderGated(name, idx, args[2], body, loValue) { return gated }
     let hi = try bound(args[2])
     guard let loValue = lo.value, let hiValue = hi.value else {
       var inner = self
@@ -348,4 +352,80 @@ extension Resolver {
     }
     return acc ?? .num(name == "sum" ? 0 : 1)
   }
+
+  /// Expand the Σ/Π a function's body left open on its parameters, now that
+  /// a call has substituted its arguments: `f(N) = sum(k=1..N, k)` keeps the
+  /// sum a call (expandSum), and `f(100)` expands it to 100. A bound still
+  /// open here — on an enclosing function's parameter or a sequence index —
+  /// waits as before (lib/sums.ts `expandClosedSums`).
+  func expandClosedSums(_ e: Expr) throws -> Expr {
+    if case .call(let name, let args) = e, name == "sum" || name == "prod", args.count == 4 {
+      func open(_ b: Expr) -> Bool {
+        freeVars(b).contains { opts.params?.contains($0) == true || opts.openVars.contains($0) }
+      }
+      if open(args[1]) || open(args[2]) { return e }
+      return try expandSum(e, args[3])
+    }
+    return try mapChildren(e) { try expandClosedSums($0) }
+  }
+
+  /// A Σ up to a clamped whole-number slider, `N = round(clamp(19, 1, 50))`,
+  /// whose terms form a sine/cosine series expands to the slider's maximum,
+  /// each term gated on `N >= k`: N is then read at runtime rather than baked
+  /// into the expansion, and Shader.swift's fourierLoop runs the series only
+  /// up to N, as for reconstruct. Nil for anything else — another bound or
+  /// body, a range fourierLoop cannot loop over — which then expands at the
+  /// current value as usual (lib/sums.ts `sliderGated`).
+  private func sliderGated(_ sum: String, _ idx: String, _ hiE: Expr, _ body: Expr, _ lo: Double) throws -> Expr? {
+    guard sum == "sum", case .var(let name) = hiE else { return nil }
+    // A parameter or open index named like a slider is its own value.
+    if opts.params?.contains(name) == true || opts.openVars.contains(name) { return nil }
+    guard opts.consts(name) != nil, let range = wholeClampRange(opts.definition(name)) else { return nil }
+    let start = (lo - 1e-9).rounded(.up)
+    let count = range.hi - start + 1
+    if start < 1 || count > Double(sumMaxTerms) || Double(ctx.terms) + count > Double(sumMaxTotal) { return nil }
+    var acc: Expr?
+    var k = start
+    while k <= range.hi {
+      // Even the terms the slider's minimum always keeps are gated: a uniform
+      // run of gates is the shape fourierLoop reads.
+      let value = Expr.piecewise(
+        [Expr.Case(cond: .ineq(.ge, hiE, .num(k)), value: foldNums(try resolve(substIdx(body, idx, .num(k)))))],
+        otherwise: .num(0))
+      acc = acc.map { add($0, value) } ?? value
+      k += 1
+    }
+    guard let acc, fourierSeries(acc) != nil else { return nil }
+    ctx.terms += Int(count)
+    opts.boundConsts?.names.insert(name)
+    return acc
+  }
+}
+
+/// The whole-number [lo, hi] of a rounded clamp slider — round(clamp(v, lo,
+/// hi)) or clamp(round(v), lo, hi), i.e. min(max(…)) with a round, floor or
+/// ceil outside or around v and integer ends — or nil. Its value is then
+/// always a whole number in [lo, hi], so `N >= k` gates exactly
+/// (lib/sums.ts `wholeClampRange`).
+private func wholeClampRange(_ definition: Expr?) -> (lo: Double, hi: Double)? {
+  func rounding(_ e: Expr?) -> Expr? {
+    if case .call(let name, let args)? = e, ["round", "floor", "ceil"].contains(name), args.count == 1 {
+      return args[0]
+    }
+    return nil
+  }
+  var e = definition
+  var rounded = false
+  while let inner = rounding(e) {
+    rounded = true
+    e = inner
+  }
+  guard case .call("min", let outer)? = e, outer.count == 2, case .call("max", let inside) = outer[0],
+    inside.count == 2
+  else { return nil }
+  if !rounded && rounding(inside[0]) == nil { return nil }
+  guard case .num(let lo) = inside[1], case .num(let hi) = outer[1], lo.isFinite, hi.isFinite,
+    lo == lo.rounded(), hi == hi.rounded()
+  else { return nil }
+  return hi > lo ? (lo, hi) : nil
 }

@@ -59,6 +59,8 @@ func buildRandomVariables(_ scan: RandomScan, _ built: BuiltDefs, _ raw: [Defini
 {
   let fnNames = Set(raw.compactMap { if case .function(let name, _, _) = $0 { name } else { nil } })
   var ropts = ResolveOpts()
+  // The document's shadowed names: `e` after `e := 2` (lib/analysis.ts `valueNames`).
+  ropts.valueNames = shadowedNames(raw.filter { $0.kind != "fn" }.map(\.name) + scan.names)
   ropts.definition = { built.fields[$0] ?? built.conditions[$0] ?? built.consts[$0] }
   ropts.comps = { built.points.contains($0) ? pointComps($0, built.pointDims[$0] ?? 2) : nil }
   ropts.documentNames = documentNames

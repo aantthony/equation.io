@@ -1,7 +1,7 @@
 import EquationCore
 import Foundation
 
-/// What geometry rows draw over the shader passes (web/main.ts, the
+/// What geometry rows draw over the shader passes (web/scene.ts, the
 /// 'polygon' and 'label' cases of its 2D overlay): a figure as a polyline
 /// through its vertices — closed and filled for a polygon, a square or a
 /// hull, with an arrow head for a vector — and a label as text at its point.

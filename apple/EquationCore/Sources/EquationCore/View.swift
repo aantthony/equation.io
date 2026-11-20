@@ -249,10 +249,12 @@ private func numExpr(_ e: Expr, _ env: [String: Double], _ what: String) throws 
   return v
 }
 
-private func num(_ src: String, _ env: [String: Double], _ what: String) throws -> Double {
+private func num(_ src: String, _ env: [String: Double], _ what: String, _ valueNames: Set<String>) throws
+  -> Double
+{
   let parsed: Expr
   do {
-    parsed = try parseExpr(src)
+    parsed = try parseExpr(src, valueNames: valueNames)
   } catch {
     throw LanguageError("\(what): \(error.message)")
   }
@@ -292,10 +294,11 @@ private func mentionsWord(_ text: String, _ word: String) -> Bool {
 /// rows fall through to the expression parser); throws a row-friendly error
 /// when it is one but malformed. `env` supplies constant values at t = 0.
 func parseViewRow(
-  _ text: String, _ env: [String: Double], documentNames: Set<String> = []
+  _ text: String, _ env: [String: Double], documentNames: Set<String> = [], valueNames: Set<String> = []
 ) throws -> ViewSpec? {
   var axes: [String]?
-  return try parseViewRow(text, env, documentNames: documentNames, latticeAxes: &axes)
+  return try parseViewRow(
+    text, env, documentNames: documentNames, valueNames: valueNames, latticeAxes: &axes)
 }
 
 /// `latticeAxes` comes back as the index axes a lattice view names, [across,
@@ -304,7 +307,8 @@ func parseViewRow(
 /// `documentNames` are the names the document defines, which a map's bare
 /// function name may be one of.
 func parseViewRow(
-  _ text: String, _ env: [String: Double], documentNames: Set<String> = [], latticeAxes: inout [String]?
+  _ text: String, _ env: [String: Double], documentNames: Set<String> = [], valueNames: Set<String> = [],
+  latticeAxes: inout [String]?
 ) throws -> ViewSpec? {
   if let split = try parseDividerRow(text) { return split }
   if let body = wholeCallBody(text, "grid") {
@@ -326,7 +330,7 @@ func parseViewRow(
   } else if let body = wholeCallBody(text, "camera") {
     (head, inner) = ("camera", body)
   } else if let body = wholeCallBody(text, "on") {
-    return try parseSurfaceRow(body, env, documentNames: documentNames)
+    return try parseSurfaceRow(body, env, documentNames: documentNames, valueNames: valueNames)
   } else {
     return nil
   }
@@ -366,7 +370,7 @@ func parseViewRow(
       let axis = named.name
       if axis == "ratio" {
         if ratio != nil { throw LanguageError("view(...) sets ratio twice.") }
-        let value = try num(named.value, env, "view ratio")
+        let value = try num(named.value, env, "view ratio", valueNames)
         if value <= 0 { throw LanguageError("The view ratio must be positive.") }
         ratio = value
         continue
@@ -375,7 +379,8 @@ func parseViewRow(
       // `x = 10^X`: no range, and the screen's X, so a map from the screen to x.
       if range == nil, let mapped = AxisMap.Axis(rawValue: axis), mentionsWord(named.value, mapped.screen) {
         if maps[mapped] != nil { throw LanguageError("view(...) maps \(axis) twice.") }
-        let map = try parseAxisMap(mapped, named.value, env: env, documentNames: documentNames)
+        let map = try parseAxisMap(
+          mapped, named.value, env: env, documentNames: documentNames, valueNames: valueNames)
         if mapped == .x { maps.x = map } else { maps.y = map }
         continue
       }
@@ -383,8 +388,8 @@ func parseViewRow(
         throw LanguageError("view(...) sets \(axis) twice.")
       }
       guard let range else { throw LanguageError(usage) }
-      let lo = try num(range.0, env, "view \(axis) lower bound")
-      let hi = try num(range.1, env, "view \(axis) upper bound")
+      let lo = try num(range.0, env, "view \(axis) lower bound", valueNames)
+      let hi = try num(range.1, env, "view \(axis) upper bound", valueNames)
       if lo >= hi {
         throw LanguageError("view \(axis) range needs lo < hi (got \(JS.string(lo))..\(JS.string(hi))).")
       }
@@ -440,19 +445,19 @@ func parseViewRow(
     }
   }
   if args.count < 2 || args.count > 4 { throw LanguageError(usage) }
-  let theta = try num(args[0], env, "camera theta")
-  let phi = try num(args[1], env, "camera phi")
+  let theta = try num(args[0], env, "camera theta", valueNames)
+  let phi = try num(args[1], env, "camera phi", valueNames)
   var radius: Double?
   var target: [Double]?
   for arg in args.dropFirst(2) {
-    guard let parsed = try? parseExpr(arg) else { throw LanguageError(usage) }
+    guard let parsed = try? parseExpr(arg, valueNames: valueNames) else { throw LanguageError(usage) }
     if case .vec(let items) = parsed {
       if target != nil { throw LanguageError("camera(...) sets the target twice.") }
       if items.count != 3 { throw LanguageError("The camera target needs 3 components: (x, y, z).") }
       target = try items.map { try numExpr($0, env, "camera target") }
     } else {
       if radius != nil { throw LanguageError("camera(...) sets the radius twice.") }
-      let r = try num(arg, env, "camera radius")
+      let r = try num(arg, env, "camera radius", valueNames)
       if r <= 0 { throw LanguageError("The camera radius must be positive.") }
       radius = r
     }
@@ -460,7 +465,7 @@ func parseViewRow(
   var spin: Double?
   if let spinText {
     if jsTrimmed(spinText).isEmpty { throw LanguageError(usage) }
-    let value = try num(spinText, env, "camera spin")
+    let value = try num(spinText, env, "camera spin", valueNames)
     if value != 0 { spin = value }
   }
   return .camera(theta: theta, phi: phi, radius: radius, target: target, spin: spin, locked: locked)
@@ -468,7 +473,9 @@ func parseViewRow(
 
 /// `on((X, Y, Z) = (…), x = lo..hi, y = lo..hi)`: the surface the panel's 2D
 /// rows are drawn on (lib/view.ts `parseSurfaceRow`).
-private func parseSurfaceRow(_ inner: String, _ env: [String: Double], documentNames: Set<String>) throws
+private func parseSurfaceRow(
+  _ inner: String, _ env: [String: Double], documentNames: Set<String>, valueNames: Set<String>
+) throws
   -> ViewSpec
 {
   let args = splitArgs(inner)
@@ -506,11 +513,12 @@ private func parseSurfaceRow(_ inner: String, _ env: [String: Double], documentN
     else { throw LanguageError(usage) }
     let axis = named.name
     if ranges[axis] != nil { throw LanguageError("on(…) sets \(axis) twice.") }
-    let lo = try num(range.0, env, "\(axis) lower bound")
-    let hi = try num(range.1, env, "\(axis) upper bound")
+    let lo = try num(range.0, env, "\(axis) lower bound", valueNames)
+    let hi = try num(range.1, env, "\(axis) upper bound", valueNames)
     if lo >= hi { throw LanguageError("The \(axis) range needs lo < hi (got \(JS.string(lo))..\(JS.string(hi))).") }
     ranges[axis] = [lo, hi]
   }
   guard let src, let x = ranges["x"], let y = ranges["y"] else { throw LanguageError(usage) }
-  return .surface(try parseSurfaceMap(src, x: x, y: y, env: env, documentNames: documentNames))
+  return .surface(
+    try parseSurfaceMap(src, x: x, y: y, env: env, documentNames: documentNames, valueNames: valueNames))
 }

@@ -164,7 +164,9 @@ public func canonicalName(_ name: String) -> String {
 /// Split into tokens, lowering unicode sugar as each one is read (glyphs to
 /// names, subscripts to `_`, superscripts to `^ n`), so the first bad
 /// character or exponent is the one reported, as in the lazy TypeScript.
-func tokenize(_ text: String) throws(ParseError) -> [Token] {
+/// `raw`: the tokens as written, a superscript run left as it is (the
+/// TypeScript's tokenizer before `desugarUnicode`, which explicitAssignment reads).
+func tokenize(_ text: String, raw: Bool = false) throws(ParseError) -> [Token] {
   let units = Array(text.utf16)
   guard !units.isEmpty else { return [] }
   var out: [Token] = []
@@ -177,6 +179,8 @@ func tokenize(_ text: String) throws(ParseError) -> [Token] {
       out.append(Token(type: .symbol, str: glyphAliases[units[range.lowerBound]]!, loc: loc))
     case .symbol where units[range].contains(where: isSubscriptDigit):
       out.append(Token(type: .symbol, str: canonicalName(str), loc: loc))
+    case .superscript where raw:
+      out.append(Token(type: .number, str: str, loc: loc))
     case .superscript:
       let digits = units[range].map { superscripts[$0]! }.joined()
       let body = digits.hasPrefix("-") ? digits.dropFirst() : Substring(digits)

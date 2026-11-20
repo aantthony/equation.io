@@ -3,7 +3,7 @@ import Foundation
 
 // A parametric region, `(u cos(2pi v), u sin(2pi v))`: the area a pair in u
 // and v fills as both run over [0, 1], as triangles the overlay fills
-// (lib/path.ts `regionSampler`, web/main.ts `sampleRegion`).
+// (lib/path.ts `regionSampler`, web/scene.ts `sampleRegion`).
 
 /// Cells along each side of the lattice a region is sampled on (lib/path.ts `REGION_CELLS`).
 let regionCells = 64

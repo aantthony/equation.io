@@ -6,7 +6,7 @@ import Foundation
 // when they were classified (EquationCore `classifyMapped`), so their shaders
 // need nothing here. What a row places — points, parametric curves, a named
 // point — is computed in x and y as anywhere else, and carried to the screen
-// as it is added to the overlay (web/main.ts `since` and `carry`). The grid
+// as it is added to the overlay (web/scene.ts `since` and `carry`). The grid
 // is drawn at the mapped axes' ticks, and the axis numbers follow them: both
 // read the scene's `maps` (`MetalContext.image`, `drawLabels2D`).
 
