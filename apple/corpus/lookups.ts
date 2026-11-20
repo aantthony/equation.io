@@ -5,7 +5,7 @@
  * and, over it, every kind, shape and function by each of its names, with
  * the misspellings, plurals, phrases and misses a model sends.
  *
- *   pnpm swift:corpus
+ *   pnpm swift:lookups   (pnpm swift:corpus runs it too)
  */
 import { writeFileSync } from 'node:fs';
 import { functionDoc, kindExamples, listKinds, searchFunctions, shape } from '../../lib/assistant-tools.ts';

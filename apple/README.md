@@ -80,7 +80,8 @@ The corpus includes what Ask's lookups answer in TypeScript to a few thousand
 requests (`corpus/lookups.ts`: every kind, shape and function by each of its
 names, with misspellings, phrases and misses), which `EquationAssist` must
 answer the same to the character: the evals below score what the tools
-return.
+return. `pnpm swift:lookups` records that part alone, after a change to the
+reference, the examples or `lib/assistant-tools.ts`.
 
 ## Ask evals
 
