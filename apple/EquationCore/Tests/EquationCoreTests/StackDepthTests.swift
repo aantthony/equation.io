@@ -112,10 +112,17 @@ private final class Answer<T>: @unchecked Sendable {
   init(_ value: T) { self.value = value }
 }
 
-/// What each row of the rows says is wrong with it, read on a stack with room for anything.
-private func errors(_ rows: [String]) -> [String?] {
+/// What each row of the rows says is wrong with it, read on a stack of `size` bytes.
+private func errors(_ rows: [String], on size: Int) -> [String?] {
   let answer = Answer<[String?]>([])
-  _ = stackUse(8 << 20) { answer.value = analyze(rows).rows.map(\.error) }
+  _ = stackUse(size) { answer.value = analyze(rows).rows.map(\.error) }
+  return answer.value
+}
+
+/// A thread's depth limit, on a stack of `size` bytes.
+private func depthLimit(on size: Int) -> Int {
+  let answer = Answer(0)
+  _ = stackUse(size) { answer.value = maxExprDepth }
   return answer.value
 }
 
@@ -130,11 +137,14 @@ private func padded(_ name: String) -> String { name.padding(toLength: 24, withP
 @Suite struct StackDepth {
   /// The deepest row of each shape the guard lets through is analyzed —
   /// resolved, lowered, differentiated, compiled, read out — within the
-  /// smallest stack a thread has, with a quarter of it to spare.
-  @Test func theDeepestRowsFitTheSmallestStack() {
+  /// stack of the thread it is read on, with a quarter of it to spare: the
+  /// smallest a thread has, a main thread's megabyte, and a deep one.
+  @Test(arguments: [smallestStack, 1 << 20, 8 << 20])
+  func theDeepestRowsFitTheirStack(stack: Int) {
+    if probing() { print("  on \(stack >> 10) KB, \(depthLimit(on: stack)) levels:") }
     for (name, most, rows) in deepShapes {
       // The deepest n that is not refused.
-      func refused(_ n: Int) -> Bool { errors(rows(n)).contains(stackExceeded) }
+      func refused(_ n: Int) -> Bool { errors(rows(n), on: stack).contains(stackExceeded) }
       var (fits, over) = (1, most)
       if !refused(over) { fits = over }
       while over - fits > 1 {
@@ -142,10 +152,22 @@ private func padded(_ name: String) -> String { name.padding(toLength: 24, withP
         if refused(middle) { over = middle } else { fits = middle }
       }
       let deepest = rows(fits)
-      let used = stackUse(8 << 20) { _ = analyze(deepest) }
+      let used = stackUse(stack) { _ = analyze(deepest) }
       if probing() { print("  \(padded(name)) n = \(fits): \(used >> 10) KB") }
-      #expect(used < smallestStack * 3 / 4, "\(name), n = \(fits), uses \(used >> 10) KB of stack")
+      #expect(used < stack * 3 / 4, "\(name), n = \(fits), uses \(used >> 10) KB of \(stack >> 10)")
     }
+  }
+
+  /// An optimized build reads 512 levels on any thread; a debug build, whose
+  /// frames are several times larger, as many as the thread's stack holds.
+  @Test func theLimitIsTheThreads() {
+    #expect(depthLimit(on: 64 << 20) == 512)
+    #if DEBUG
+      #expect(depthLimit(on: smallestStack) == 100)
+      #expect(depthLimit(on: 1 << 20) == 209)
+    #else
+      #expect(depthLimit(on: smallestStack) == 512)
+    #endif
   }
 
   /// A row far deeper than any walk could go down says so in the site's
@@ -188,7 +210,7 @@ private func padded(_ name: String) -> String { name.padding(toLength: 24, withP
   /// `diff` itself, on the deepest expressions the guard allows and past
   /// them: a derivative of each, or the engine's words, never a stack overrun.
   @Test func derivativesOfDeepExpressions() throws {
-    let limit = maxExprDepth
+    let limit = depthLimit(on: smallestStack)
     let x = Expr.var("x")
     @Sendable func deep(_ n: Int, _ step: (Expr, Int) -> Expr) -> Expr { (1...n).reduce(x) { step($0, $1) } }
     let shapes: [(String, @Sendable (Int) -> Expr)] = [

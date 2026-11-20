@@ -60,6 +60,7 @@ struct ParseContext {
     // thousand terms from becoming one no walk — not even its release — can
     // go down. (Port: the site's parser builds it, and its engine refuses.)
     var depths: [Int] = []
+    let deepest = maxExprDepth
     try shunting(tokens) { (token: Token) throws(ParseError) in
       if token.type == .operator || token.type == .parenclose {
         guard let op = operatorTable[token.str] else { throw unknownOperator(token) }
@@ -68,7 +69,7 @@ struct ParseContext {
         if args.count < op.n { throw ParseError("Incomplete expression.", parse: true) }
         let depth = (depths.suffix(args.count).max() ?? 0) + (addsLevel(op.kind, args) ? 1 : 0)
         depths.removeLast(args.count)
-        if depth > maxExprDepth { throw ParseError(stackExceeded) }
+        if depth > deepest { throw ParseError(stackExceeded) }
         stack.append(try apply(op.kind, args))
         depths.append(depth)
       } else {

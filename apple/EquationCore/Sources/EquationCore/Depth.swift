@@ -1,3 +1,7 @@
+#if canImport(Darwin)
+  import Darwin
+#endif
+
 /// How deep an expression may nest (port only).
 ///
 /// The language's walks are recursive, here as on the site: resolving,
@@ -14,22 +18,44 @@
 /// made of (a derivative, a function's body around its arguments), before it
 /// is made: letting go of a tree is a frame per level as well.
 ///
-/// The limit is a number of levels, not a number of bytes left on this
-/// thread's stack, so that a document reads the same wherever it is read:
-/// plans made on one thread are evaluated on others, the smallest of which
-/// has 512 KB. It is what a 512 KB stack holds of the deepest walk's frames,
-/// measured (StackDepthTests) with room to spare, and so it differs between
-/// an optimized build and a debug one, whose frames are several times larger.
+/// The limit is a number of levels: 512, which holds the longest Σ the
+/// language expands (500 terms) — or fewer on a thread whose stack would not
+/// hold that many of the deepest walk's frames. Those are measured
+/// (StackDepthTests), with room to spare: an optimized build's fit the
+/// smallest stack a thread has, 512 KB, so there the limit is 512 wherever a
+/// document is read; a debug build's are several times larger, and a 512 KB
+/// thread reads 100 levels, a main thread's megabyte 209, and 512 only on a
+/// thread made with a deep stack, as the app makes one (DeepStack). What is
+/// read on such a thread is to be evaluated on one: a plan's expression is
+/// as deep as its row's.
 
 /// What a row too deep to walk says: the JavaScript engines' own words, which
 /// are the site's error for it.
 let stackExceeded = "Maximum call stack size exceeded"
 
-/// The deepest an expression may nest.
+/// The deepest an expression may nest, on this thread.
+public var maxExprDepth: Int {
+  #if canImport(Darwin)
+    let stack = Int(pthread_get_stacksize_np(pthread_self()))
+    return min(deepestExpr, max(16, (stack * 3 / 4 - stackReserve) / stackBytesPerLevel))
+  #else
+    // (WebAssembly: the linear memory's stack, 1 MB by default, and a trap, not a crash, past it.)
+    return deepestExpr
+  #endif
+}
+
+/// The deepest any thread reads: past the longest Σ (500 terms, a level each).
+private let deepestExpr = 512
+/// What a walk holds whatever the row's depth: the document's own frames.
+/// (A quarter of the stack is left alone besides, for the caller's.)
+private let stackReserve = 32 << 10
+/// What a level of the deepest walk costs: measured at 3.6 KB in a debug
+/// build (a list beside a deep sum) and under 0.7 KB in an optimized one
+/// (calls nested in calls), by StackDepthTests.
 #if DEBUG
-  public let maxExprDepth = 96
+  private let stackBytesPerLevel = 3600
 #else
-  public let maxExprDepth = 512
+  private let stackBytesPerLevel = 680
 #endif
 
 /// How many definitions may be read one inside another: a function whose
