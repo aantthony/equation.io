@@ -1,0 +1,11 @@
+{
+  "layers": {
+    "projections": [
+      {
+        "relation": "eq",
+        "field": "(y - (floor((x + (3.0 * u))) / 2.0))",
+        "color": [0.176, 0.439, 0.702]
+      }
+    ]
+  }
+}
