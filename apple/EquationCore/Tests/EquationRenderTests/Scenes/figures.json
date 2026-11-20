@@ -1,0 +1,25 @@
+{
+  "layers": {},
+  "overlay": {
+    "points": [
+      { "x": -4, "y": 3, "color": "rgb(0, 0, 0)", "r": 4 },
+      { "x": -3, "y": 3.5, "color": "rgb(0, 0, 0)", "r": 4 },
+      { "x": -2, "y": 3, "color": "rgb(0, 0, 0)", "r": 4 },
+      { "x": 1, "y": 2, "color": "rgb(45, 112, 179)", "label": "A" },
+      { "x": -3, "y": 1, "color": "rgb(199, 68, 64)", "label": "B" }
+    ],
+    "polylines": [
+      { "pts": [1, 2, -3, 1, 0, -2], "color": "rgb(56, 140, 70)", "closed": true, "fill": "rgba(56, 140, 70, 0.16)" },
+      { "pts": [3, -2, 5, 1], "color": "rgb(96, 66, 166)", "arrow": true },
+      { "pts": [-5, -3, -2, -4], "color": "rgb(250, 126, 25)" }
+    ],
+    "bars": [
+      { "x": 4.3, "y": 1, "halfWidth": 0.3, "color": "rgb(199, 68, 64)" },
+      { "x": 4.9, "y": 2, "halfWidth": 0.3, "color": "rgb(199, 68, 64)" },
+      { "x": 5.5, "y": 0, "halfWidth": 0.3, "color": "rgb(199, 68, 64)" },
+      { "x": 6.1, "y": 3, "halfWidth": 0.3, "color": "rgb(199, 68, 64)" },
+      { "x": 6.7, "y": 1, "halfWidth": 0.3, "color": "rgb(199, 68, 64)" }
+    ],
+    "texts": [{ "x": 2, "y": 4, "text": "the curves cross here", "color": "rgb(45, 112, 179)" }]
+  }
+}

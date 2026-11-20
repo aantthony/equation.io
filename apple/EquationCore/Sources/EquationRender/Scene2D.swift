@@ -15,10 +15,18 @@ public struct Scene2D: Equatable, Codable, Sendable {
   public var time: Double?
   /// Absent: the opening window (`View2D.opening`).
   public var view: View2D?
+  /// What the overlay draws over the shader passes, in math coordinates
+  /// (already carried to the screen's, in a mapped panel).
+  public var overlay: Overlay2D?
+  /// A lattice panel's labels, in place of the axis numbers.
+  public var lattice: LatticeLabels?
+  /// The panel's axis maps (the site's `Frame.maps`), which the axis numbers follow.
+  public var maps: AxisMaps?
 
   public init(
     layers: Layers2D = Layers2D(), env: [String: Double]? = nil, gridSpecs: [GridSpec]? = nil, frame: Frame2D? = nil,
-    time: Double? = nil, view: View2D? = nil
+    time: Double? = nil, view: View2D? = nil, overlay: Overlay2D? = nil, lattice: LatticeLabels? = nil,
+    maps: AxisMaps? = nil
   ) {
     self.layers = layers
     self.env = env
@@ -26,6 +34,9 @@ public struct Scene2D: Equatable, Codable, Sendable {
     self.frame = frame
     self.time = time
     self.view = view
+    self.overlay = overlay
+    self.lattice = lattice
+    self.maps = maps
   }
 }
 
@@ -79,9 +90,17 @@ extension MetalContext {
       // Points, y down, as the overlay draws.
       ctx.translateBy(x: 0, y: CGFloat(height))
       ctx.scaleBy(x: CGFloat(dpr), y: -CGFloat(dpr))
+      // A layer of its own, as the site's overlay canvas is: a panel clears its box before drawing.
+      ctx.beginTransparencyLayer(auxiliaryInfo: nil)
+      // The panel's box from the top-left corner, in points (web/main.ts, for a split view).
+      let box = scene.frame?.vp.map {
+        OverlayBox(x: $0.x / dpr, y: (Double(height) - $0.y - $0.h) / dpr, w: $0.w / dpr, h: $0.h / dpr)
+      }
       drawLabels2D(
         ctx, size: CGSize(width: Double(width) / dpr, height: Double(height) / dpr), view: view, dpr: dpr,
-        theme: theme, numbers: (scene.frame?.grid ?? .on) != .off)
+        theme: theme, extras: scene.overlay, numbers: (scene.frame?.grid ?? .on) != .off && scene.gridSpecs == nil,
+        box: box, lattice: scene.lattice, maps: scene.maps ?? AxisMaps())
+      ctx.endTransparencyLayer()
       return ctx.makeImage()
     }
   }

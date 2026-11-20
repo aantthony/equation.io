@@ -54,8 +54,12 @@ TypeScript does, which a fixture can check to the byte.
 
 `Render2D.swift` has the site's scene types (`View2D`, `Layers2D`, …) field
 for field, and `Renderer2D.render` draws them in the site's order. What is
-drawn with a 2D context over the shader passes (axis numbers, and in time
-points, labels, polylines) is `Overlay2D.swift`, in CoreGraphics.
+drawn with a 2D context over the shader passes (axis numbers, a lattice's
+labels, points, polylines, clouds, bars, regions, glyphs, a graph's vertices,
+text) is `Overlay2D.swift`, in CoreGraphics and CoreText; a `Scene2D` carries
+it as `overlay`. A mapped axis (`view(x = 10^X)`) is `AxisMap.swift`, its
+ticks `AxisTicks.swift`, and `MapOverlay.swift` carries a row's overlay
+through one.
 
 To see what the renderer draws without the app, and set it beside the site:
 
