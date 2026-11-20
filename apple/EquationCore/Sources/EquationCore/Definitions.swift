@@ -632,11 +632,11 @@ func buildDefs(_ raw: [Definition], skip: Set<String>, sequences: [SeqScan] = []
       case .state(let name, _):
         let opts = options()
         states.derivs[name] = try withoutStateFamily(
-          try Resolver(getFn: getFn, opts: opts).resolve(try parse(d)), opts.isList)
+          try Resolver(getFn: getFn, opts: opts).resolve(try parse(d)), opts)
       case .initial(let name, _):
         let opts = options()
         states.inits[name] = try withoutStateFamily(
-          try Resolver(getFn: getFn, opts: opts).resolve(try parse(d)), opts.isList)
+          try Resolver(getFn: getFn, opts: opts).resolve(try parse(d)), opts)
       case .constant(let name, _, let draw):
         let resolved = try Resolver(getFn: getFn, opts: options()).resolve(try parse(d))
         defs.conditions[name] = nil

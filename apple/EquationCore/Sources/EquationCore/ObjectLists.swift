@@ -1229,15 +1229,20 @@ func drawnByPosition(_ value: Expr) -> Bool {
 /// A state's rate or start, which may not read a list yet: a list of starts
 /// is a family of runs, one state per member (lib/defs.ts, the state
 /// families), which is not ported.
-func withoutStateFamily(_ resolved: Expr, _ isList: (String) -> Bool) throws -> Expr {
-  if readsLists(resolved, isList) { throw Unsupported("a family of states") }
+func withoutStateFamily(_ resolved: Expr, _ opts: ResolveOpts) throws -> Expr {
+  if readsLists(resolved, opts) { throw Unsupported("a family of states") }
   return resolved
 }
 
 /// Whether a resolved expression reads a list anywhere: a literal, a named
 /// list, a position or a filter, text, or a function that reduces or sorts
-/// one. What a pass that does not lower lists asks before it goes on.
-func readsLists(_ e: Expr, _ isList: (String) -> Bool) -> Bool {
+/// one. What a pass that does not lower lists asks before it goes on. (A
+/// matrix or a tensor indexes as a list does, but is none.)
+func readsLists(_ e: Expr, _ opts: ResolveOpts) -> Bool {
+  readsLists(e) { name in ((try? opts.getList?(name)) ?? nil) != nil }
+}
+
+private func readsLists(_ e: Expr, _ isList: (String) -> Bool) -> Bool {
   switch e {
   case .list, .data, .text, .lazy, .index, .eqtest, .str, .hist: return true
   case .var(let name): return isList(name) || isList(dottedHead(name))

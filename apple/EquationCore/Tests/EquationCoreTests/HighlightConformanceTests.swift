@@ -171,7 +171,7 @@ private func describe(_ spans: [HighlightSpan], _ row: String) -> String {
   /// leaves alone, where a definition the site fails (`S = X +`, a `~` row
   /// half typed) still binds its name here. Lower this as the port reaches
   /// those rows.
-  private let knownDifferingRows = 13
+  private let knownDifferingRows = 6
 
   @Test func notesMatchTheSite() {
     for document in fixture.documents {
