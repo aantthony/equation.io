@@ -306,6 +306,7 @@ func boundNames(_ document: PreparedDocument) -> BoundNames {
   names.values.formUnion(built.states.keys)
   names.values.formUnion(built.vecStates.keys)
   names.values.formUnion(built.lists.keys)
+  names.values.formUnion(built.intervals.keys)
   names.functions.formUnion(built.fns.keys)
   // The sequences of the rows the port reads (lib/defs.ts `defs.sequences`).
   for (k, scan) in document.seqScans.enumerated() where document.blocked[k] == nil {

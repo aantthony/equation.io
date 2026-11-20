@@ -64,6 +64,10 @@ struct ResolveOpts {
   var isList: (String) -> Bool = { _ in false }
   var getList: GetList?
   var indexIssue: ((_ index: Expr, _ target: Expr) -> String?)?
+  /// A name defined as an interval (Interval.swift), and whether one may be
+  /// written here: in a Fourier signal, or as a definition's whole value.
+  var interval: (String) -> Expr? = { _ in nil }
+  var intervals = false
 }
 
 /// The elementary functions the port evaluates and compiles: a call to any
@@ -260,6 +264,7 @@ struct Resolver {
       return e
     case .var(let name):
       if let term = try opts.sequenceTerm?(name, nil, opts.openVars) { return term }
+      if let value = try namedInterval(name) { return value }
       if let value = opts.complex(name) { return value }
       // What the port cannot write in yet, by the names that ask for it.
       if name == "int" { throw Unsupported("integrals") }
@@ -384,6 +389,7 @@ struct Resolver {
       // arguments and cannot capture their variables.
       return opts.params != nil ? inlined : writeConditions(inlined, namedCondition)
     }
+    if let signal = try resolveSignalCall(name, rawArgs) { return signal }
     // (A label's text is not math: it passes through as written.)
     let args = try legacyCallArgs(name, rawArgs).map { arg in
       if name == "label", case .str = arg { return arg }

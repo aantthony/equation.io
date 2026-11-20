@@ -421,6 +421,7 @@ public func analyze(_ sources: [String]) -> DocumentAnalysis {
   ropts.comps = comps
   ropts.documentNames = documentNames
   ropts.complex = { built.complexes[$0] }
+  ropts.interval = { built.intervals[$0] }
   // Σ/Π bounds in plot rows expand against the constants' values at t = 0.
   let boundConsts = NameBox()
   boundConsts.names = built.sumBoundConsts
@@ -796,7 +797,8 @@ public func analyze(_ sources: [String]) -> DocumentAnalysis {
       row.kind = "comment (group heading)"
     } else if let d = row.definition {
       let valued = built.mats.has(d.name) ? "matrix" : built.tensors.has(d.name) ? "tensor" : nil
-      let constant = valued ?? (named ? "point" : built.lists.has(d.name) ? "list" : "const")
+      let interval = built.intervals.has(d.name) ? "interval" : nil
+      let constant = interval ?? valued ?? (named ? "point" : built.lists.has(d.name) ? "list" : "const")
       row.kind = "definition (\(d.kind == "const" ? constant : d.kind))"
     } else if let view = row.view {
       row.kind =

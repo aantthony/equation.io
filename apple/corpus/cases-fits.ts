@@ -27,4 +27,19 @@ export const FITS_CASES: string[] = [
   'X = [0, 1, 2, 3]; Y = [1, 2.7, 7.4, 20]; Y ~ exp(k X); k; ln(Y) ~ r X + s; r; s; Y ~ gamma X; gamma',
   'L = [1, 2, 3]; Y ~ m L + b; Y = [2, 4, 7]; m; X ~ Normal(0, 1); L ~ n X; n',
   'X = [1, 2, none, 4]; Y = [2, 4, 6, 8.5]; Y ~ m X + b; m; b',
+  // Fourier analysis: samples in a tuple, a signal over an interval, the series it reconstructs.
+  'T = (0, 1, 0, -1, 0, 1, 0, -1); S = fourier(T); S; segment((S.x, 0), S); y = reconstruct(T, 2); fourier(T)',
+  'T = (1, 3, 2, 5, 4, 2, 1, 0); fourier(T, interval(0, 10)); y = reconstruct(T, 3, interval(0, 10)); reconstruct(T, 4)',
+  'L = [0, 1, 0, -1]; fourier(L); T = sort(L); fourier(T); fourier((1, 2)); fourier((1)); fourier(T, 8); fourier()',
+  's = interval(0, 1); S = fourier(sin(2pi s) + 0.5 cos(6pi s)); S; S.y; y = reconstruct(sin(2pi s), 1); fourier(sin(2pi s), 16)',
+  's = interval(0, 2pi); N = clamp(round(3), 0, 8); f(x) = sign(sin(x)); y = reconstruct(f(s), N); fourier(f(s), 32); N',
+  's = interval(0, 1); N = 2; y = reconstruct(s^2, N); y = reconstruct(s^2, 2.5); y = reconstruct(s^2, 200); y = reconstruct(s^2, N, 4)',
+  'N = clamp(round(3), 0, 200); s = interval(0, 1); y = reconstruct(abs(s - 0.5), N); M = clamp(2, 0, 8); y = reconstruct(s, M)',
+  's = interval(0, 1); a = 2; fourier(a sin(2pi s)); fourier(sin(2pi s) x); fourier(sin(2pi s + t)); fourier(sin(q s)); fourier(3)',
+  's = interval(0, 1); r = interval(1, 2); fourier(s r); fourier(sin(2pi s), r); f(x) = x^2; fourier(f); reconstruct(f, 2)',
+  'fourier(sin(2pi interval(0, 1))); y = reconstruct(interval(0, 1)^2, 3); fourier(interval(0, 1) + interval(0, 1))',
+  's = interval(0, 1); g(x) = reconstruct(s (1 - s), 4); y = g(2x); g(0.25); h(q) = reconstruct(q s, 2); y = h(3)',
+  's = interval(0, 1); S = fourier(e^(2pi i s)); fourier(re(e^(2pi i s))); fourier(i s); k = s; fourier(sin(2pi k))',
+  // An interval anywhere else is another kind's.
+  's = interval(0, 1); s; y = s x; (s, s^2); mean(s^2); b = 2 s; b; s = interval(2, 1); interval(1); q = interval(1, x)',
 ];

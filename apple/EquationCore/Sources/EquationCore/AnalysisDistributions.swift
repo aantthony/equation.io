@@ -63,6 +63,7 @@ func buildRandomVariables(_ scan: RandomScan, _ built: BuiltDefs, _ raw: [Defini
   ropts.comps = { built.points.contains($0) ? pointComps($0, built.pointDims[$0] ?? 2) : nil }
   ropts.documentNames = documentNames
   ropts.complex = { built.complexes[$0] }
+  ropts.interval = { built.intervals[$0] }
   let getFn: GetFn = { name in
     if let fn = built.fns[name] { return fn }
     if fnNames.contains(name) { throw LanguageError("\(name) has an error in its definition.") }

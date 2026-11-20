@@ -1742,7 +1742,14 @@ private func lowerCall(_ e: Expr, _ name: String, _ rawArgs: [Expr], _ ctx: Ctx)
     return settled
   }
   if name == MAP { return try lowerMap(rawArgs, ctx) }
-  if name == "fourier" || name == "reconstruct" { throw Unsupported("Fourier analysis") }
+  if name == "fourier" || name == "reconstruct" {
+    return try lowerFourier(
+      name, rawArgs,
+      ListLowering(
+        opts: ctx.opts, lower: { try lower($0, ctx) }, settle: { try settle($0, ctx) },
+        constVal: { try constVal($0, ctx, $1, whole: $2) }, numericItems: { try numericItems($0, ctx, $1) },
+        listOf: { try listOf($0, ctx) }))
+  }
   if name == "hist" {
     // How many arguments there are, and what the bin count is, are questions
     // about the row: settled before the list is lowered.

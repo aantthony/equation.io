@@ -468,6 +468,8 @@ struct BuiltDefs {
   var states = OrderedMap<StateDef>()
   /// Vector states and how many components each has.
   var vecStates: [String: Int] = [:]
+  /// Names defined as an interval: the hidden parameter every mention shares (Interval.swift).
+  var intervals = OrderedMap<Expr>()
   /// The fits by their rows' keys (RegressionRows.swift).
   var fits: [String: FitResult] = [:]
 }
@@ -520,6 +522,7 @@ func buildDefs(_ raw: [Definition], skip: Set<String>, sequences: [SeqScan] = []
     opts.comps = comps
     opts.documentNames = Set(byName.keys)
     opts.complex = { defs.complexes[$0] }
+    opts.interval = { defs.intervals[$0] }
     // Σ/Π bounds in later definitions may use the constants resolved so far.
     opts.consts = { numEnv[$0] }
     opts.boundConsts = boundConsts
@@ -660,10 +663,21 @@ func buildDefs(_ raw: [Definition], skip: Set<String>, sequences: [SeqScan] = []
         states.inits[name] = try withoutStateFamily(
           try Resolver(getFn: getFn, opts: opts).resolve(try parse(d)), opts)
       case .constant(let name, _, let draw):
-        let resolved = try Resolver(getFn: getFn, opts: options()).resolve(try parse(d))
+        // (`s = interval(0, 1)`, or another name for one: the one place an interval is written.)
+        var valueOpts = options()
+        let source = try parse(d)
+        valueOpts.intervals = !paramVars.contains(name) && writesInterval(source, defs)
+        let resolved = try Resolver(getFn: getFn, opts: valueOpts).resolve(source)
         defs.conditions[name] = nil
         // u and v take only an interval: the range they run over.
         if paramVars.contains(name) { throw Unsupported("intervals") }
+        // `r = interval(1, 2)`: not a number but a hidden parameter, which
+        // every row using the name shares.
+        if hasInterval(resolved) {
+          if draw { throw LanguageError("\(name) ∈ … draws from a list; that is an interval.") }
+          defs.intervals[name] = resolved
+          continue
+        }
         // Lowering expands point arithmetic; a pair result names a point.
         // Point-ness flows in definition order, so `C = B + D` needs B and D
         // defined above (a stray point name below is reported after the loop).
@@ -1020,7 +1034,8 @@ func buildDefs(_ raw: [Definition], skip: Set<String>, sequences: [SeqScan] = []
       // A surviving matrix or tensor name means it was defined below its
       // use, so lowering saw it as a plain scalar.
       let listed = defs.lists.has(name) ? "a list" : nil
-      if let kind = listed ?? (defs.mats.has(name) ? "a matrix" : defs.tensors.has(name) ? "a tensor" : nil) {
+      let valued = defs.mats.has(name) ? "a matrix" : defs.tensors.has(name) ? "a tensor" : nil
+      if let kind = listed ?? valued ?? (defs.intervals.has(name) ? "an interval" : nil) {
         throw LanguageError("\(name) is \(kind) — move its definition above where it is used.")
       }
       throw LanguageError(
@@ -1092,7 +1107,7 @@ func buildDefs(_ raw: [Definition], skip: Set<String>, sequences: [SeqScan] = []
         || defs.complexes.has(name)
         || defs.fns[name] != nil || defs.unsupported[name] != nil || defs.mats.has(name) || defs.tensors.has(name)
         || defs.states.has(name) || defs.vecStates[name] != nil
-        || defs.lists.has(name)
+        || defs.lists.has(name) || defs.intervals.has(name)
     }
     func references(_ expr: Expr) -> NameSet {
       var names = freeVars(expr)
@@ -1132,6 +1147,7 @@ func buildDefs(_ raw: [Definition], skip: Set<String>, sequences: [SeqScan] = []
       defs.tensors[name] = nil
       defs.states[name] = nil
       defs.lists[name] = nil
+      defs.intervals[name] = nil
     }
     func remove(_ name: String) {
       let owner = ownerOf(name)
@@ -1163,6 +1179,7 @@ func buildDefs(_ raw: [Definition], skip: Set<String>, sequences: [SeqScan] = []
       for (name, matrix) in defs.mats.entries { candidates += matrix.flatMap { $0 }.map { (name, $0, []) } }
       for (name, tensor) in defs.tensors.entries { candidates += tensor.data.map { (name, $0, []) } }
       candidates += defs.lists.entries.map { ($0.key, $0.value.e, []) }
+      candidates += defs.intervals.entries.map { ($0.key, $0.value, []) }
       for (name, expr, params) in candidates where present(name) {
         var refs = sourceRefs(name)
         for ref in references(expr) { refs.insert(ref) }
