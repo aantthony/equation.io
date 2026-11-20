@@ -20,6 +20,12 @@ export const REST_CASES: string[] = [
   'graph(1, 2); grid(on); ---; graph(1, 2); y = x; ---; graph(2, 2); 1 + 1; mark(2)',
   'view(x = 1..100, x = 10^X); graph(1, 2); mark(1)',
   'graph(i, 2); graph(1.5, 2.25, -0.5); graph((1, 2), 3); graph([1, 2], [3, 4, 5]); graph(1, 2) # note',
+  // Trails in space, and trails and complex numbers on a surface panel.
+  'a = 2; trail((cos(t), sin(t), a t)); trail(cos(t), sin(t), t); A = (1, 2, 3); trail(A); trail(A + (t, 0, 0)); trail((x, 1, 2))',
+  "p' = (10(p_2 - p_1), p_1(28 - p_3) - p_2, p_1 p_2 - 8 p_3/3); p(0) = (1, 1, 20); trail(p); trail((p_1, p_2)); trail(2 p)",
+  'on((X, Y, Z) = (x, y, x y), x = -1..1, y = -1..1); trail((cos(t), sin(t))/2); 0.5 e^(i t); e^(2 pi i u)/2; ' +
+    '[1, i, -1]/2; trail((t, 1, 2)); B = (0.2, 0.3); trail(B); w^3 = 1',
+  'z = x y; trail((cos(t), sin(t))); trail((cos(t), sin(t), 1)); (1, 2); i',
   // Tuple-valued recurrences: a stack over time, the orbit of a point.
   's_0 = (); s_{n+1} = push(s_n, n); s_3; count(s_3); top(s_4); s_2[1]; s_0; count(s_0); s_1; pop(s_3); top(s_0)',
   'p_0 = (0, 0); a = 1.4; b = 0.3; p_{n+1} = (1 - a p_n[1]^2 + p_n[2], b p_n[1]); p_3; p_2[1]; (p_5[1], p_5[2])',

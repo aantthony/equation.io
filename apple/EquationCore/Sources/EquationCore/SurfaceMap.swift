@@ -263,6 +263,10 @@ public func surfaceMapping(_ object: MathObject) -> SurfaceMapping? {
   case .curveParametric(let coordinates): return coordinates.count == 2 ? .carry : .refused
   case .vectorField(let components): return components.count == 2 ? .carry : .refused
   case .point(let coordinates): return coordinates.count == 2 ? .carry : .refused
+  // (A complex number is the point (re, im), a complex path the curve it
+  // traces, and a trail in x and y where its point has been.)
+  case .complexPoint, .complexPath: return .carry
+  case .trail(let coordinates): return coordinates.count == 2 ? .carry : .refused
   case .label: return .carry
   // geodesic(P, d): traced in x and y, on this surface.
   case .geodesic(let spec): return spec.dim == 2 ? .carry : .refused
@@ -274,7 +278,6 @@ public func surfaceMapping(_ object: MathObject) -> SurfaceMapping? {
     if each.contains(where: { $0 == nil }) { return nil }
     if each.contains(where: { $0 == .refused }) { return .refused }
     return each.first ?? SurfaceMapping.none
-  case .trail, .complexPoint, .complexPath, .list(.complex): return nil
   default: return .refused
   }
 }

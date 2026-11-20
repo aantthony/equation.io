@@ -142,6 +142,7 @@ public struct Document3D: Equatable, Sendable {
           drawGeodesic(spec, row: index, shade, env, camera, into: &scene)
           continue
         }
+        if drawTrail(member.cpu!, member, index, shade, env, camera, run, into: &scene) { continue }
         if let surface,
           drawOnSurface(surface, member.cpu!, member, index, shade, env, time, camera, into: &scene)
         {

@@ -460,7 +460,10 @@ func classify(_ lowered: Expr, defined: Set<String>, fields: [String: Expr]) thr
   }
 
   if case .trail(let coordinates) = expr {
-    return done(try classifyTrail(coordinates, off: hasSpace || hasParam || complexRow))
+    var classified = done(try classifyTrail(coordinates, off: hasSpace || hasParam || complexRow))
+    // (A trail of a point in space is drawn in space.)
+    classified.needs3D = coordinates.count == 3
+    return classified
   }
 
   if let figure = try classifyFigure(expr, hasSpace: hasSpace, hasParam: hasParam, complex: complexRow) {

@@ -21,7 +21,6 @@ func classifyTrail(_ coordinates: [Expr], off: Bool) throws -> MathObject {
   if coordinates.count != 2 && coordinates.count != 3 {
     throw LanguageError("A point or vector needs 2 or 3 components.")
   }
-  if coordinates.count == 3 { throw Unsupported("trails in space") }
   return .trail(coordinates: coordinates)
 }
 
