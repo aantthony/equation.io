@@ -68,6 +68,14 @@ public enum CpuPlan: Equatable, Sendable {
   /// A `pcurve` in space with its `tube` radius (the TypeScript's plan is one type).
   case tube(comps: [Expr], radius: Expr, d1: [Expr]?, d2: [Expr]?, d3: [Expr]?)
   case psurface(comps: [Expr], paint: Expr?)
+  /// A random variable's density, drawn from its law on the CPU.
+  case density(rv: String, mass: Expr?)
+  /// A discrete random variable's mass function, drawn as stems.
+  case pmf(rv: String, mass: Expr?)
+  /// An `E(…)` row: a marker at the mean under the variable's law.
+  case expect(rv: String)
+  /// A `P(…)` row: its event, and the variable whose law it shades.
+  case prob(body: Expr, shade: ProbShade?)
 
   /// The plan's `type`, as the TypeScript spells it.
   public var type: String {
@@ -99,6 +107,10 @@ public enum CpuPlan: Equatable, Sendable {
     case .vfield3d: "vfield3d"
     case .tube: "pcurve"
     case .psurface: "psurface"
+    case .density: "density"
+    case .pmf: "pmf"
+    case .expect: "expect"
+    case .prob: "prob"
     }
   }
 }
@@ -254,6 +266,14 @@ public func compileCpu(_ classified: Classified) throws -> CpuPlan {
     return .automaton(rule: rule, radius: radius, seed: seed, dims: dims, axes: axes)
   case .lattice(let expr, let axes):
     return .lattice(expr: expr, axes: axes)
+  case .distribution(let form, let rv, let mass):
+    return switch form {
+    case .density: .density(rv: rv, mass: mass)
+    case .pmf: .pmf(rv: rv, mass: mass)
+    case .expect: .expect(rv: rv)
+    }
+  case .probability(let body, let shade):
+    return .prob(body: body, shade: shade)
   }
 }
 
@@ -338,7 +358,7 @@ public func compileGpu(_ classified: Classified) throws -> GpuPlan {
   case .bifurcation(let expr, let variable, _):
     return plan(.bifurcation(field: try glsl(sub(substVars(expr, [variable: .var("a")])))))
   case .point, .complexPoint, .curveParametric, .complexPath, .value, .note, .label, .figure, .tuple, .sequence,
-    .automaton, .lattice, .curveTube, .intersection, .system:
+    .automaton, .lattice, .curveTube, .intersection, .system, .distribution, .probability:
     return plan(.none)
   }
 }

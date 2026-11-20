@@ -79,6 +79,11 @@ public indirect enum MathObject: Equatable, Sendable {
   /// A square system, one residual per unknown: its isolated solutions, or
   /// with u (`parametric`) the curve they trace.
   case system(residuals: [Expr], parametric: Bool, angular: [Bool])
+  /// A random variable's row the CPU draws (a density curve, a pmf's stems),
+  /// or the marker of an `E(…)` row. `mass` multiplies what is drawn.
+  case distribution(form: DistributionForm, rv: String, mass: Expr? = nil)
+  /// A `P(…)` row with no closed-form region: its event, and the variable whose law it shades.
+  case probability(body: Expr, shade: ProbShade?)
 
   /// The kind as the site's tools name it (`publicKind`).
   public var publicKind: String {
@@ -110,6 +115,8 @@ public indirect enum MathObject: Equatable, Sendable {
     case .bifurcation: "bifurcation"
     case .automaton: "automaton"
     case .lattice: "lattice"
+    case .distribution(let form, _, _): form.rawValue
+    case .probability: "prob"
     }
   }
 }

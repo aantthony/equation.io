@@ -307,6 +307,8 @@ func boundNames(_ document: PreparedDocument) -> BoundNames {
   for (k, scan) in document.seqScans.enumerated() where document.blocked[k] == nil {
     if let scan, !scan.lattice, !scan.emptyTuple { names.sequences.append(.init(name: scan.name, index: scan.index)) }
   }
+  // A random variable whose declaration stands is a value (lib/env.ts `rvs`).
+  names.values.formUnion(document.random.built.declarations.map(\.name))
   scanBoundNames(document.texts.map { Array($0.utf16) }, rows: Set(document.blocked.keys), into: &names)
   return names
 }
@@ -414,42 +416,9 @@ private func scanBoundNames(_ texts: [[UInt16]], rows: Set<Int>, into names: ino
 /// or columns), and no distribution at the head of the right side, which
 /// keeps `X ~ Normal(0, 1)` a declaration (lib/regression.ts `tildeRow`).
 private func regressionModel(_ u: [UInt16], _ declared: Set<String>) -> [UInt16]? {
-  var quote: UInt16 = 0
-  var depth = 0
-  var tilde = -1
-  for (k, c) in u.enumerated() {
-    if quote != 0 {
-      if c == quote { quote = 0 }
-      continue
-    }
-    switch c {
-    case 0x22: quote = c
-    case 0x27 where !(k > 0 && endsValue(u[k - 1])): quote = c
-    case 0x28, 0x5B, 0x7B: depth += 1
-    case 0x29, 0x5D, 0x7D: depth -= 1
-    case 0x7E where depth == 0:
-      if tilde >= 0 { return nil }
-      tilde = k
-    default: break
-    }
-  }
-  guard tilde >= 0 else { return nil }
-  let lhs = jsTrim(u[..<tilde])
-  let rhs = Array(jsTrim(u[(tilde + 1)...]))
-  // A law at the head, but for the spellings that are also models: exp, gamma, beta, t.
-  var head = RowScanner(rhs)
-  if let name = head.nameRange() {
-    let spelled = head.text(name).lowercased()
-    head.space()
-    if head.atEnd || head.peek == 0x28 {
-      if distributionNames.contains(spelled), !["exp", "gamma", "beta", "t"].contains(spelled) { return nil }
-      // The one carve-out: a bare `exp` is the Exponential alias.
-      if spelled == "exp", name == 0..<rhs.count { return nil }
-    }
-  }
-  let data = declared.contains(canonicalName(String(decoding: lhs, as: UTF16.self)))
-  let expression = lhs.contains { [0x2E, 0x5B, 0x5D, 0x28, 0x2B, 0x2A, 0x2F, 0x2D].contains($0) }
-  return data || expression ? rhs : nil
+  // The one reading of a `~` row, which the analysis shares (Regression.swift).
+  guard let row = tildeRow(u, declared), row.regression else { return nil }
+  return row.rhs
 }
 
 /// How many items a right side has when the whole of it is one

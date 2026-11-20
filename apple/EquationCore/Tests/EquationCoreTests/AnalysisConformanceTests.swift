@@ -96,9 +96,7 @@ import Testing
   }
 
   @Test func whatIsNotPortedSaysSo() {
-    let rows = [
-      "L = [1, 2, 3]", "(x, y) = (1, 2)", "X ~ Normal(0, 1)", "s_{n+1} = push(s_n, n)", "int[0..1] x dx", "(u, v)",
-    ]
+    let rows = ["L = [1, 2, 3]", "(x, y) = (1, 2)", "s_{n+1} = push(s_n, n)", "int[0..1] x dx", "(u, v)"]
     for text in rows {
       let row = analyze([text]).rows[0]
       #expect(row.unsupported != nil, "\(text)")
@@ -155,9 +153,8 @@ import Testing
     check("info", got.info, want["info"] as? String)
     check("kind", got.kind, want["kind"] as? String)
     check("takesColor", got.takesColor, want["takesColor"] as! Bool)
-    if want["dist"] as? String != nil || want["dataLocal"] as? String != nil {
-      out.append("the site reads this row as a distribution or a data row")
-    }
+    check("dist", got.dist?.rawValue, want["dist"] as? String)
+    if want["dataLocal"] as? String != nil { out.append("the site reads this row as a data row") }
     // The slider, and where a drag to a third of the way along lands.
     if let slider = want["slider"] as? [String: Any] {
       let wanted = Slider(
@@ -210,6 +207,8 @@ import Testing
         out.append("cpu: \(error)")
       }
     }
+    // What is drawn of a random variable's law.
+    out += drawnDifferences(got.cpu, want["drawn"], analysis)
     let gpu = want["gpu"] as? [String: Any]
     check("gpu type", got.gpu?.type, gpu?["type"] as? String)
     if let gpu, let mine = got.gpu, gpu["omitted"] == nil {
@@ -367,6 +366,20 @@ import Testing
         parametric: o["parametric"] as? Bool ?? false, angular: o["angular"] as? [Bool] ?? [])
     case "vfield3d": return .vfield3d(comps: try exprs("comps"))
     case "psurface": return .psurface(comps: try exprs("comps"), paint: try o["paint"].map { try decode($0) })
+    case "density", "pmf":
+      if o["mass"] != nil { throw FixtureError(description: "a density scaled by its intervals' length") }
+      let rv = o["rv"] as! String
+      return o["type"] as! String == "pmf" ? .pmf(rv: rv, mass: nil) : .density(rv: rv, mass: nil)
+    case "expect": return .expect(rv: o["rv"] as! String)
+    case "prob":
+      let shade = try (o["shade"] as? [String: Any]).map { s in
+        ProbShade(
+          rv: s["rv"] as! String,
+          bounds: ProbBounds(
+            lo: try s["lo"].map(decode), hi: try s["hi"].map(decode), loStrict: s["loStrict"] as? Bool,
+            hiStrict: s["hiStrict"] as? Bool, point: s["point"] as? Bool ?? false, not: s["not"] as? Bool ?? false))
+      }
+      return .prob(body: try expr("body"), shade: shade)
     default: throw FixtureError(description: "a \(o["type"]!) plan")
     }
   }

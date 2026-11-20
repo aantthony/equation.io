@@ -15,6 +15,7 @@
 import { writeFileSync } from 'node:fs';
 import { analyzeRows } from '../../lib/analysis.ts';
 import { diff } from '../../lib/diff.ts';
+import { type PmfStems, type RVSystem, markerHeight, shadePolygon } from '../../lib/dist.ts';
 import {
   childrenOf,
   type Expr,
@@ -34,6 +35,7 @@ import { realFourier, reconstructSeries, spectrumPoints } from '../../lib/fourie
 import { toGLSL } from '../../lib/glsl.ts';
 import { takesColor } from '../../lib/palette.ts';
 import { valueReadout } from '../../lib/plot.ts';
+import { fitRegression, formatFit } from '../../lib/regression.ts';
 import { rowKind } from '../../lib/row-kind.ts';
 import { sliderBounds, sliderForm, sliderValue, writeSlider } from '../../lib/slider.ts';
 import { keepNote, noteStart, splitStatements } from '../../lib/statements.ts';
@@ -72,11 +74,65 @@ for (const type of ['polygon', 'label', 'tuple', 'tfield2d']) PORTED.add(type);
 for (const type of ['sequence', 'cobweb', 'bifurcation', 'automaton', 'lattice']) PORTED.add(type);
 // In space.
 for (const type of ['implicit3d', 'scalar3d', 'spacecurve', 'system', 'vfield3d', 'psurface']) PORTED.add(type);
+// Random variables (lib/dist.ts): what the CPU draws of one, by its name.
+for (const type of ['density', 'pmf', 'expect', 'prob']) PORTED.add(type);
 function slim(plan: { type: string } | undefined): unknown {
   if (!plan) return null;
   if (!PORTED.has(plan.type)) return { type: plan.type, omitted: true };
   const text = JSON.stringify(plan, replacer);
   return text.length > 20_000 ? { type: plan.type, omitted: true } : plan;
+}
+
+/** What web/main.ts draws of a random variable's plan, from lib/dist.ts: a pmf's stems (the whole law, and
+ *  through a window), the stems or the polygon a P(…) row selects, a uniform sum's exact curve, and an E(…)
+ *  row's marker. (A curve the site integrates or samples is left out: only its plan is recorded.) */
+function drawnOf(plan: { type: string } | undefined, rvs: RVSystem, constEnv: Record<string, number>): unknown {
+  const env = { ...constEnv, t: 0 };
+  const window = { lo: -2.5, hi: 9.25 };
+  const attempt = (run: () => unknown): unknown => {
+    try {
+      return run() ?? null;
+    } catch {
+      return 'error';
+    }
+  };
+  const runs = (found: PmfStems[] | null): unknown =>
+    found && found.map(s => ({ ks: [...s.ks], ps: [...s.ps], envelope: s.envelope, step: s.step ?? null }));
+  const exactCurve = (rv: string) => (rvs.exactLaw(rv)?.kind === 'usum' ? rvs.curve(rv, env) : undefined);
+  const cpu = plan as import('../../lib/compiler.ts').CpuPlan | undefined;
+  switch (cpu?.type) {
+    case 'pmf':
+      return {
+        all: attempt(() => runs(rvs.pmfRuns(cpu.rv, env))),
+        window: attempt(() => runs(rvs.pmfRuns(cpu.rv, env, window))),
+      };
+    case 'density':
+      return {
+        curve: attempt(() => {
+          const c = exactCurve(cpu.rv);
+          return c === undefined ? 'unrecorded' : c && { pts: [...c.pts], mean: c.mean, sd: c.sd, mass: c.mass };
+        }),
+      };
+    case 'prob': {
+      const shade = cpu.shade;
+      if (!shade) return null;
+      return {
+        all: attempt(() => runs(rvs.pmfRuns(shade.rv, env, undefined, shade))),
+        window: attempt(() => runs(rvs.pmfRuns(shade.rv, env, window, shade))),
+        polygon: attempt(() => {
+          const c = exactCurve(shade.rv);
+          if (c === undefined) return 'unrecorded';
+          const lo = shade.lo ? evaluate(shade.lo, env) : undefined;
+          const hi = shade.hi ? evaluate(shade.hi, env) : undefined;
+          return c && shadePolygon(c, lo, hi);
+        }),
+      };
+    }
+    case 'expect':
+      return { mark: attempt(() => markerHeight(rvs, cpu.rv, env)) };
+    default:
+      return null;
+  }
 }
 
 /** Targeted documents: one concern each, rows separated as the examples' are. */
@@ -377,6 +433,83 @@ const CASES: string[] = [
   'S = (u, v, u v); gaussian(1, 2); gaussian(S, 1); gaussian((u, u, u)); gaussian(T); gaussian((u, v, x)); gaussian((1, 2))',
   'gaussian((u, v, u v)); gaussian((u, v, u v), 0, 0); S = (u, v, floor(u) v); gaussian(S); gaussian(S, 1, 2, 3); gaussian(S, 1, 2, 3, 4)',
   'k = u v; S = (u, v, k); gaussian(S); C = (u, u, u); gaussian(C); A = (1, 2, 3); meancurvature(A); gaussian(x) = x; gaussian(2)',
+  // Random variables: declarations of every family, their aliases and defaults.
+  'X ~ Normal(0, 1); Y ~ N; Z ~ normal(1, 2); U ~ Uniform(0, 2); V ~ U; W ~ Exponential(2); Q ~ Exp; R ~ exp',
+  'A ~ Gamma(2, 1); B ~ Beta(2, 3); C ~ ChiSquared(3); D ~ ChiSq(2); F ~ Chi2(4); G ~ StudentT(3); H ~ T(5)',
+  'A ~ LogNormal(0, 0.5); B ~ LogNormal; C ~ Cauchy(0, 1); D ~ Cauchy; F ~ Weibull(2, 1); G ~ Weibull(0.5, 2)',
+  'A ~ Binomial(10, 0.3); B ~ Binom(4, 1); C ~ Poisson(4); D ~ Pois(0.5); F ~ Geometric(0.25); G ~ Geom(1)',
+  'A ~ NegativeBinomial(3, 0.5); B ~ NegBin(1.5, 0.2); C ~ Bernoulli(0.3); D ~ DiscreteUniform(1, 6); F ~ Bernoulli(1)',
+  // What a declaration refuses.
+  'X ~ Foo(1); X2 ~ Normal(0, 1, 2); X3 ~ Normal(0); X4 ~ Gamma; X5 ~ Normal(0, -1); X6 ~ Uniform(2, 1); X7 ~ 3',
+  'X ~ Binomial(2.5, 0.5); X2 ~ Binomial(-1, 0.5); X3 ~ Binomial(3, 1.5); X4 ~ Geometric(0); X5 ~ Poisson(0)',
+  'X ~ DiscreteUniform(1.5, 3); X2 ~ DiscreteUniform(3, 1); X3 ~ Normal(); X4 ~ Normal(0, 1) + 2; X5 ~ Normal(1,; X6 ~',
+  'x ~ Normal(0, 1); e ~ Normal(0, 1); sin ~ Normal(0, 1); gamma ~ Normal(0, 1); X ~ Normal(0, 1); X ~ Uniform(0, 1)',
+  'a = 2; a ~ Normal(0, 1); f(x) = x; f ~ Normal(0, 1); X ~ Normal(Y, 1); Y ~ Normal(0, 1); Z ~ Normal(x, 1)',
+  'X ~ Normal(q, 1); Y ~ Normal(0, (1, 2)); Z ~ Normal(i, 1); W ~ Normal(0, 1) # the bell',
+  // Parameters that are sliders, and ones that move.
+  'a = 1; b = 0.5; X ~ Normal(0, a); P(X < b); E(X); X + b; 2 X',
+  'a = -1; X ~ Gamma(a, 1); E(X); P(X > 1); G ~ Normal(0, a); E(G); P(G < 1); U ~ Uniform(1, a); E(U); P(U < 2)',
+  'a = -1; N ~ Poisson(a); E(N); P(N < 2); B ~ Binomial(2.5 + 0 a, 0.5); E(B); W ~ Weibull(a, 1); E(W)',
+  'X ~ Normal(0, sin(t)); E(X); P(X < 1); a = 2 t; Y ~ Normal(a, 1); E(Y); P(Y > a); Z ~ Poisson(1 + t); E(Z); P(Z < 2)',
+  'n = 20; p = 0.3; X ~ Binomial(n, p); P(X <= 4); E(X); m = 4; Y ~ Poisson(m); k = 3; Z ~ DiscreteUniform(1, k)',
+  'n = 0.1 30; X ~ Binomial(n, 0.5); E(X); P(X < n); P(X <= n)',
+  // Derived variables with a closed law.
+  'X ~ Normal(0, 1); Y ~ Normal(1, 2); Z = 2 X + 1; W = X + Y; V = X - Y; S = X + X; R = -X; Q = X/2; T = 3; T2 = Z + 1',
+  'X ~ Normal(0, 1); Y = X^2; Y2 = X X; Y3 = X^2 + 1; C ~ Normal(1, 1); Y4 = C^2; P(Y < 1); E(Y); P(0.5 < Y < 2)',
+  'U ~ Uniform(0, 1); A = 2 U + 1; B = -U; a = 3; C = a U; P(A < 2); E(A); E(B); P(C > 1)',
+  'X ~ Exponential(2); A = 3 X; B = X + 1; C = -X; a = 2; D = a X; E(A); P(A > 1)',
+  'L ~ LogNormal(0, 1); A = 2 L; B = L + 1; E(A); P(A < 3); C1 ~ Cauchy(0, 1); C2 ~ Cauchy(1, 2); D = C1 - 2 C2; E(D); P(D > 0)',
+  'a = 2; b = 1; X ~ Gamma(a, b); Y ~ Exponential(b); S = X + Y; P(X > 4); E(S); P(S < 3); K ~ ChiSquared(3); K + K',
+  'G1 ~ Gamma(2, 1); G2 ~ Gamma(3, 2); G1 + G2; G1 + 2 G2; X1 ~ Exponential(1); X2 ~ Exponential(1); X1 + X2; E(X1 + X2)',
+  'A ~ Poisson(2); B ~ Poisson(3); S = A + B; P(S <= 4); E(S); P(S = 5); P(S != 5); P(2 <= S < 6); S2 = A + A',
+  'A ~ Binomial(3, 0.5); B ~ Bernoulli(0.5); C ~ Binomial(4, 0.2); S = A + B; S; T = A + C; E(S); P(S >= 2)',
+  'A ~ NegativeBinomial(2, 0.5); B ~ NegativeBinomial(1.5, 0.5); S = A + B; E(S); P(S > 3); G ~ Geometric(0.5); G + G',
+  // Sums of uniforms: an exact piecewise polynomial.
+  'X ~ Uniform(0, 1); Y ~ Uniform(0, 1); X + Y; S = X + Y; P(S > 1.5); E(S); P(0.5 < S < 1); P(X + Y < 0.5); E(X - Y)',
+  'X1 ~ Uniform(0, 1); X2 ~ Uniform(0, 1); X3 ~ Uniform(0, 1); X4 ~ Uniform(0, 1); S = X1 + X2 + X3 + X4; P(S > 3); E(S)',
+  'a = 2; X ~ Uniform(0, a); Y ~ Uniform(-1, 1); S = 2 X - Y + 1; P(S < 2); E(S); T = a X + Y; E(T); P(T > 1)',
+  // Probabilities: bounds, chains, strictness, what P refuses.
+  'X ~ Normal(0, 1); P(X > 1); P(1 < X); P(X < -1); P(-1 < X < 2); P(2 > X > -1); P(-1 <= X <= 2); P(X < 1 < 2)',
+  'X ~ Normal(0, 1); P(X); P(X + 1); P(X = 1); P(1 > 0); P(x < X); P(X < y); P(0 < X > 1); P((X, 1) < 2); P()',
+  'X ~ Normal(0, 1); P(2 X + 1 < 3); P(0 < X^2 < 1); P(-X > 1); P(X < q); P(1 < 2 < X); P(X < 1, X > 0)',
+  'D ~ DiscreteUniform(1, 6); P(2 < D <= 5); E(D); P(D = 3); P(D < 3); P(D <= 3); P(D > 6); P(D >= 1); P(D < 2.5); P(3 = D)',
+  'X ~ Poisson(4); P(X < 3); P(X <= 3); P(X = 3); P(X = 2.5); P(X > 100); P(3 < X < 4); P(X >= 0)',
+  'p = 0.25; G ~ Geometric(p); W ~ NegativeBinomial(3, p); P(G > 4); E(G); E(W); P(W <= 2); P(G = 1); B ~ Binomial(1000, 0.3); P(B < 300)',
+  'X ~ Beta(0.5, 0.5); P(X < 0.2); E(X); T ~ T(2); P(T > 2); E(T); T1 ~ T(1); E(T1); T3 ~ T(3); E(T3); P(-1 < T3 < 1)',
+  'X ~ LogNormal(0, 0.5); Y ~ Weibull(2, 1); P(X > 2); P(Y < 1); E(X); E(Y); C ~ ChiSquared(3); P(C > 7.81); E(C)',
+  'X ~ Gamma(50, 2); P(X > 30); E(X); Y ~ Beta(30, 40); P(Y < 0.4); Z ~ T(2000000); P(Z > 1.96); G ~ Gamma(2000000, 1); P(G < 2000000)',
+  // Expectations.
+  'X ~ Normal(1, 2); E(X); E(2 X + 1); E(X + X); E(x); E(X < 1); E((X, 1)); E(1); E(); E(X + q); U ~ Uniform(0, 4); E(U)',
+  'C ~ Cauchy(0, 1); E(C); E(2 C + 1); W ~ Weibull(0.01, 1); E(W); L ~ LogNormal(0, 30); E(L)',
+  // The names P and E when the document defines them.
+  'P = 2; X ~ Normal(0, 1); P(X > 1); E(x) = x^2; E(X); E(3)',
+  'P(x) = x + 1; P(2); X ~ Normal(0, 1); P(X > 1); E = (1, 2); E(X)',
+  // Derived rows, cycles and failures.
+  'Y = X + 1; X ~ Normal(0, 1); Z = Y + W; W = Z; V = Q + 1; Q ~ Foo; A = X + nope; B = (X, 1); C = X < 1',
+  'X ~ Normal(0, 1); Y = X; Y = 2 X; e = X; t = X; f(x) = X + x; y = X; X = 3; 2X; X2; X_1 = X',
+  'X ~ Normal(0, 1); X < 1; X + x; X + u; (X, 1); y = X x; X; -X; X + 1; X - X; 0 X',
+  // What the port does not answer yet: quadrature, enumeration, samples.
+  'X ~ Normal(0, 1); Y = sin(X); Y; P(Y > 0); E(Y); P(X > Y); Z = {X > 0: X^2, 1}; E(X^2); X Y; E(X^3)',
+  'D ~ DiscreteUniform(1, 6); F ~ DiscreteUniform(1, 6); S = D + F; P(S >= 10); P(D > F); E(S); D / 2; D^2; E(D^2); P(D^2 <= 9)',
+  'N ~ Poisson(3); Z ~ Normal(0, 0.25); Y = N + Z; P(Y < 2.5); E(Y); U ~ Uniform(0, 1); V = U^2; E(V); E(U + V)',
+  // Arithmetic on discrete variables: atoms enumerated over the joint of the bases.
+  'D ~ DiscreteUniform(1, 6); F ~ DiscreteUniform(1, 6); S = D + F; S - D; D - D; D F; D/F; D^F; -D; abs(D - F); max(D, F)',
+  'D ~ DiscreteUniform(1, 6); F ~ DiscreteUniform(1, 6); min(D, F) + 1; {D > F: D, F}; mod(D, 2); D + F + D; {D > 3: 1}; D + 0.5',
+  'D ~ DiscreteUniform(1, 6); F ~ DiscreteUniform(1, 6); P(D > F); P(D >= F); P(D = F); P(D != F); P(D + F = 7); P(D + F > 9)',
+  'D ~ DiscreteUniform(1, 6); F ~ DiscreteUniform(1, 6); P(2 < D + F <= 5); P(D < F < 5); P(D F > 10); E(D F); E(D/F); P(D - D = 0)',
+  'D ~ DiscreteUniform(1, 6); E(1/(D - 3)); 1/(D - 3); P(1/(D - 3) > 0); sqrt(D - 3); E(sqrt(D - 3)); P(D^2 <= 9); P(D^2 != 9); P(3 < D^2)',
+  'X ~ Poisson(4); Y ~ Geometric(0.25); X Y; X^2; 2^Y; E(2^Y); E(X^2); P(X^2 < 10); P(X > Y); E(1.5^Y); 1/X; E(1/X); P(1/X > 0.3)',
+  'N ~ Binomial(5, 0.5); 0.1 N; 0.1 N + 0.2 N; P(0.1 N + 0.2 N = 0.3); P(0.1 N + 0.2 N <= 0.3); P(0.1 N < 0.3); N/3; (N/3) 3; sin(N)',
+  'a = 2; D ~ DiscreteUniform(1, 6); T = a D + 1; P(T > 5); E(T); S = D + t; E(S); B ~ Binomial(3, a/4); B^2; E(B^2); P(B^2 = 4)',
+  'D0 ~ DiscreteUniform(1, 6); D1 ~ DiscreteUniform(1, 6); D2 ~ DiscreteUniform(1, 6); D3 ~ DiscreteUniform(1, 6); ' +
+    'D4 ~ DiscreteUniform(1, 6); T = D0 + D1 + D2 + D3 + D4; T + D0; P(T > 20); E(T D0); P(T > 3 D0); T^2; W = T - D1; P(W = T)',
+  'X ~ Poisson(1000000); X^2; E(X^2); Y ~ Geometric(0.000001); P(X > Y); Y + Y; A ~ Poisson(300); B ~ Poisson(300); A B; P(A < B)',
+  'G ~ Geometric(0.5); 3^G; E(3^G); 1.9^G; E(1.9^G); 1.3^G; E(1.3^G); G^2; H ~ NegativeBinomial(2.5, 0.3); H/2; P(H/2 <= 1.5)',
+  // u and v alone: the density of the row's values.
+  'u; 2 u + 1; u + v; u - v; a = 2; a u; u^2; u v; (u, v); u + x; u < 0.5; sin(u); 1 - u; u + u; u/2 + v/2 + 1',
+  // Fits, which need lists.
+  'P = [(0, 1), (1, 3), (2, 5)]; P.y ~ m P.x + b; y = m x + b; y = x',
+  'Y = [1, 2, 3]; X = [0, 1, 2]; Y ~ a X + c; Y ~ exp(a X); Y ~ exp; Y ~ gamma; Y ~ Normal(0, 1); y = 2 x; 2 ~ 3',
 ];
 
 /** Small documents written at random from the ported core's own words, so
@@ -540,7 +673,8 @@ const recorded = docs.map(({ name, rows }) => {
             lo = Math.min(-10, Math.floor(value));
             hi = Math.max(10, Math.ceil(value));
           }
-          const whole = form.whole || sumBound.has(def.name);
+          // (A whole-number parameter of a discrete law steps in whole numbers too.)
+          const whole = form.whole || sumBound.has(def.name) || analysis.rvs.wholeParamNames().has(def.name);
           slider = { min: lo, max: hi, step: whole ? 1 : niceMajor((hi - lo) / 400, 1), value };
           // Where the slider lands when dragged to a third of the way along.
           const target = lo + (hi - lo) / 3;
@@ -569,6 +703,7 @@ const recorded = docs.map(({ name, rows }) => {
         cls: row.cls ? { animated: row.cls.animated, needs3D: row.cls.needs3D, params: row.cls.params } : null,
         cpu: slim(row.cpu),
         gpu: slim(row.gpu),
+        drawn: drawnOf(row.cpu, analysis.rvs, analysis.constEnv),
       };
     }),
   };
@@ -733,6 +868,59 @@ const structures = STRUCTURES.map(([name, expr]) => ({
   glsl: attempt(() => toGLSL(expr)),
 }));
 
+// --- fits (lib/regression.ts) ---
+//
+// A fit reaches fitRegression through list lowering, which the Swift port does not have: the lists are written
+// out here, one model per observation with X (and Z) replaced by its numbers.
+
+const X5 = [0, 1, 2, 3, 4];
+const FITS: Array<{ y: number[]; x?: number[]; z?: number[]; model: string; params: string[]; fixed?: Record<string, number> }> = [
+  { y: [1.1, 2.9, 5.2, 6.8, 9.1], x: X5, model: 'm X + b', params: ['m', 'b'] },
+  { y: [9, 2, 1, 6, 17], x: [-2, -1, 0, 1, 2], model: 'a X^2 + b X + c', params: ['a', 'b', 'c'] },
+  { y: [2, 2.84, 4.03, 5.72, 8.11], x: [0, 0.5, 1, 1.5, 2], model: 'a exp(b X)', params: ['a', 'b'] },
+  { y: [1, 2, 3, 4, 5], x: X5, model: 'm X + k', params: ['m'], fixed: { k: 1 } },
+  { y: [3, 3, 3, 3, 3], x: X5, model: 'c', params: ['c'] },
+  { y: [1, 2, 3, 4, 5], x: X5, model: 'a X + b X', params: ['a', 'b'] },
+  { y: [1, 2, 3, 4, 5], x: X5, model: 'a b X', params: ['a', 'b'] },
+  { y: [1, 2, NaN, 4, 5], x: [0, 1, 2, NaN, 4], model: 'm X + b', params: ['m', 'b'] },
+  { y: [1, 2], x: [0, 1], model: 'a X^2 + b X + c', params: ['a', 'b', 'c'] },
+  { y: [1, 2, 3], x: [0, 1], model: 'm X', params: ['m'] },
+  { y: [1, 2, 3], x: [0, 1, 2], model: 'k X', params: [] },
+  { y: [1, 2, 3], x: [0, 1, 2], model: 'm ln(X - 1)', params: ['m'] },
+  { y: [1, 2, 3], x: [0, 1, 2], model: 'floor(m X)', params: ['m'] },
+  { y: [1, 2, 3], x: [0, 1, 2], model: 'm abs(X) + b', params: ['m', 'b'] },
+  { y: [0.1, 0.9, 2.1, 2.9, 4.2], x: X5, z: [1, 0, 2, 1, 3], model: 'a X + b Z + c', params: ['a', 'b', 'c'] },
+  { y: [0, 0.84, 0.91, 0.14, -0.76], x: X5, model: 'a sin(b X)', params: ['a', 'b'] },
+  { y: [5, 2.7, 1.6, 1.1, 0.9], x: X5, model: 'a exp(-b X) + c', params: ['a', 'b', 'c'] },
+  { y: [1, 4, 9, 16, 25], x: [1, 2, 3, 4, 5], model: 'a X^p', params: ['a', 'p'] },
+  { y: [1e200, 2e200, 3e200], x: [1, 2, 3], model: 'm X', params: ['m'] },
+  { y: [1, 2, 3], x: [1, 2, 3], model: 'a/(X - b)', params: ['a', 'b'] },
+  { y: [2.1, 3.9, 6.2, 7.8], x: [1, 2, 3, 4], model: 'a X + b + c + d + f + g + h + j + k', params: ['a', 'b', 'c', 'd', 'f', 'g', 'h', 'j', 'k'] },
+  { y: [0.5, 0.62, 0.73, 0.82, 0.88], x: X5, model: '1/(1 + exp(-(a + b X)))', params: ['a', 'b'] },
+];
+const fits = FITS.map(({ y, x = [], z = [], model, params, fixed = {} }) => {
+  const parsed = parseExpr(model);
+  const models = Array.from({ length: x.length || y.length }, (_, k) =>
+    substVars(parsed, { X: nm(x[k] ?? NaN), Z: nm(z[k] ?? NaN) }),
+  );
+  let result: unknown;
+  try {
+    const fit = fitRegression(y, models, params, fixed);
+    result = {
+      coefficients: Object.entries(fit.coefficients).map(([name, value]) => ({ name, value: num(value) })),
+      count: fit.count,
+      skipped: fit.skipped,
+      rmse: num(fit.rmse),
+      r2: fit.r2 === null ? null : num(fit.r2),
+      nonlinear: fit.nonlinear,
+      text: formatFit(fit),
+    };
+  } catch (err) {
+    result = { error: (err as Error).message };
+  }
+  return { y: y.map(num), models: models.map(tree), params, fixed, result };
+});
+
 const POW: Array<[number, number]> = [];
 for (const a of [0, -0, 1, -1, 2, -2, -8, 0.5, -0.5, 10, NaN, Infinity, -Infinity])
   for (const b of [0, 1, -1, 2, 3, 0.5, 1 / 3, 2 / 3, 0.33333, 1 / 7, 5 / 12, 1 / 13, -1 / 3, 2.5, NaN, Infinity, -Infinity])
@@ -812,6 +1000,7 @@ writeFileSync(
     substitution: Object.fromEntries(Object.entries(SUBSTITUTION).map(([name, e]) => [name, tree(e)])),
     structureEnvs: STRUCTURE_ENVS.map(env => Object.fromEntries(Object.entries(env).map(([k, v]) => [k, num(v)]))),
     structures,
+    fits,
     pow: POW.map(([a, b]) => ({ a: num(a), b: num(b), value: num(realPow(a, b)) })),
     numbers: NUMBERS.map(v => ({
       v: num(v),
