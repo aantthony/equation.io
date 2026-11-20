@@ -97,6 +97,9 @@ struct Grabbable: Equatable {
   enum Target: Equatable {
     case row(Int)
     case seed(Int)
+    /// One of the solutions of a point placed by its coordinates' names
+    /// (`(r, theta) = (2, 0.8)`): the drag rewrites the row's right-hand pair.
+    case solution(row: Int, index: Int)
   }
   var target: Target
   /// Where the panel draws it: on a panel with mapped axes, on its screen.
@@ -254,11 +257,16 @@ struct GraphContent: Equatable {
         let stacks = panel.graph.levelStacks(rows: levels, at: time, view: view, width: r.w, height: r.h)
         if !stacks.isEmpty { scene.layers.levels = stacks }
       }
-      if let hot, hot.panel == k, case .row(let row) = hot.target, var overlay = scene.overlay {
+      var hotRow: Int?
+      switch hot?.target {
+      case .row(let row)?, .solution(let row, _)?: hotRow = row
+      default: break
+      }
+      if let hot, hot.panel == k, let row = hotRow, var overlay = scene.overlay {
         // The overlay doesn't say which row a dot is: the one where the held point is.
         let held = grabPoints(
           panel: k, rows: row..<(row + 1), time: time, run: run, view: view, width: r.w, height: r.h)
-        for at in held {
+        for at in held where at.target == hot.target {
           for index in overlay.points.indices where overlay.points[index].x == at.x && overlay.points[index].y == at.y {
             overlay.points[index].hot = true
           }
@@ -338,22 +346,29 @@ struct GraphContent: Equatable {
     guard framing[k].space?.document != nil else { return nil }
     for row in panels.panels[k].rows where analysis.rows[row].error == nil {
       guard case .surface(let map)? = analysis.rows[row].view, (try? surfaceGLSL(map)) != nil else { continue }
-      var made: [String: String] = [:]
-      for row in analysis.rows {
-        if case .constant(let name, let rhs, _)? = row.definition { made[name] = rhs }
-      }
-      let names = { (text: String) in
-        (try? parseExpr(text, valueNames: analysis.valueNames)).map { Array(freeVars($0)) } ?? []
-      }
-      var reads: Set<String> = []
-      var next = names(map.text)
-      while let name = next.popLast() {
-        guard reads.insert(name).inserted, let rhs = made[name] else { continue }
-        next += names(rhs)
-      }
-      return (map, reads)
+      return (map, reads(names(in: map.text)))
     }
     return nil
+  }
+
+  private func names(in text: String) -> [String] {
+    (try? parseExpr(text, valueNames: analysis.valueNames)).map { Array(freeVars($0)) } ?? []
+  }
+
+  /// `names` and, through the constants' rows, everything they are made of
+  /// (lib/defs.ts `definitionDependencies`, less a state's rate and start).
+  func reads(_ names: [String]) -> Set<String> {
+    var made: [String: String] = [:]
+    for row in analysis.rows {
+      if case .constant(let name, let rhs, _)? = row.definition { made[name] = rhs }
+    }
+    var reads: Set<String> = []
+    var next = names
+    while let name = next.popLast() {
+      guard reads.insert(name).inserted, let rhs = made[name] else { continue }
+      next += self.names(in: rhs)
+    }
+    return reads
   }
 
   /// The named points of a surface panel a drag can move along the surface,
@@ -385,6 +400,19 @@ struct GraphContent: Equatable {
     var points: [Grabbable] = analysis.grabPoints(rows: rows ?? panel.rows, env: env).compactMap { point in
       panel.graph.screenPoint(point.x, point.y, bounds: bounds).map {
         Grabbable(target: .row(point.row), x: $0.x, y: $0.y)
+      }
+    }
+    // A point placed by its coordinates' names, at each solution it was drawn
+    // with. (Not on a mapped panel: its solutions are on the screen, and
+    // the coordinates read x and y.)
+    if panel.graph.maps == nil {
+      for row in rows ?? panel.rows {
+        guard let names = analysis.coordinateNames(row: row),
+          analysis.movesCoordinatePoint(row: row, pinned: reads(names))
+        else { continue }
+        for (index, at) in panel.graph.solvedPoints(row: row).enumerated() where at.count == 2 {
+          points.append(Grabbable(target: .solution(row: row, index: index), x: at[0], y: at[1]))
+        }
       }
     }
     // A seed is one grabbable point however many fields trace a curve from it.

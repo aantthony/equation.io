@@ -409,7 +409,16 @@ final class EditorController: NSObject {
     #else
       let inset = textView.textContainerInset.left + textView.textContainerInset.right
     #endif
-    return max(120, textView.bounds.width - inset - Style.indent - 12)
+    // (Less the text's own padding: the width a widget is laid out at is the one it is measured at.)
+    return max(120, textView.bounds.width - inset - Style.indent - 12 - linePadding)
+  }
+
+  private var linePadding: CGFloat {
+    #if os(macOS)
+      textView.textContainer?.lineFragmentPadding ?? 0
+    #else
+      textView.textContainer.lineFragmentPadding
+    #endif
   }
 
   /// Make, update or drop the view under each row that has something to show.
@@ -498,13 +507,8 @@ final class EditorController: NSObject {
       }
       if let host = widgets[i], let height = widgetHeights[i] {
         host.view.isHidden = false
-        #if os(macOS)
-          let padding = textView.textContainer?.lineFragmentPadding ?? 0
-        #else
-          let padding = textView.textContainer.lineFragmentPadding
-        #endif
         host.view.frame = CGRect(
-          x: origin.x + Style.indent + padding, y: bottom + 2, width: widgetWidth - padding, height: height)
+          x: origin.x + Style.indent + linePadding, y: bottom + 2, width: widgetWidth, height: height)
       }
     }
   }

@@ -217,11 +217,25 @@ final class MetalCanvas: MTKView, MTKViewDelegate {
   }
 
   /// The frame at `time`: every panel in its box, as the view has it now.
+  /// The rows are evaluated with the stack a deep one needs (DeepStack.swift).
   private func frames(_ content: GraphContent, at time: Double) -> (frames: [PanelFrame], layout: [PanelLayout]) {
-    content.frames(
-      at: time, width: viewport.pixels.width, height: viewport.pixels.height, dpr: viewport.scale, theme: theme,
-      views: viewport.states.map(\.view), cameras: viewport.states.map(\.camera), run: run,
-      seeds: viewport.states.map(\.seeds), hot: viewport.hot)
+    let (pixels, dpr, theme, run) = (viewport.pixels, viewport.scale, theme, run)
+    let (states, hot) = (viewport.states, viewport.hot)
+    return DeepStack.run {
+      content.frames(
+        at: time, width: pixels.width, height: pixels.height, dpr: dpr, theme: theme, views: states.map(\.view),
+        cameras: states.map(\.camera), run: run, seeds: states.map(\.seeds), hot: hot)
+    }
+  }
+
+  /// Step the states to `time`: frame by frame as they are drawn, or, for a
+  /// picture where none were, as the frames up to then would have.
+  private func step(to time: Double, playing: Bool = false) {
+    guard var stepper = run else { return }
+    // (Out of the view while it steps, so that its trails are not copied.)
+    run = nil
+    DeepStack.run { if playing { stepper.play(to: time) } else { stepper.advance(to: time) } }
+    run = stepper
   }
 
   func draw(in view: MTKView) {
@@ -232,7 +246,7 @@ final class MetalCanvas: MTKView, MTKViewDelegate {
     else { return }
     turn()
     let time = viewport.time
-    run?.advance(to: time)
+    step(to: time)
     let frame = frames(content, at: time)
     renderer.helpers = content.framing.lazy.compactMap { $0.space?.helpers }.first
     renderer.draw(
@@ -264,7 +278,8 @@ final class MetalCanvas: MTKView, MTKViewDelegate {
     guard let model else { return }
     let now = CACurrentMediaTime()
     if !isPaused, !immediately, now - noted < 0.1 { return }
-    let notes = content.notes(at: time, run: run)
+    let run = run
+    let notes = DeepStack.run { content.notes(at: time, run: run) }
     guard notes != model.notes else { return }
     noted = now
     // Not while the view that owns this one is being updated.
@@ -297,7 +312,7 @@ final class MetalCanvas: MTKView, MTKViewDelegate {
       renderer.helpers = content.framing.lazy.compactMap { $0.space?.helpers }.first
       let time = viewport.time
       // Stepped as the frames up to now would have stepped it, where none were drawn (a hidden window).
-      run?.play(to: time)
+      step(to: time, playing: true)
       let frame = frames(content, at: time)
       // (What the rows say once drawn, where no frame on screen has said it.)
       note(content, at: time, now: true)
@@ -395,7 +410,7 @@ final class MetalCanvas: MTKView, MTKViewDelegate {
     // A mapped axis panned past what its map can name (ln(X) left of X = 0)
     // has no row to write: the row keeps the last window it could.
     if mapped {
-      let read = analyze(lines)
+      let read = analyzeDeep(lines)
       for change in changed where read.rows[change.row].error != nil { lines[change.row] = change.was }
       changed.removeAll { lines[$0.row] == $0.was }
     }
@@ -611,7 +626,8 @@ final class MetalCanvas: MTKView, MTKViewDelegate {
   private var picker: SurfacePicker?
 
   private func surface(at p: CGPoint, in k: Int) -> OnSurface? {
-    guard let content, spatial(k), k < content.framing.count, let surface = content.surface(panel: k) else { return nil }
+    guard let content, spatial(k), k < content.framing.count, let surface = content.surface(panel: k)
+    else { return nil }
     let layout = viewport.layout(content)
     guard k < layout.count, layout[k].rect.w > 0, layout[k].rect.h > 0 else { return nil }
     let (box, scale) = (layout[k].rect, scale)
@@ -733,7 +749,7 @@ final class MetalCanvas: MTKView, MTKViewDelegate {
         // Along the surface, to the pixel there; held where the pointer leaves it.
         guard case .row(let row) = grab.target, let on = surface(at: p, in: active), let hit = on.hit else { return }
         let lines = model.rows()
-        let moved = analyze(lines).movingPoint(
+        let moved = analyzeDeep(lines).movingPoint(
           row: row, to: hit.x, hit.y, upp: on.units(hit.x, hit.y), pinned: on.reads, in: lines)
         if let moved { model.gestureEdit(moved) }
         return
@@ -743,15 +759,26 @@ final class MetalCanvas: MTKView, MTKViewDelegate {
       let math = view.point(px: at.px, py: at.py)
       var to = (x: math.x + grab.dx, y: math.y + grab.dy)
       var upp = (x: view.upp, y: view.uppY)
+      let graph = content.panels.panels[active].graph
       // A seed is the view's: it moves, and no row is rewritten.
       guard case .row(let row) = grab.target else {
         if case .seed(let index) = grab.target, index < viewport.states[active].seeds.count {
           viewport.states[active].seeds[index] = FieldSeed(x: to.x, y: to.y)
           redraw()
+        } else if case .solution(let row, _) = grab.target {
+          // A point placed by its coordinates' names: they are read where
+          // the pointer is, and written as the row's pair (web/main.ts `coordinatePointWriter`).
+          var env = graph.environment(at: viewport.time, run: run)
+          env["t"] = viewport.time
+          let lines = model.rows()
+          let read = analyzeDeep(lines)
+          let pinned = content.reads(read.coordinateNames(row: row) ?? [])
+          let moved = read.movingCoordinatePoint(
+            row: row, to: to.x, to.y, upp: upp, env: env, pinned: pinned, in: lines)
+          if let moved { model.gestureEdit(moved) }
         }
         return
       }
-      let graph = content.panels.panels[active].graph
       if graph.maps?.plane != nil {
         // Through a plane map the point is held on the screen and written
         // in x and y, each rounded to about a pixel there (web/main.ts `dragToPlane`).
@@ -774,7 +801,7 @@ final class MetalCanvas: MTKView, MTKViewDelegate {
       }
       // The rows as they are now: the last move's rewrite may not have come back round yet.
       let lines = model.rows()
-      if let next = analyze(lines).movingPoint(row: row, to: to.x, to.y, upp: upp, in: lines) {
+      if let next = analyzeDeep(lines).movingPoint(row: row, to: to.x, to.y, upp: upp, in: lines) {
         model.gestureEdit(next)
       }
       return

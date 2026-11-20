@@ -71,6 +71,23 @@ clock and the run of the document's states (`StateStepper`), and moves them;
 a point moved by hand rewrites its row, as on the site, and in a Mac
 document window everything one gesture rewrites is one undo step.
 
+What a viewer adds to a panel is the view's too: the seeds a click or tap
+that goes nowhere drops on a 2D panel's vector fields (`PanelState.seeds`,
+given to each frame's graph; a double tap lets go of them), and the toggles
+under a row (certify search box, a matrix field's streamlines, a space
+curve's combs, with the older ones). What drawing a row finds — a
+certificate, a geodesic cut short, a readout that moves with t — comes back
+after the frame as the row's note (`GraphContent.notes`, `GraphModel.notes`),
+shown in place of its readout. A point is dragged where its panel draws it:
+through a view's maps, along the surface of an `on(…)` panel, or as a point
+placed by its coordinates' names (`(r, theta) = (2, 0.8)`).
+
+The port walks a row by recursion, and a row may be deep (a Σ of 500 terms,
+150 nested calls): more stack than an iPhone's main thread has, in a debug
+build several times over. `DeepStack.swift` is a thread with enough, which
+every reading of the rows (`GraphAnalysis`, `analyzeDeep`) and every frame's
+evaluation of them runs on while its caller waits.
+
 Ask's `get_graph`, `set_graph` and `check` describe each row as the site
 does (`EquationRender` `RowReport.swift`, lib/assistant-tools.ts
 `describeRow` ported and held to it by fixture: `pnpm swift:reports`).

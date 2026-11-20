@@ -1,3 +1,4 @@
+import EquationCore
 import EquationRender
 import MetalKit
 
@@ -190,6 +191,8 @@ import MetalKit
     ///   ask name tool args…      one of Ask's tools, its answer as name.txt:
     ///                              get | check row | row | set row | row | view x0 x1 y0 y1 [seconds]
     ///                              | camera theta phi radius [seconds] | slider a to [seconds]
+    ///   stack path kb [raw] row | row …  read and draw rows from a thread with kb KB of stack (raw: by the
+    ///                            core's analyze, on that thread itself); path.txt says ok if it could
     ///   wait seconds
     ///   shot name                the frame, as name.png in the app's temporary directory
     ///   rows name                the document's rows, as name.txt there
@@ -308,6 +311,37 @@ import MetalKit
               ? URL(fileURLWithPath: "\(name).txt")
               : URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("\(name).txt")
             try? answer.write(to: url, atomically: true, encoding: .utf8)
+          case "stack" where step.count >= 4:
+            // Read rows on a thread with that little stack, as the app reads and draws them (or, with
+            // `raw`, by the core's analyze where it stands): it answers, or the app is gone.
+            let raw = step[3] == "raw"
+            let rows = step.dropFirst(raw ? 4 : 3).joined(separator: " ").split(separator: "|")
+              .map { $0.trimmingCharacters(in: .whitespaces) }
+            let name = step[1]
+            let thread = Thread {
+              var errors: [String] = []
+              if raw {
+                errors = analyze(rows).rows.compactMap(\.error)
+              } else {
+                let read = GraphAnalysis(
+                  rows: rows.enumerated().map { GraphRow(id: $0.offset, text: $0.element) }, theme: .light)
+                errors = read.status.compactMap(\.error)
+                let content = read.content
+                let views = content.panels.opening(width: 800, height: 600, dpr: 2)
+                let cameras = content.framing.map { $0.camera ?? $0.space?.opening ?? Camera3D() }
+                let drawn = DeepStack.run {
+                  content.frames(
+                    at: 0, width: 800, height: 600, dpr: 2, theme: .light, views: views, cameras: cameras, run: nil
+                  ).frames.count
+                }
+                errors.append("\(drawn) panels drawn")
+              }
+              try? "ok \(errors.joined(separator: " / "))".write(
+                to: URL(fileURLWithPath: "\(name).txt"), atomically: true, encoding: .utf8)
+            }
+            thread.stackSize = Int(n[1]) << 10
+            thread.start()
+            try? await Task.sleep(for: .seconds(1.5))
           case "wait" where n.count >= 1:
             try? await Task.sleep(for: .seconds(n[0]))
           case "shot":
@@ -322,7 +356,9 @@ import MetalKit
                 : "view(cx = \(state.view.cx), cy = \(state.view.cy), upp = \(state.view.upp))"
             }
             let pixels = self.viewport.pixels
-            let size = "size \(pixels.width) \(pixels.height) scale \(self.scale) drawn \(self.drawn)"
+            let stack = pthread_get_stacksize_np(pthread_self()) >> 10
+            let size =
+              "size \(pixels.width) \(pixels.height) scale \(self.scale) drawn \(self.drawn) stack \(stack) KB"
             let hover = "hover \(self.viewport.hover?.text ?? "-")"
             // (As the editor shows them: with what drawing the rows found.)
             let status = (self.model?.shown ?? []).enumerated().map { k, row in

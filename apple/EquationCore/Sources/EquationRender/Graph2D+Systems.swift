@@ -56,6 +56,13 @@ final class SolvedSystems: Equatable, @unchecked Sendable {
     return found.points
   }
 
+  /// The solutions the row last drew.
+  func last(row: Int) -> [[Double]] {
+    lock.lock()
+    defer { lock.unlock() }
+    return rows[row]?.points ?? []
+  }
+
   /// What the row's certified search last reported.
   func report(row: Int) -> (note: String?, error: String?) {
     lock.lock()
@@ -65,6 +72,12 @@ final class SolvedSystems: Equatable, @unchecked Sendable {
 }
 
 extension Graph2D {
+  /// The solutions the system of row `index` was last drawn with: where a
+  /// drag finds its points (web/scene.ts, the 'system' case's `grabs`).
+  public func solvedPoints(row index: Int) -> [[Double]] {
+    systemsSolved.last(row: index)
+  }
+
   /// Whether the row offers "certify search box" (web/main.ts `rowToggle`): a
   /// system of two equations that is not parametric and wraps no angle.
   ///
