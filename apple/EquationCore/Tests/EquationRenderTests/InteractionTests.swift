@@ -53,55 +53,18 @@ import Testing
         == "camera(-3.14159, 0.25, 123457000, spin = -0.25)")
   }
 
-  private func boxes(_ rows: [String], margin: Double = 24) -> [[Double]] {
-    let splits = analyze(rows).rows.compactMap(\.view)
-    return panelBoxes(splits, width: 1001, height: 701, margin: margin).map {
-      [$0.x, $0.y, $0.w, $0.h, Double($0.host), $0.inset ? 1 : 0, $0.sharedX ? 1 : 0, $0.sharedY ? 1 : 0]
-    }
-  }
-
-  @Test func panelsAreLaidOutAsTheSiteLaysThemOut() {
-    #expect(boxes(["---"]) == [[0, 0, 500, 701, 0, 0, 0, 0], [500, 0, 501, 701, 0, 0, 0, 0]])
-    #expect(
-      boxes(["--- below 40%, shared x"]) == [[0, 0, 1001, 421, 0, 0, 0, 0], [0, 421, 1001, 280, 0, 0, 1, 0]])
-    #expect(
-      boxes(["--- right 40%", "--- below", "--- inset top left 30%"]) == [
-        [0, 0, 601, 701, 0, 0, 0, 0], [601, 0, 400, 350, 0, 0, 0, 0], [601, 350, 400, 351, 1, 0, 0, 0],
-        [625, 374, 120, 105, 2, 1, 0, 0],
-      ])
-    #expect(
-      boxes(["--- inset", "--- left 25% shared x y", "--- above"]) == [
-        [250, 0, 751, 701, 0, 0, 0, 0], [714, 24, 263, 245, 0, 1, 0, 0], [0, 351, 250, 350, 0, 0, 1, 1],
-        [0, 0, 250, 351, 2, 0, 0, 0],
-      ])
-  }
-
-  @Test func aPointerIsInTheTopmostPanel() {
-    let splits = analyze(["--- right 40%", "--- below", "--- inset top left 30%"]).rows.compactMap(\.view)
-    let boxes = panelBoxes(splits, width: 1001, height: 701, margin: 24)
-    #expect(panelAt(boxes, 10, 10) == 0)
-    #expect(panelAt(boxes, 700, 100) == 1)
-    #expect(panelAt(boxes, 900, 600) == 2)
-    // The inset floats over the panel it is in.
-    #expect(panelAt(boxes, 630, 380) == 3)
-    // Outside every box: the first.
-    #expect(panelAt(boxes, -5, 2000) == 0)
-    // A box counts up from the bottom for the renderers.
-    #expect(boxes[3].frame(in: 701) == Frame2D.Box(x: 625, y: 701 - 374 - 105, w: 120, h: 105))
-  }
-
   @Test func sharedAxesMoveTogether() {
     let splits = analyze(["--- below, shared x"]).rows.compactMap(\.view)
-    let boxes = panelBoxes(splits, width: 800, height: 600)
-    #expect(linkRoot(boxes, 1, x: true) == 0 && linkRoot(boxes, 1, x: false) == 1)
+    let boxes = layoutPanels(splits, 800, 600)
+    #expect(linkRoot(boxes, 1, .x) == 0 && linkRoot(boxes, 1, .y) == 1)
     var views = [View2D(cx: 0, cy: 0, upp: 0.01), View2D(cx: 3, cy: 4, upp: 0.05, ratio: 2)]
     // The lower panel follows the upper one's x, and keeps its own y and ratio.
-    syncLinkedWindows(&views, boxes)
+    syncLinks(&views, boxes)
     #expect(views[1] == View2D(cx: 0, cy: 4, upp: 0.01, ratio: 2))
     // Panning the lower one pans the upper.
     views[1].cx = 7
     views[1].upp = 0.02
-    syncLinkedWindows(&views, boxes, moved: 1)
+    #expect(syncLinks(&views, boxes, moved: 1) == [0])
     #expect(views[0] == View2D(cx: 7, cy: 0, upp: 0.02))
   }
 
@@ -241,8 +204,8 @@ private func difference(_ a: CGImage, _ b: CGImage, columns: Range<Int>) -> Doub
   @Test func aPlaneBesideASpaceIsEachOnesPicture() throws {
     let metal = try #require(MetalContext())
     let (width, height) = (400, 240)
-    let boxes = panelBoxes(analyze(["--- right"]).rows.compactMap(\.view), width: 400, height: 240)
-    #expect(boxes.map(\.w) == [200, 200])
+    let boxes = layoutPanels(analyze(["--- right"]).rows.compactMap(\.view), 400, 240)
+    #expect(boxes.map(\.rect.w) == [200, 200])
     let layers = Layers2D(curves: [Curve2D(field: "y - sin(x)", color: [0.8, 0.2, 0.2])])
     let view = View2D.opening(width: 200, height: 240)
     let graph = try torus()
@@ -250,8 +213,9 @@ private func difference(_ a: CGImage, _ b: CGImage, columns: Range<Int>) -> Doub
     let renderer = FrameRenderer(metal)
     renderer.helpers = graph.helpers
     let panels = [
-      PanelFrame(box: boxes[0], content: .plane(view: view, layers: layers, overlay: nil)),
-      PanelFrame(box: boxes[1], content: .space(camera: camera, scene: graph.scene), env: graph.env ?? [:]),
+      PanelFrame(layout: boxes[0], content: .plane(Scene2D(layers: layers, view: view))),
+      PanelFrame(
+        layout: boxes[1], content: .space(camera: camera, scene: graph.scene, env: graph.env ?? [:], grid: .on)),
     ]
     let frame = try #require(renderer.image(of: panels, width: width, height: height, dpr: 1, theme: .light))
     #expect(renderer.space?.failures == 0)
@@ -263,11 +227,11 @@ private func difference(_ a: CGImage, _ b: CGImage, columns: Range<Int>) -> Doub
     }
     #expect(renderer.refineIn() == nil)
 
-    var plane = Scene2D(layers: layers, frame: Frame2D(vp: boxes[0].frame(in: 240)))
+    var plane = Scene2D(layers: layers, frame: Frame2D(vp: Frame2D.Box(x: 0, y: 0, w: 200, h: 240)))
     plane.view = view
     let left = try #require(metal.image(of: plane, width: width, height: height, dpr: 1, theme: .light))
     var space = graph
-    space.frame = Frame2D(vp: boxes[1].frame(in: 240))
+    space.frame = Frame2D(vp: Frame2D.Box(x: 200, y: 0, w: 200, h: 240))
     let right = try #require(metal.image(of: space, width: width, height: height, dpr: 1, theme: .light))
     // (The line where the panels meet is the frame's own.)
     #expect(difference(frame, left, columns: 0..<198) < 0.002)
@@ -279,20 +243,51 @@ private func difference(_ a: CGImage, _ b: CGImage, columns: Range<Int>) -> Doub
   /// An inset is drawn over the panel it floats on, whichever renderer draws each.
   @Test func anInsetCoversItsHost() throws {
     let metal = try #require(MetalContext())
-    let boxes = panelBoxes(analyze(["--- inset top left 50%"]).rows.compactMap(\.view), width: 320, height: 240)
+    let boxes = layoutPanels(analyze(["--- inset top left 50%"]).rows.compactMap(\.view), 320, 240)
     let graph = try torus()
     let renderer = FrameRenderer(metal)
     renderer.helpers = graph.helpers
-    let plane = PanelFrame.Content.plane(view: View2D(upp: 0.05), layers: Layers2D(), overlay: nil)
-    let space = PanelFrame.Content.space(camera: graph.camera ?? Camera3D(), scene: graph.scene)
+    let plane = PanelFrame.Content.plane(Scene2D(view: View2D(upp: 0.05)))
+    let space = PanelFrame.Content.space(
+      camera: graph.camera ?? Camera3D(), scene: graph.scene, env: graph.env ?? [:], grid: .on)
     for (host, inset) in [(plane, space), (space, plane)] {
-      let both = [PanelFrame(box: boxes[0], content: host), PanelFrame(box: boxes[1], content: inset)]
+      let both = [PanelFrame(layout: boxes[0], content: host), PanelFrame(layout: boxes[1], content: inset)]
       let image = try #require(renderer.image(of: both, width: 320, height: 240, dpr: 1, theme: .dark))
       let alone = try #require(
-        renderer.image(of: [PanelFrame(box: boxes[0], content: host)], width: 320, height: 240, dpr: 1, theme: .dark))
+        renderer.image(
+          of: [PanelFrame(layout: boxes[0], content: host)], width: 320, height: 240, dpr: 1, theme: .dark))
       // Inside the inset the host's picture is gone; outside it stands.
       #expect(difference(image, alone, columns: 2..<158) > 0.05)
       #expect(difference(image, alone, columns: 170..<320) < 0.002)
     }
+  }
+}
+
+/// The app draws a document's 2D panels through `FrameRenderer`, metal-shot
+/// through `MetalContext.image`: the same rows are the same picture.
+@Suite struct FramesAreShots {
+  private func both(_ rows: [String], time: Double) throws -> (frame: CGImage, shot: CGImage) {
+    let metal = try #require(MetalContext())
+    let analysis = analyze(rows)
+    let colors = Graph2D.colors(analysis, ids: Array(rows.indices), previous: [:], theme: .light, sources: rows).colors
+    let panels = GraphPanels(analysis, colors: colors)
+    var run = StateStepper(analysis)
+    run.play(to: time)
+    let scene = panels.scene(at: time, width: 400, height: 300, dpr: 2, run: run)
+    let frame = try #require(
+      FrameRenderer(metal).image(of: scene.frames, width: 400, height: 300, dpr: 2, time: time, theme: .light))
+    let shot = try #require(metal.image(of: scene, width: 400, height: 300, dpr: 2, theme: .light))
+    return (frame, shot)
+  }
+
+  @Test(arguments: [
+    (["y = sin(x - t)", "(cos(t), sin(t))"], 1.5),
+    (["y = x^2", "A = (1, 2)", "--- right 40%, shared y", "y = sin(x)", "--- inset", "x^2 + y^2 = 4"], 0.0),
+    (["view(x = 0.1..1000, y = 0.01..100, x = 10^X, y = 10^Y)", "y = sqrt(x)", "(10, 1)"], 0.0),
+    (["th' = om", "om' = -sin(th)", "th(0) = 3", "(th, om)", "trail((th, om))"], 2.0),
+  ] as [([String], Double)])
+  func aDocumentIsTheSamePictureEitherWay(rows: [String], time: Double) throws {
+    let (frame, shot) = try both(rows, time: time)
+    #expect(difference(frame, shot, columns: 0..<400) == 0)
   }
 }

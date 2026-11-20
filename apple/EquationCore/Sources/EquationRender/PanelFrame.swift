@@ -1,39 +1,47 @@
 import CoreGraphics
+import EquationCore
 import Foundation
 import Metal
 
-/// One panel of a frame: where it is, and what it shows there — a window
-/// onto the plane with its layers, or a camera on a scene.
+/// One panel of a frame: where it is (EquationCore `layoutPanels`), and what
+/// it shows there — a 2D panel's scene as `Graph2D.scene` writes it down
+/// (window, layers, overlay, grid, axis maps, lattice), or a camera on a
+/// scene in space.
 public struct PanelFrame: Equatable, Sendable {
   public enum Content: Equatable, Sendable {
-    case plane(view: View2D, layers: Layers2D, overlay: Overlay2D?)
-    case space(camera: Camera3D, scene: Scene3D)
+    /// Drawn exactly as `Renderer2D.render(_:target:scene:theme:)` draws a
+    /// `PanelScene`'s entry; its `frame.vp` is the layout's box when the
+    /// frame is split, whatever it holds.
+    case plane(Scene2D)
+    /// `env`: the constants' values this frame, which the u_<name> uniforms carry.
+    case space(camera: Camera3D, scene: Scene3D, env: [String: Double], grid: Frame2D.Grid)
   }
 
   /// In device pixels, from the frame's top-left corner.
-  public var box: PanelBox
+  public var layout: PanelLayout
   public var content: Content
-  /// The constants' values this frame: what the u_<name> uniforms carry.
-  public var env: [String: Double]
-  public var grid: Frame2D.Grid
-  /// A lattice panel's labels (`Graph2D.cells`): its grid then runs between
-  /// the cells, and the overlay numbers them.
-  public var lattice: LatticeLabels?
 
-  public init(
-    box: PanelBox, content: Content, env: [String: Double] = [:], grid: Frame2D.Grid = .on,
-    lattice: LatticeLabels? = nil
-  ) {
-    self.box = box
+  public init(layout: PanelLayout, content: Content) {
+    self.layout = layout
     self.content = content
-    self.env = env
-    self.grid = grid
-    self.lattice = lattice
   }
 
   var isSpace: Bool {
     if case .space = content { return true }
     return false
+  }
+
+  /// The panel's box as the renderers take it: from the bottom-left corner
+  /// of a frame `height` pixels high, as GL counts.
+  func box(in height: Double) -> Frame2D.Box {
+    Frame2D.Box(x: layout.rect.x, y: height - layout.rect.y - layout.rect.h, w: layout.rect.w, h: layout.rect.h)
+  }
+}
+
+extension PanelScene {
+  /// The frame's 2D panels, for `FrameRenderer`; whoever draws 3D adds the others.
+  public var frames: [PanelFrame] {
+    panels.compactMap { entry in entry.scene.map { PanelFrame(layout: entry.layout, content: .plane($0)) } }
   }
 }
 
@@ -127,8 +135,8 @@ public final class FrameRenderer {
 
   /// Draw `panels` into `pass`'s first color attachment, which is `width` ×
   /// `height` pixels and takes the theme's background first. The 3D panels'
-  /// own passes go on `buffer` before it. Tiled panels are drawn in order,
-  /// then the insets over them.
+  /// own passes go on `buffer` before it. `time` is the 3D panels' (a 2D
+  /// panel's scene carries its own).
   public func draw(
     _ panels: [PanelFrame], on buffer: any MTLCommandBuffer, into pass: MTLRenderPassDescriptor, width: Int,
     height: Int, time: Double, theme: GraphTheme
@@ -136,8 +144,9 @@ public final class FrameRenderer {
     let size = (width: width, height: height)
     let background = MTLClearColor(
       red: Double(theme.bg.x), green: Double(theme.bg.y), blue: Double(theme.bg.z), alpha: 1)
-    let frame = { (panel: PanelFrame) in
-      Frame2D(vp: panel.box.frame(in: Double(height)), grid: panel.grid, lattice: panel.lattice == nil ? nil : true)
+    let split = panels.count > 1
+    let frame = { (panel: PanelFrame, grid: Frame2D.Grid) in
+      Frame2D(vp: panel.box(in: Double(height)), grid: grid)
     }
 
     var resolved: (any MTLTexture)?
@@ -147,9 +156,9 @@ public final class FrameRenderer {
       space = renderer
       if let targets = spaceTargets(width, height, samples: renderer.sampleCount) {
         for panel in panels {
-          guard case .space(let camera, let scene) = panel.content else { continue }
+          guard case .space(let camera, let scene, let env, let grid) = panel.content else { continue }
           renderer.prepare(
-            buffer, target: size, cam: camera, scene: scene, time: time, env: panel.env, frame: frame(panel))
+            buffer, target: size, cam: camera, scene: scene, time: time, env: env, frame: frame(panel, grid))
         }
         let own = MTLRenderPassDescriptor()
         own.colorAttachments[0].texture = targets.color
@@ -167,9 +176,9 @@ public final class FrameRenderer {
         own.depthAttachment.storeAction = .dontCare
         if let encoder = buffer.makeRenderCommandEncoder(descriptor: own) {
           for panel in panels {
-            guard case .space(let camera, let scene) = panel.content else { continue }
+            guard case .space(let camera, let scene, let env, let grid) = panel.content else { continue }
             renderer.render(
-              encoder, target: size, cam: camera, scene: scene, time: time, env: panel.env, frame: frame(panel),
+              encoder, target: size, cam: camera, scene: scene, time: time, env: env, frame: frame(panel, grid),
               theme: theme)
           }
           encoder.endEncoding()
@@ -184,15 +193,19 @@ public final class FrameRenderer {
     pass.colorAttachments[0].loadAction = .clear
     pass.colorAttachments[0].clearColor = background
     guard let encoder = buffer.makeRenderCommandEncoder(descriptor: pass) else { return }
-    for panel in panels.filter({ !$0.box.inset }) + panels.filter(\.box.inset) {
+    // In panel order, as the site draws them: an inset comes after the tile it floats over.
+    for panel in panels {
       switch panel.content {
-      case .plane(let view, let layers, _):
-        plane.render(
-          encoder, target: size, view: view, layers: layers, time: time, env: panel.env, frame: frame(panel),
-          theme: theme)
+      case .plane(var scene):
+        if split {
+          var own = scene.frame ?? Frame2D()
+          own.vp = panel.box(in: Double(height))
+          scene.frame = own
+        }
+        plane.render(encoder, target: size, panel: scene, clear: split, theme: theme)
       case .space:
         guard let resolved, let state = copyState() else { continue }
-        let box = panel.box
+        let box = panel.layout.rect
         let left = min(max(Int(box.x), 0), width)
         let top = min(max(Int(box.y), 0), height)
         let across = max(min(Int(box.w), width - left), 0)
@@ -260,43 +273,36 @@ public final class FrameRenderer {
 }
 
 /// What is drawn over a frame's panels with a 2D context (in points, y
-/// down, `dpr` device pixels to the point): each panel's labels in its box,
-/// tiles first and insets over them, and a line where panels meet.
+/// down, `dpr` device pixels to the point): each panel's labels and overlay
+/// clipped to its box, in panel order, then the edges between panels
+/// (web/main.ts `drawPanelEdges`). `edges` is the whole layout when some
+/// panels are not among `panels` (one with no room draws nothing).
 public func drawPanelLabels(
-  _ ctx: CGContext, _ panels: [PanelFrame], size: CGSize, dpr: Double, theme: GraphTheme
+  _ ctx: CGContext, _ panels: [PanelFrame], size: CGSize, dpr: Double, theme: GraphTheme,
+  edges: [PanelLayout]? = nil
 ) {
-  ctx.clear(CGRect(origin: .zero, size: size))
-  for panel in panels.filter({ !$0.box.inset }) + panels.filter(\.box.inset) {
-    let b = panel.box
-    let box = OverlayBox(x: b.x / dpr, y: b.y / dpr, w: b.w / dpr, h: b.h / dpr)
-    let rect = CGRect(x: box.x, y: box.y, width: box.w, height: box.h)
+  let layout = edges ?? panels.map(\.layout)
+  let split = layout.count > 1
+  // One 2D panel draws its overlay whole, clearing it; split panels each
+  // draw clipped to their box, so the overlay is cleared once for all of them.
+  if split || panels.contains(where: \.isSpace) { ctx.clear(CGRect(origin: .zero, size: size)) }
+  for panel in panels {
+    let r = panel.layout.rect
+    let box = OverlayBox(x: r.x / dpr, y: r.y / dpr, w: r.w / dpr, h: r.h / dpr)
     switch panel.content {
-    case .plane(let view, _, let overlay):
+    case .plane(let scene):
+      let view = scene.view ?? .opening(width: r.w, height: r.h)
       drawLabels2D(
-        ctx, size: size, view: view, dpr: dpr, theme: theme, extras: overlay, numbers: panel.grid != .off, box: box)
-    case .space(let camera, let scene):
+        ctx, size: size, view: view, dpr: dpr, theme: theme, extras: scene.overlay,
+        numbers: (scene.frame?.grid ?? .on) != .off && scene.gridSpecs == nil, box: split ? box : nil,
+        lattice: scene.lattice, maps: scene.maps ?? AxisMaps())
+    case .space(let camera, let scene, _, let grid):
+      let rect = CGRect(x: box.x, y: box.y, width: box.w, height: box.h)
       // An inset's box is its own: the labels of the panel under it stop at its edge.
       ctx.clear(rect)
       drawLabels3D(
-        ctx, box: rect, cam: camera, points: scene.points, texts: scene.texts ?? [], theme: theme,
-        axes: panel.grid != .off)
+        ctx, box: rect, cam: camera, points: scene.points, texts: scene.texts ?? [], theme: theme, axes: grid != .off)
     }
-    guard panels.count > 1 else { continue }
-    // The sides that are not the frame's own.
-    ctx.saveGState()
-    ctx.setStrokeColor(cgColor(theme.gridMajor))
-    ctx.setLineWidth(1)
-    let sides: [(Bool, CGPoint, CGPoint)] = [
-      (rect.minX > 0.5, CGPoint(x: rect.minX, y: rect.minY), CGPoint(x: rect.minX, y: rect.maxY)),
-      (rect.maxX < size.width - 0.5, CGPoint(x: rect.maxX, y: rect.minY), CGPoint(x: rect.maxX, y: rect.maxY)),
-      (rect.minY > 0.5, CGPoint(x: rect.minX, y: rect.minY), CGPoint(x: rect.maxX, y: rect.minY)),
-      (rect.maxY < size.height - 0.5, CGPoint(x: rect.minX, y: rect.maxY), CGPoint(x: rect.maxX, y: rect.maxY)),
-    ]
-    for (inner, from, to) in sides where inner {
-      ctx.move(to: from)
-      ctx.addLine(to: to)
-    }
-    ctx.strokePath()
-    ctx.restoreGState()
   }
+  if split { drawPanelEdges(ctx, layout, dpr: dpr, theme: theme) }
 }

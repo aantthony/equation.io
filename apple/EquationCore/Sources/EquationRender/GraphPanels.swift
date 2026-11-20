@@ -198,20 +198,29 @@ extension Renderer2D {
     let split = scene.panels.count > 1
     for entry in scene.panels {
       guard let panel = entry.scene else { continue }
-      var frame = panel.frame ?? Frame2D()
-      let box = frame.vp ?? Frame2D.Box(x: 0, y: 0, w: Double(target.width), h: Double(target.height))
-      let view = panel.view ?? .opening(width: box.w, height: box.h)
-      // A mapped axis is gridded at its ticks, which follow from the maps and the window.
-      if let maps = panel.maps, frame.ticks == nil {
-        let ticks = mappedTicks(view, box.w, box.h, maps)
-        if ticks.x != nil || ticks.y != nil { frame.ticks = MappedTicks(x: ticks.x, y: ticks.y) }
-      }
-      if split { clear(encoder, target: target, box: box, theme: theme) }
-      render(
-        encoder, target: target, view: view, layers: panel.layers, time: panel.time ?? 0, env: panel.env ?? [:],
-        gridSpecs: panel.gridSpecs, frame: frame, theme: theme)
+      render(encoder, target: target, panel: panel, clear: split, theme: theme)
     }
     endFrame()
+  }
+
+  /// One 2D panel in its box (`frame.vp`, or the whole target): cleared
+  /// first when the frame is split, gridded at its mapped axes' ticks.
+  func render(
+    _ encoder: any MTLRenderCommandEncoder, target: (width: Int, height: Int), panel: Scene2D, clear split: Bool,
+    theme: GraphTheme
+  ) {
+    var frame = panel.frame ?? Frame2D()
+    let box = frame.vp ?? Frame2D.Box(x: 0, y: 0, w: Double(target.width), h: Double(target.height))
+    let view = panel.view ?? .opening(width: box.w, height: box.h)
+    // A mapped axis is gridded at its ticks, which follow from the maps and the window.
+    if let maps = panel.maps, frame.ticks == nil {
+      let ticks = mappedTicks(view, box.w, box.h, maps)
+      if ticks.x != nil || ticks.y != nil { frame.ticks = MappedTicks(x: ticks.x, y: ticks.y) }
+    }
+    if split { clear(encoder, target: target, box: box, theme: theme) }
+    render(
+      encoder, target: target, view: view, layers: panel.layers, time: panel.time ?? 0, env: panel.env ?? [:],
+      gridSpecs: panel.gridSpecs, frame: frame, theme: theme)
   }
 
   private func clear(
@@ -239,21 +248,7 @@ extension Renderer2D {
 public func drawPanelLabels(
   _ ctx: CGContext, size: CGSize, scene: PanelScene, dpr: Double, theme: GraphTheme
 ) {
-  let split = scene.panels.count > 1
-  // One panel draws its overlay whole, clearing it; split panels each draw
-  // clipped to their box, so the overlay is cleared once for all of them.
-  if split { ctx.clear(CGRect(origin: .zero, size: size)) }
-  for entry in scene.panels {
-    guard let panel = entry.scene else { continue }
-    let r = entry.layout.rect
-    let box = split ? OverlayBox(x: r.x / dpr, y: r.y / dpr, w: r.w / dpr, h: r.h / dpr) : nil
-    let view = panel.view ?? .opening(width: r.w, height: r.h)
-    drawLabels2D(
-      ctx, size: size, view: view, dpr: dpr, theme: theme, extras: panel.overlay,
-      numbers: (panel.frame?.grid ?? .on) != .off && panel.gridSpecs == nil, box: box, lattice: panel.lattice,
-      maps: panel.maps ?? AxisMaps())
-  }
-  if split { drawPanelEdges(ctx, scene.panels.map(\.layout), dpr: dpr, theme: theme) }
+  drawPanelLabels(ctx, scene.frames, size: size, dpr: dpr, theme: theme, edges: scene.panels.map(\.layout))
 }
 
 /// Hairlines between tiled panels, and a frame round each inset (web/main.ts `drawPanelEdges`).
