@@ -29,6 +29,12 @@ struct RowStatus: Decodable, Equatable {
   /// The display toggles the row offers, as the site's buttons under it
   /// (web/main.ts `rowToggles`, `makeLevelsBtn`).
   var toggles: [Toggle]?
+  /// The row reads a data file that is not in this document: what it says
+  /// of the file. Not an error — the row draws once the file is given.
+  var needsFile: String?
+  /// The row is the one that names a data file, `p = open("a.csv", …)`:
+  /// where a missing file is asked for.
+  var opensFile: Bool?
 
   struct Toggle: Decodable, Equatable {
     /// levels, sums, streamlines or arrows.

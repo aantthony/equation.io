@@ -1,3 +1,5 @@
+import EquationCore
+import EquationDocument
 import SwiftUI
 import UniformTypeIdentifiers
 
@@ -13,12 +15,19 @@ struct GraphRow: Identifiable, Hashable {
   var text: String
 }
 
-/// A graph document: its rows, in order. Saved as JSON so that views,
-/// data files and settings can join the rows later.
+/// A graph document: its rows, in order, and the data files they open. Saved
+/// as JSON, the files inside it (EquationDocument `GraphDocumentFile` says why they
+/// travel there), so that views and settings can join the rows later.
 struct GraphDocument: FileDocument {
   static let readableContentTypes: [UTType] = [.equationGraph]
 
   var rows: [GraphRow]
+  /// The data files the rows open (`p = open("people.csv", 3a7f…)`): their
+  /// bytes, kept on this device and in this document only, and what the
+  /// parser made of them, which is what the analysis reads.
+  private(set) var data = DocumentData()
+  /// The files as `analyze(_:files:)` takes them.
+  var files: DataFiles { data.files }
   /// Counts whole-document replacements (an example), which the renderer
   /// opens as a new graph — reframed — rather than as an edit. Not saved.
   private(set) var generation = 0
@@ -42,26 +51,43 @@ struct GraphDocument: FileDocument {
   /// A graph from a file's bytes.
   init(data: Data) throws {
     timing.debug("document: read")
-    self.init(rows: try JSONDecoder().decode(File.self, from: data).rows)
+    let file = try GraphDocumentFile(data: data)
+    self.init(rows: file.rows)
+    self.data = file.data
   }
 
-  /// The file's bytes.
+  /// The file's bytes: the rows, and the data files they read.
   func encoded() throws -> Data {
     timing.debug("document: write")
-    let encoder = JSONEncoder()
-    encoder.outputFormatting = [.prettyPrinted, .withoutEscapingSlashes]
-    return try encoder.encode(File(rows: rows.map(\.text)))
+    return try file.encoded()
   }
+
+  /// The document as its file has it.
+  private var file: GraphDocumentFile { GraphDocumentFile(rows: rows.map(\.text), data: data) }
+
+  /// Bring data files into the document (EquationDocument `GraphDocumentFile.open`):
+  /// each is parsed and kept, a row that names it is pinned to its bytes, and
+  /// a file no row names gets a row of its own. One edit, so one undo step.
+  mutating func open(_ picked: [(name: String, bytes: Data)]) -> [DataNotice] {
+    var file = file
+    let notices = file.open(picked)
+    data = file.data
+    setLines(file.rows)
+    return notices
+  }
+
+  /// The rows as a link carries them: each `open(…)` row pinned to the bytes
+  /// it reads. The link names the file; it never holds it.
+  var linkRows: [String] { file.linkRows }
+
+  /// What is saved of the data files: their hashes, in order. With the rows'
+  /// text, what tells an edited document from a saved one.
+  var savedFiles: [String] { data.stored.map(\.hash) }
 
   /// Shown in place of `previous`: the renderer opens it as a new graph
   /// (reframed), not as an edit to the one before.
   mutating func follow(_ previous: GraphDocument) {
     generation = previous.generation + 1
-  }
-
-  private struct File: Codable {
-    var version = 1
-    var rows: [String]
   }
 
   /// The document as the editor shows it: one row per line.

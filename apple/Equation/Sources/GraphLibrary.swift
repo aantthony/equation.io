@@ -12,8 +12,10 @@
     var document: GraphDocument
     /// Where the graph saves: nil for a new graph not yet edited.
     private(set) var url: URL?
-    /// The rows as last saved (or as opened), so an unedited graph never writes.
+    /// The rows as last saved (or as opened), and the data files with them, so
+    /// an unedited graph never writes.
     private var saved: [String]
+    private var savedFiles: [String] = []
     /// A file outside the app's folder, held open for as long as it is shown.
     private var scoped: URL?
     private var pendingSave: Task<Void, Never>?
@@ -60,11 +62,12 @@
       document = next
       self.url = url
       saved = next.rows.map(\.text)
+      savedFiles = next.savedFiles
     }
 
     /// The graph changed: save it once typing pauses.
     func changed() {
-      guard document.rows.map(\.text) != saved else { return }
+      guard document.rows.map(\.text) != saved || document.savedFiles != savedFiles else { return }
       pendingSave?.cancel()
       pendingSave = Task {
         try? await Task.sleep(for: .milliseconds(500))
@@ -82,12 +85,13 @@
     private func save() {
       pendingSave = nil
       let texts = document.rows.map(\.text)
-      guard texts != saved else { return }
+      guard texts != saved || document.savedFiles != savedFiles else { return }
       let target = url ?? Self.unusedURL()
       do {
         try document.encoded().write(to: target, options: .atomic)
         url = target
         saved = texts
+        savedFiles = document.savedFiles
       } catch {
         problem = "Couldn't save \(target.lastPathComponent): \(error.localizedDescription)"
       }
@@ -159,6 +163,8 @@
           example: { store.newGraph(rows: $0) })
       )
       .onChange(of: store.document.rows) { store.changed() }
+      // (A missing file supplied changes no row, and is to be saved all the same.)
+      .onChange(of: store.document.savedFiles) { store.changed() }
       .onChange(of: phase) { if phase != .active { store.flush() } }
       .onOpenURL { store.open($0, external: true) }
       .sheet(isPresented: $showingFiles) {

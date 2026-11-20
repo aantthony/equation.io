@@ -27,6 +27,14 @@ final class GraphModel {
   @ObservationIgnored var rows: () -> [String] = { [] }
   @ObservationIgnored var ids: () -> [Int] = { [] }
   @ObservationIgnored var edit: ([String]) -> Void = { _ in }
+  #if DEBUG
+    /// EQUATION_SCRIPT's way to the window's data files and its document's
+    /// bytes (DocumentView sets these; GraphGestures.swift plays them).
+    @ObservationIgnored var importData: ([URL]) -> Void = { _ in }
+    @ObservationIgnored var dataNotices: () -> [String] = { [] }
+    @ObservationIgnored var encoded: () -> Data? = { nil }
+    @ObservationIgnored var load: (Data) -> Void = { _ in }
+  #endif
 
   /// The document's undo manager, where the document registers its own
   /// changes with one (a Mac document window): there a gesture's rewrites
@@ -161,9 +169,14 @@ struct GraphAnalysis: Equatable {
     reason.hasPrefix("Not supported in the app yet") ? reason : "The app doesn't draw this yet (\(reason))."
   }
 
-  init(rows: [GraphRow], theme: GraphTheme, previous: [Int: Int] = [:], toggles on: [Int: Set<String>] = [:]) {
+  /// `files`: the document's data files, which its `open(…)` rows read. Nil
+  /// for a reading that is to see none of them (Ask's: Chat.swift).
+  init(
+    rows: [GraphRow], theme: GraphTheme, previous: [Int: Int] = [:], toggles on: [Int: Set<String>] = [:],
+    files: DataFiles? = nil
+  ) {
     let texts = rows.map(\.text)
-    let analysis = analyze(texts)
+    let analysis = analyze(texts, files: files)
     // (A `#hex` note's color is read from the rows as written.)
     let colored = Graph2D.colors(
       analysis, ids: rows.map(\.id), previous: previous, theme: theme, sources: texts)
@@ -227,7 +240,10 @@ struct GraphAnalysis: Equatable {
           spans: spans[k].map { RowStatus.Span(start: $0.start, end: $0.end, cls: $0.cls.rawValue) },
           slider: row.slider.map { RowStatus.Slider(min: $0.min, max: $0.max, step: $0.step, value: $0.value) },
           unsupported: row.error == nil ? row.unsupported.map(Self.notDrawnYet) : nil,
-          toggles: offered[k].isEmpty ? nil : offered[k]))
+          toggles: offered[k].isEmpty ? nil : offered[k],
+          // A row whose file is not here says so; the row that names the file asks for it.
+          needsFile: row.error == nil ? row.dataLocal : nil,
+          opensFile: row.definition?.kind == "table"))
     }
   }
 }
@@ -240,7 +256,8 @@ struct GraphView: View {
 
   var body: some View {
     let theme = colorScheme == .dark ? GraphTheme.dark : .light
-    let analysis = GraphAnalysis(rows: document.rows, theme: theme, previous: model.slots, toggles: model.toggles)
+    let analysis = GraphAnalysis(
+      rows: document.rows, theme: theme, previous: model.slots, toggles: model.toggles, files: document.files)
     let _ = connect(analysis, theme)
     MetalGraphView(content: analysis.content, theme: theme, generation: document.generation, model: model)
       .onChange(of: analysis.status, initial: true) { _, status in model.status = status }
@@ -258,7 +275,8 @@ struct GraphView: View {
     model.slide = { [weak model] index, value in
       var lines = document.wrappedValue.rows.map(\.text)
       guard lines.indices.contains(index),
-        let moved = analyze(lines).settingSlider(row: index, to: value, in: lines[index]), moved != lines[index]
+        let moved = analyze(lines, files: document.wrappedValue.files)
+          .settingSlider(row: index, to: value, in: lines[index]), moved != lines[index]
       else { return }
       lines[index] = moved
       // One drag of a slider is one undo step.

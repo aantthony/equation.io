@@ -37,6 +37,8 @@ targets:
         product: EquationRender
       - package: EquationCore
         product: EquationAssist
+      - package: EquationCore
+        product: EquationDocument
     info:
       path: Sources/Info.plist
       properties:
