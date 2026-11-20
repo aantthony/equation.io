@@ -45,6 +45,14 @@ const DOCUMENTS: Array<[text: string, time?: number]> = [
   ['a = 1; (x y, z) = (a, t); (atan2(y, x), z) = (1, 0); camera(0, 1, 8)', 0.25],
   ['(x + y + z, x - y, z) = (1, 0, 2); (x^2 + y^2 + z^2, x - y, z) = (4, 0, 1)'],
   ['(atan2(y, x), x^2 + y^2, z) = (1, 4, 0); (x - cos(2 pi u), y - sin(2 pi u), z - u) = (0, 0, 0)'],
+  // Figures and labels in space, and ones of the plane beside them.
+  [
+    'A = (0, 0, 0); B = (3, 0, 1); C = (0, 2, 2); polygon(A, B, C); vector(A, (1, 1, 3)); segment(B, (3, 3, t)); ' +
+      'label(C, "top"); polyline(A, (1, 0, 2), (2, 1, 2), (2, 2, 0))',
+    0.5,
+  ],
+  ['hull((0, 0, 0), (2, 0, 0), (0, 2, 0), (0, 0, 2), (1, 1, 1)); hull((3, 0, 0), (3, 1, 0), (3, 0, 1)); z = -1'],
+  ['z = x y / 4; polygon((0, 0), (2, 0), (2, 2), (0, 2)); segment((0, 0), (1, 3)); label((1, 2), "flat"); (1, 2)'],
   // Positions in coordinates named on the left.
   [
     'rho = sqrt(x^2 + y^2 + z^2); theta = atan2(y, x); phi = acos(z/rho); (rho, theta, phi) = (2, pi/4, pi/3); ' +

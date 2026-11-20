@@ -198,6 +198,37 @@ public struct Document3D: Equatable, Sendable {
       scene.points.append(
         Scene3D.Point(
           pos: SIMD3(p[0], p[1], p.count > 2 ? p[2] : 0), color: color, label: row.definition?.name, group: index))
+    case .label(_, let coords, let text):
+      let p = coords.map { value($0, env) }
+      guard p.count >= 2, p.allSatisfy(\.isFinite) else { break }
+      scene.texts =
+        (scene.texts ?? []) + [Scene3D.Text(pos: SIMD3(p[0], p[1], p.count > 2 ? p[2] : 0), text: text, color: color)]
+    case .polygon(let dim, let pts, let closed, let arrow, let hull, let over):
+      guard let vals = try? figureCoordinates(pts, over: over, env), vals.allSatisfy(\.isFinite) else { break }
+      if hull {
+        guard let geometry = hullGeometry(vals, dim: dim) else { break }
+        // A solid's faces as one mesh, its edges in a lighter shade over them.
+        let solid = !geometry.mesh.indices.isEmpty
+        if solid {
+          scene.tubes.append(
+            Scene3D.Tube(
+              positions: geometry.mesh.positions, normals: geometry.mesh.normals, uvs: geometry.mesh.uvs,
+              indices: geometry.mesh.indices, cells: SIMD2(1, 1), color: color, retained: true))
+        }
+        scene.segments.append(
+          Scene3D.Segments(pts: geometry.edges, color: solid ? color + (1 - color) * 0.55 : color, retained: true))
+        break
+      }
+      var flat: [Double] = []
+      for k in stride(from: 0, to: vals.count - dim + 1, by: dim) {
+        flat += [vals[k], vals[k + 1], dim == 3 ? vals[k + 2] : 0]
+      }
+      // A closed polygon fills translucently when a fan from its first
+      // vertex covers it exactly: triangles, convex outlines.
+      let fill = closed && fanFillable(flat)
+      if closed { flat += flat.prefix(3) }
+      scene.curves.append(
+        Scene3D.Curve(pts: flat.map { Float($0) }, color: color, arrow: arrow ? true : nil, fill: fill ? true : nil))
     case .vfield3d(let comps):
       if streamlines.contains(index), case .vfield3d(let glsl)? = row.gpu?.shader {
         scene.streamlines =
