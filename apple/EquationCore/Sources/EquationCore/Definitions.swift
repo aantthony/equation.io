@@ -667,8 +667,8 @@ func buildDefs(_ raw: [Definition], skip: Set<String>, sequences: [SeqScan] = []
           try Resolver(getFn: getFn, opts: opts).resolve(try parse(d)), opts)
       case .initial(let name, _):
         let opts = options()
-        states.inits[name] = try withoutStateFamily(
-          try Resolver(getFn: getFn, opts: opts).resolve(try parse(d)), opts)
+        // (A list of starting values is a family of runs: StateFamilies.swift.)
+        states.inits[name] = try Resolver(getFn: getFn, opts: opts).resolve(try parse(d))
       case .constant(let name, _, let draw):
         // (`s = interval(0, 1)`, or another name for one: the one place an interval is written.)
         var valueOpts = options()
@@ -839,10 +839,28 @@ func buildDefs(_ raw: [Definition], skip: Set<String>, sequences: [SeqScan] = []
   writeComplexConstants(&defs)
   // Vector states split into their scalar components (States.swift).
   let (pointNames, pointDims, matrices) = (defs.points, defs.pointDims, defs.mats)
+  // (What list lowering reads of the definitions, as they stand while the states are rewritten.)
+  let stateOptions = options()
+  func listed(_ e: Expr, _ at: BuiltDefs, _ stateNames: Set<String>) throws -> Low {
+    var opts = stateOptions
+    opts.definition = { at.conditions[$0] ?? at.consts[$0] ?? (stateNames.contains($0) ? .var($0) : nil) }
+    opts.comps = { name in
+      at.points.contains(name)
+        ? pointComps(name, at.pointDims[name] ?? 2) : at.vecStates[name].map { vecStateComps(name, $0) }
+    }
+    opts.complex = { at.complexes[$0] }
+    opts.isList = { isListName(at, $0) }
+    opts.getList = listGetter(at)
+    opts.indexIssue = { index, _ in indexIssue(index, at) }
+    return try lowerLists(e, listGetter(at), opts, named: true)
+  }
+  let (beforeStates, stateNames) = (defs, states.names)
   lowerVectorStates(
     &defs, &states, defined: { byName[$0] != nil },
     comps: { name in pointNames.contains(name) ? pointComps(name, pointDims[name] ?? 2) : nil },
-    mats: { matrices[$0] })
+    mats: { matrices[$0] }, listed: { try listed($0, beforeStates, stateNames) })
+  expandStateFamilies(
+    &defs, &states, prefix: sequencePrefix(raw.map(\.name)), compOwner: &compOwner, lowerNamed: listed)
   writeComplexLists(&defs)
 
   // A definition whose value depends on position — x, y, or z, directly or
@@ -1048,7 +1066,8 @@ func buildDefs(_ raw: [Definition], skip: Set<String>, sequences: [SeqScan] = []
   }
 
   // A list holds data: its elements may only use constants and t.
-  for (name, message) in strayListNames(defs, constNames) {
+  // (Or states: a family's runs are hidden ones, StateFamilies.swift.)
+  for (name, message) in strayListNames(defs, constNames.union(states.names)) {
     defs.errors[name] = message
     defs.lists[name] = nil
   }
@@ -1125,7 +1144,7 @@ func buildDefs(_ raw: [Definition], skip: Set<String>, sequences: [SeqScan] = []
   // a failed one merely because its lowered expression hid that reference.
   if !defs.errors.isEmpty {
     func ownerOf(_ name: String) -> String {
-      compOwner[name] ?? states.vecOwnerKey[name] ?? fitOwner[name] ?? name
+      compOwner[name] ?? states.vecOwnerKey[name] ?? states.familyOwner[name] ?? fitOwner[name] ?? name
     }
     let known = Set(byName.keys).union(compOwner.keys).union(states.vecOwnerKey.keys).union(defs.consts.keys)
       .union(fitOwner.keys)

@@ -290,9 +290,7 @@ final class SequenceResolver {
     var first: [String: SeqScan] = [:]
     for scan in scans where first[scan.name] == nil { first[scan.name] = scan }
     sequences = first
-    var prefix = "eqioSeq"
-    while rawNames.contains(where: { $0.hasPrefix(prefix + "_") }) { prefix += "X" }
-    self.prefix = prefix
+    self.prefix = sequencePrefix(rawNames)
   }
 
   /// Lets go of the document: its closures and the resolver hold each other.

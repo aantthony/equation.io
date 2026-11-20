@@ -1331,6 +1331,13 @@ private func needsOrder(_ target: Expr, _ idx: Expr, _ low: Low) -> String {
   func spelled(_ fallback: String) -> String {
     if case .num(let value) = idx { JS.string(value) } else { fallback }
   }
+  // A state family's runs are in order only when their starts are (StateFamilies.swift).
+  if low.own.first?.id.hasSuffix("#runs") == true {
+    let name: String = if case .var(let name) = target { name } else { "p" }
+    let k = spelled("k")
+    return "\(name)[\(k)] needs an order — its runs start from a list [ … ], which has none. Start them from a "
+      + "tuple to number them: \(name)(0) = (sort([1..4]), 0)."
+  }
   let points = low.items.first.map(isVec) ?? false
   if listLiteral(target) != nil {
     let k = spelled("k")

@@ -105,6 +105,20 @@ export const LEFTOVER_CASES: string[] = [
   'r = sqrt(x^2 + y^2); phi = atan2(y, x); M = 1; ds^2 = -(1 - 2M/sqrt(x^2 + y^2)) dt^2 + dr^2/(1 - 2M/r) + r^2 dphi^2; tidal; tidal((5, 1))',
   'L = 3; ds^2 = -(1 - (x^2 + y^2)/L^2) dt^2 + dx^2 + dy^2 + (x dx + y dy)^2/(L^2 - x^2 - y^2); tidal; lightcones',
   'g = 0.2; ds^2 = -(1 + g x)^2 dy^2 + dx^2; tidal; lightcones; geodesic((1, 0), (0, 1)); lightray((1, 0), (1, 1))',
+  // State families: a list of starting values is a run each.
+  "th' = om; om' = -sin(th); th(0) = [1..12]/4; (th, om); th; om; th[2]; mean(th)",
+  "p' = (10(p_2 - p_1), p_1(28 - p_3) - p_2, p_1 p_2 - 8 p_3/3); p(0) = (sort([0..9])/10, 1, 20); p; p[1]; p_1",
+  "a' = -a; a(0) = [1, 2, 3]; a; 2 a; y = a x; E = a^2/2; E; (t, a)",
+  "r' = v; v' = -r; r(0) = [(1, 0), (0, 2)]; r; v; segment((0, 0), r); f = r_1 + v_2; f",
+  "a' = -b; b' = a; a(0) = [1, 2]; b(0) = [0, 1, 2]; a; b",
+  "a' = -b; b' = a; a(0) = [1, 2]; b(0) = [3, 4]; (a, b); c' = 1; c; c(0) = 2",
+  "a' = -a; a(0) = []; a(0) = 2; b' = b; b(0) = [(1, 2)]; q' = (q_2, -q_1); q(0) = [1, 2]",
+  "a' = -a; a(0) = [0..2000]; b' = -b; b(0) = [1, 2] x; c' = [1, 2] c; c(0) = 1",
+  "k = [1, 2]; a' = -a; a(0) = k; a; P = (a, 1); P; s = 2; b' = s a; b",
+  "a' = -a; a(0) = (1, 2, 3)/2; a; a[2]; a(0..3); trail((a, t))",
+  // Orbits in space.
+  "p' = (10(p_2 - p_1), p_1(28 - p_3) - p_2, p_1 p_2 - 8 p_3/3); p(0) = (1, 1, 20); p(0..5); p_1(0..5); (p_1, p_2)(0..3)",
+  "a' = -b; b' = a; a(0) = 1; (a, b, t)(0..6); (a, b, a b)(0..2); (a, b, x)(0..2); (a, b, 1)(3..1)",
   // gaussian(x, y) under a metric.
   'ds^2 = 4(dx^2 + dy^2)/(1 - x^2 - y^2)^2; gaussian(x, y); x^2 + y^2 = 1; -gaussian(x, y); gaussian((0, 0))',
 ];
