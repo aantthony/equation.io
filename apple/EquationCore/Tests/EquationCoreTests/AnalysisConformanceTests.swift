@@ -113,6 +113,15 @@ import Testing
     #expect(analyze(["y = x"]).settingSlider(row: 0, to: 1, in: "y = x") == nil)
   }
 
+  @Test func constantsMoveWithTime() {
+    let analysis = analyze(["a = 2 t", "b = a + 1", "c = 3", "y = b x"])
+    #expect(analysis.animated == ["a", "b"])
+    #expect(analysis.env == ["a": 0, "b": 1, "c": 3])
+    #expect(analysis.environment(at: 1.5) == ["a": 3, "b": 4, "c": 3])
+    #expect(analysis.rows[3].classified?.animated == false)
+    #expect(analysis.rows[3].gpu?.params == ["b"])
+  }
+
   // MARK: Comparing a row
 
   private func compare(

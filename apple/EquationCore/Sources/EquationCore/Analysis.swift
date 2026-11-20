@@ -57,10 +57,23 @@ public struct DocumentAnalysis: Equatable, Sendable {
   /// Every constant's value at t = 0, by name: what the plans' `params`
   /// read (as uniforms `uniformName` names, or by name on the CPU).
   public var env: [String: Double]
-  /// Constants that move with t: their values need evaluating each frame.
+  /// Constants that move with t: their values need evaluating each frame
+  /// (`environment(at:)`).
   public var animated: Set<String>
   /// The document's own functions (a slider's `clamp` is not one of these).
   var userFns: Set<String>
+  /// Each constant's expression, in the order the rows define them.
+  var constNames: [String]
+  var constExprs: [Expr]
+
+  /// Every constant's value at a time, in seconds since the graph opened
+  /// (lib/env.ts `evaluateFrame`): what the uniforms read on that frame.
+  public func environment(at time: Double) -> [String: Double] {
+    if animated.isEmpty { return env }
+    var defs = BuiltDefs()
+    for (name, expr) in zip(constNames, constExprs) { defs.consts[name] = expr }
+    return (try? evaluateFrame(defs, time: time)) ?? env
+  }
 
   /// The row's text with its slider moved to `value`: held to the slider's
   /// range and step, written into its literal as the site writes it, the
@@ -596,7 +609,9 @@ public func analyze(_ sources: [String]) -> DocumentAnalysis {
       row.slider = Slider(min: lo, max: hi, step: form.whole ? 1 : niceSpacing((hi - lo) / 400, 1), value: value)
     }
   }
-  return DocumentAnalysis(rows: rows, env: constEnv, animated: animated, userFns: userFns)
+  return DocumentAnalysis(
+    rows: rows, env: constEnv, animated: animated, userFns: userFns, constNames: built.consts.keys,
+    constExprs: built.consts.entries.map(\.value))
 }
 
 /// `^\s*name\s*\(`

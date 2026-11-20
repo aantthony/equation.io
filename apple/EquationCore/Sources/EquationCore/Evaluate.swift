@@ -49,7 +49,7 @@ public struct NameSet: Equatable, Sendable, Sequence {
 // MARK: - Structure (lib/expr.ts childrenOf, mapChildren, substVars, freeVars)
 
 /// A node's direct children, in the order the TypeScript lists them.
-func childrenOf(_ e: Expr) -> [Expr] {
+public func childrenOf(_ e: Expr) -> [Expr] {
   switch e {
   case .num, .var, .str: return []
   case .neg(let a): return [a]
@@ -63,7 +63,7 @@ func childrenOf(_ e: Expr) -> [Expr] {
 }
 
 /// Map one level of children, keeping everything else about the node.
-func mapChildren(_ e: Expr, _ map: (Expr) throws -> Expr) rethrows -> Expr {
+public func mapChildren(_ e: Expr, _ map: (Expr) throws -> Expr) rethrows -> Expr {
   switch e {
   case .num, .var, .str: return e
   case .neg(let a): return .neg(try map(a))
@@ -92,7 +92,7 @@ private func boundSumIndex(_ e: Expr) -> String? {
 }
 
 /// Replace free variables by expressions. A surviving Σ/Π binds its index.
-func substVars(_ e: Expr, _ env: [String: Expr]) -> Expr {
+public func substVars(_ e: Expr, _ env: [String: Expr]) -> Expr {
   if case .var(let name) = e { return env[name] ?? e }
   if let index = boundSumIndex(e), env[index] != nil, case .call(let name, let args) = e {
     var bodyEnv = env
@@ -104,7 +104,7 @@ func substVars(_ e: Expr, _ env: [String: Expr]) -> Expr {
 
 /// The free variable names (not function names or constants), in the order
 /// the TypeScript's `freeVars` meets them.
-func freeVarNames(_ e: Expr) -> NameSet {
+public func freeVarNames(_ e: Expr) -> NameSet {
   var out = NameSet()
   collectFreeVars(e, &out)
   return out
