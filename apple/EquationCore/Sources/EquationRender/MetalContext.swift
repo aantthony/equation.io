@@ -31,6 +31,10 @@ public final class MetalContext {
     var count: Int
     /// The textures the shader reads, by index.
     var textures: [String] = []
+    /// The coefficient tables of the shader's helpers: uniform arrays that
+    /// never change, set with every draw's uniforms (the site uploads them
+    /// once, when the program links).
+    var tables: [(name: String, values: [Float])] = []
   }
 
   /// The pipeline for a GLSL fragment shader over the fullscreen triangle,
@@ -46,8 +50,11 @@ public final class MetalContext {
 
   private func compile(_ glsl: String) -> FragmentPipeline? {
     compiles += 1
-    let translated = translateFragment(glsl)
     do {
+      // The helpers the shader names (recursive functions, Fourier sums), as
+      // web/gl.ts `compileProgram` links them in.
+      let linked = try linkHelpers(glsl)
+      let translated = translateFragment(linked.source)
       let library = try makeLibrary(translated.source)
       let descriptor = MTLRenderPipelineDescriptor()
       descriptor.vertexFunction = library.makeFunction(name: "quad_vertex")
@@ -61,7 +68,8 @@ public final class MetalContext {
       color.destinationAlphaBlendFactor = .oneMinusSourceAlpha
       let state = try device.makeRenderPipelineState(descriptor: descriptor)
       return FragmentPipeline(
-        state: state, slots: translated.slots, count: translated.count, textures: translated.textures)
+        state: state, slots: translated.slots, count: translated.count, textures: translated.textures,
+        tables: linked.tables)
     } catch {
       failures += 1
       print("Shader compile error: \(error)\n---\n\(glsl)")
@@ -105,6 +113,10 @@ extension MetalContext {
     guard !textures.contains(where: { $0 == nil }) else { return }
     var frame = frame
     var floats = [Float](repeating: 0, count: pipeline.count)
+    for table in pipeline.tables {
+      guard let slot = pipeline.slots[table.name] else { continue }
+      for k in 0..<min(slot.count, table.values.count) { floats[slot.offset + k] = table.values[k] }
+    }
     for (name, slot) in pipeline.slots {
       guard let given = value(name) else { continue }
       for k in 0..<min(slot.count, given.count) { floats[slot.offset + k] = given[k] }
