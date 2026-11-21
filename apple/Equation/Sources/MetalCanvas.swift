@@ -60,7 +60,6 @@ final class MetalCanvas: MTKView, MTKViewDelegate {
   private var noted = 0.0
   /// A drag that slides a 3D camera's target, not one that orbits it.
   var panning = false
-  var coast = Coast()
   /// Where the pointer last was, for the Mac's drags.
   var last = CGPoint.zero
   /// The pan under way is a trackpad's scroll, not a finger's drag (iPad).
@@ -69,7 +68,6 @@ final class MetalCanvas: MTKView, MTKViewDelegate {
   private var glide: Task<Bool, Never>?
   /// A hand is on the graph or a move is in flight: what is written meanwhile is one gesture's.
   var busy: Bool { held || glide != nil }
-  private var coasting: Task<Void, Never>?
   private var spinEase: Task<Void, Never>?
   private var refine: Task<Void, Never>?
   private var writeback: Task<Void, Never>?
@@ -433,9 +431,6 @@ final class MetalCanvas: MTKView, MTKViewDelegate {
   func stopMoves() {
     glide?.cancel()
     glide = nil
-    coasting?.cancel()
-    coasting = nil
-    coast.stop()
   }
 
   /// Zoom panel `k` by `factor` (under 1 moves in): in 2D keeping the math
@@ -465,24 +460,6 @@ final class MetalCanvas: MTKView, MTKViewDelegate {
       viewport.states[k].camera.orbit(dx: dx, dy: dy)
     }
     didMove(k)
-  }
-
-  /// Carry a drag on after the hand leaves it, slowing to rest.
-  func startCoasting(panel k: Int) {
-    coasting?.cancel()
-    coasting = Task { @MainActor [weak self] in
-      var last = CACurrentMediaTime()
-      while !Task.isCancelled {
-        try? await Task.sleep(for: .milliseconds(8))
-        guard let self, !Task.isCancelled else { return }
-        let now = CACurrentMediaTime()
-        guard let step = self.coast.step(now - last) else { break }
-        last = now
-        self.drag(panel: k, dx: step.x, dy: step.y)
-      }
-      self?.flushWriteback()
-      if let self, !self.held { self.model?.endGesture() }
-    }
   }
 
   // MARK: Moves that take a while
@@ -738,7 +715,6 @@ final class MetalCanvas: MTKView, MTKViewDelegate {
     wandered = false
     viewport.hover = nil
     viewport.hot = nil
-    coast.track(x: p.x, y: p.y, at: CACurrentMediaTime())
     guard !pan, let hit = grabbable(at: p, in: active, radius: radius) else { return }
     grab = (hit.point.target, hit.point.x - hit.x, hit.point.y - hit.y)
     viewport.hot = HotPoint(panel: active, target: hit.point.target)
@@ -813,28 +789,22 @@ final class MetalCanvas: MTKView, MTKViewDelegate {
       }
       return
     }
-    coast.track(x: p.x, y: p.y, at: CACurrentMediaTime())
     drag(panel: active, dx: dx, dy: dy)
   }
 
-  /// The pointer let go: a point is put down; a drag that was still moving coasts on.
+  /// The pointer let go: a point is put down; a drag stops where it was left.
   func ended() {
     guard held else { return }
     held = false
     if grab != nil {
       grab = nil
       viewport.hot = nil
-      coast.stop()
       model?.endGesture()
       redraw()
       return
     }
-    if free(active), coast.release(at: CACurrentMediaTime()) {
-      startCoasting(panel: active)
-    } else {
-      flushWriteback()
-      model?.endGesture()
-    }
+    flushWriteback()
+    model?.endGesture()
     // A click that went nowhere, and was not a pan's, drops a seed.
     if !wandered, !panning { tapped(at: down) }
   }

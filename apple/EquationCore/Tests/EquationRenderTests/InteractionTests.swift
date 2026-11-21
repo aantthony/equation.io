@@ -8,7 +8,7 @@ import Testing
 
 /// What the app does to a graph under the hand, apart from its views: the
 /// rows a moved window, camera or point writes, the panels' boxes, and the
-/// arithmetic of zooming, easing and coasting. The expected texts and boxes
+/// arithmetic of zooming and easing. The expected texts and boxes
 /// are what lib/view.ts and lib/panels.ts answer for the same arguments.
 @Suite struct Interaction {
   @Test func viewRowsAreWrittenAsTheSiteWritesThem() {
@@ -101,27 +101,6 @@ import Testing
     #expect(abs(half.theta) < 1e-12 && abs(half.radius - 20) < 1e-9 && half.target == [0.5, 1, 1.5])
     #expect(from.moved(CameraMove()) == from)
     #expect(abs(Camera3D(theta: 7).shownTheta - (7 - 2 * .pi)) < 1e-12)
-  }
-
-  @Test func aThrowCoastsToRest() {
-    var coast = Coast()
-    for k in 0...5 { coast.track(x: Double(k) * 10, y: 0, at: Double(k) * 0.016) }
-    let thrown = coast.release(at: 0.081)
-    #expect(thrown)
-    #expect(abs(coast.velocity.x - 625) < 1e-6 && coast.velocity.y == 0)
-    var moved = 0.0
-    var steps = 0
-    while let step = coast.step(1.0 / 60) {
-      moved += step.x
-      steps += 1
-    }
-    // It carries about the speed times the decay time, and stops.
-    #expect(moved > 150 && moved < 625 * 0.325 && steps < 200)
-    #expect(coast.velocity == .zero)
-    // A hand that rested before lifting throws nothing.
-    for k in 0...5 { coast.track(x: Double(k) * 10, y: 0, at: Double(k) * 0.016) }
-    let rested = coast.release(at: 0.5)
-    #expect(!rested)
   }
 
   @Test func aDraggedPointRewritesItsRow() throws {
