@@ -82,11 +82,14 @@ shown in place of its readout. A point is dragged where its panel draws it:
 through a view's maps, along the surface of an `on(…)` panel, or as a point
 placed by its coordinates' names (`(r, theta) = (2, 0.8)`).
 
-The port walks a row by recursion, and a row may be deep (a Σ of 500 terms,
-150 nested calls): more stack than an iPhone's main thread has, in a debug
-build several times over. `DeepStack.swift` is a thread with enough, which
-every reading of the rows (`GraphAnalysis`, `analyzeDeep`) and every frame's
-evaluation of them runs on while its caller waits.
+The port walks a row by recursion, and the core refuses a row too deep for
+the thread it is read on (`Depth.swift`: 512 levels in a release build; in a
+debug build as many as the thread's stack holds, about 200 on an iPhone's
+main thread). `DeepStack.swift` is a thread with room for all 512 in either
+build, which every reading of the rows (`GraphAnalysis`, `analyzeDeep`) and
+every frame's evaluation of them runs on while its caller waits. It is no
+longer what keeps a deep row from crashing; it is what lets a debug build
+read the rows a release build reads.
 
 Ask's `get_graph`, `set_graph` and `check` describe each row as the site
 does (`EquationRender` `RowReport.swift`, lib/assistant-tools.ts
