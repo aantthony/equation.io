@@ -82,39 +82,18 @@ enum ChatModel {
     }
   }
 
-  /// The person's allowance of requests is used up. It is Apple's, counted
-  /// against their account across every app, and comes back by itself: the
-  /// note says whose limit it is and when Ask works again, where the system's
-  /// own error says only to try later.
-  struct Quota {
-    var reset: Date?
-
-    /// From a request's error, if the limit is what stopped it. The usage
-    /// is asked too: the error may be the session's own, not the model's.
-    init?(reached error: any Error) {
-      if case PrivateCloudComputeLanguageModel.Error.quotaLimitReached(let limit) = error {
-        reset = limit.resetDate
-        return
-      }
-      let usage = ChatModel.make().quotaUsage
-      guard usage.isLimitReached else { return nil }
-      reset = usage.resetDate
+  /// What to say when the person's allowance of requests is what stopped
+  /// `error`: it is Apple's, counted against their account across every app,
+  /// and the note says whose limit it is where the system's own error doesn't.
+  /// No time is promised: the reset date Apple gives is always a quarter of
+  /// an hour from the asking, whenever the allowance really comes back.
+  static func quotaNote(for error: any Error) -> String? {
+    // The usage is asked too: the error may be the session's own, not the model's.
+    if case PrivateCloudComputeLanguageModel.Error.quotaLimitReached = error {
+    } else if !make().quotaUsage.isLimitReached {
+      return nil
     }
-
-    func text(now: Date = .now, calendar: Calendar = .current) -> String {
-      let reached = "You've reached your Apple Intelligence limit for now."
-      guard let reset, reset > now else { return "\(reached) Ask will work again later." }
-      let time = reset.formatted(date: .omitted, time: .shortened)
-      let when =
-        if calendar.isDate(reset, inSameDayAs: now) {
-          "at \(time)"
-        } else if let next = calendar.date(byAdding: .day, value: 1, to: now), calendar.isDate(reset, inSameDayAs: next) {
-          "tomorrow at \(time)"
-        } else {
-          "on \(reset.formatted(date: .abbreviated, time: .omitted))"
-        }
-      return "\(reached) Ask will work again \(when)."
-    }
+    return "You've reached your Apple Intelligence limit for now. Try again in a few minutes."
   }
 
   // The instructions (instructions, referenceInstructions) are in
