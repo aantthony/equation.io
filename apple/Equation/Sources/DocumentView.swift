@@ -174,6 +174,10 @@ struct DocumentView: View {
           ToolbarItem(placement: .primaryAction) { share }
         }
     }
+    #if os(macOS)
+      // The title bar fades away while you work (WindowChrome.swift).
+      .background(WindowChrome())
+    #endif
   }
 }
 
