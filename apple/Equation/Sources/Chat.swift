@@ -320,7 +320,11 @@ final class GraphChat {
       self.session = nil
       messages[reply] = Message(role: .note, text: "That conversation got too long, so it starts afresh. Ask again.")
     } catch {
-      messages[reply] = Message(role: .note, text: error.localizedDescription)
+      if let quota = ChatModel.Quota(reached: error) {
+        messages[reply] = Message(role: .note, text: quota.text())
+      } else {
+        messages[reply] = Message(role: .note, text: error.localizedDescription)
+      }
     }
     if messages[reply].role == .assistant && messages[reply].text.isEmpty { messages.remove(at: reply) }
     if access.rows() != before { undoRows = before }

@@ -63,33 +63,57 @@ struct RowStatus: Decodable, Equatable {
 
 /// Which language model the chat talks to.
 enum ChatModel {
-  /// Apple's server model on Private Cloud Compute, instead of the one on
-  /// the device: it passes 77% of the evals to the device's 49%
-  /// (apple/evals/RESULTS.md). It needs the target's
-  /// com.apple.developer.private-cloud-compute entitlement (project.yml);
-  /// where it isn't available, the chat falls back to the model on the device.
-  static let usePrivateCloudCompute = true
-
-  /// The server model, when the app uses it and it can be reached from here.
-  private static var server: PrivateCloudComputeLanguageModel? {
-    guard usePrivateCloudCompute else { return nil }
-    let server = PrivateCloudComputeLanguageModel()
-    return server.isAvailable ? server : nil
+  /// Apple's server model on Private Cloud Compute, and no other: the model
+  /// on the device passes 49% of the evals to its 77%
+  /// (apple/evals/RESULTS.md), and an Ask that answers that badly is worse
+  /// than one that says it can't. It needs the target's
+  /// com.apple.developer.private-cloud-compute entitlement (project.yml).
+  static func make() -> PrivateCloudComputeLanguageModel {
+    PrivateCloudComputeLanguageModel()
   }
 
-  static func make() -> any LanguageModel {
-    server ?? SystemLanguageModel.default
-  }
-
-  /// Why the chat can't run on this device, in words for the person using it.
+  /// Why the chat can't run here, in words for the person using it.
   static var unavailableReason: String? {
-    if server != nil { return nil }
-    return switch SystemLanguageModel.default.availability {
+    switch make().availability {
     case .available: nil
-    case .unavailable(.deviceNotEligible): "This device can't run Apple Intelligence, which Ask needs."
-    case .unavailable(.appleIntelligenceNotEnabled): "Turn on Apple Intelligence in Settings to use Ask."
-    case .unavailable(.modelNotReady): "Apple Intelligence is still getting ready. Try again in a little while."
-    case .unavailable: "Ask isn't available on this device."
+    case .unavailable(.deviceNotEligible): "This device can't use Ask."
+    case .unavailable(.systemNotReady): "Ask isn't ready yet. Try again in a little while."
+    case .unavailable: "Ask isn't available right now."
+    }
+  }
+
+  /// The person's allowance of requests is used up. It is Apple's, counted
+  /// against their account across every app, and comes back by itself: the
+  /// note says whose limit it is and when Ask works again, where the system's
+  /// own error says only to try later.
+  struct Quota {
+    var reset: Date?
+
+    /// From a request's error, if the limit is what stopped it. The usage
+    /// is asked too: the error may be the session's own, not the model's.
+    init?(reached error: any Error) {
+      if case PrivateCloudComputeLanguageModel.Error.quotaLimitReached(let limit) = error {
+        reset = limit.resetDate
+        return
+      }
+      let usage = ChatModel.make().quotaUsage
+      guard usage.isLimitReached else { return nil }
+      reset = usage.resetDate
+    }
+
+    func text(now: Date = .now, calendar: Calendar = .current) -> String {
+      let reached = "You've reached your Apple Intelligence limit for now."
+      guard let reset, reset > now else { return "\(reached) Ask will work again later." }
+      let time = reset.formatted(date: .omitted, time: .shortened)
+      let when =
+        if calendar.isDate(reset, inSameDayAs: now) {
+          "at \(time)"
+        } else if let next = calendar.date(byAdding: .day, value: 1, to: now), calendar.isDate(reset, inSameDayAs: next) {
+          "tomorrow at \(time)"
+        } else {
+          "on \(reset.formatted(date: .abbreviated, time: .omitted))"
+        }
+      return "\(reached) Ask will work again \(when)."
     }
   }
 
