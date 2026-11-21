@@ -358,6 +358,8 @@ func isComplexValued(_ e: Expr) -> Bool {
 /// Result typing, independent of code generation and structural complex
 /// involvement (lib/complex.ts `inferScalarType`).
 public func inferScalarType(_ e: Expr, _ env: [String: ScalarType] = [:]) throws(LanguageError) -> ScalarType {
+  // (A kind to a function, below: this walk is a frame per level of the expression, and a debug
+  // build's frame holds every case's temporaries at once.)
   switch e {
   case .num:
     return .real

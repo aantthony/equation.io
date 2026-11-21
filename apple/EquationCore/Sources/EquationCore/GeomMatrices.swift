@@ -118,6 +118,8 @@ final class GeomContext {
     return found
   }
 
+  // (A kind to a function, below: this walk is a frame per level of the expression, and a debug
+  // build's frame holds every case's temporaries at once.)
   private func tensorOf(_ e: Expr) throws -> Tensor? {
     switch e {
     case .var(let name):

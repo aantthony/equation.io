@@ -137,6 +137,8 @@ private func complexParts(_ e: Expr, _ budget: Int?, _ vars: ComplexVars) throws
   return parts
 }
 
+// (A kind to a function, below: this walk is a frame per level of the expression, and a debug
+// build's frame holds every case's temporaries at once.)
 private func splitParts(_ e: Expr, _ budget: Int?, _ vars: ComplexVars) throws -> Pair {
   func parts(_ a: Expr) throws -> Pair { try complexParts(a, budget, vars) }
   if !usesComplex(e, Set(vars.keys)) && !hasProjection(e) { return (e, num(0)) }

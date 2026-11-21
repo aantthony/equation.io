@@ -111,6 +111,8 @@ public func diff(_ e: Expr, _ v: String) throws(DiffError) -> Expr {
   return derivative
 }
 
+// (A kind to a function, below: this walk is a frame per level of the expression, and a debug
+// build's frame holds every case's temporaries at once.)
 private func diffNode(_ e: Expr, _ v: String) throws(DiffError) -> Expr {
   switch e {
   case .num:

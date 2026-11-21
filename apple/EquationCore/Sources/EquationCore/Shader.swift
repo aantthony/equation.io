@@ -472,6 +472,7 @@ private func powGLSL(_ lhs: Expr, _ rhs: Expr, _ a: String, _ b: String) -> Stri
 /// compile to their own names, so the caller must declare them (as function
 /// parameters, say).
 public func toGLSL(_ e: Expr) throws(ShaderError) -> String {
+  // (A product and a call in functions of their own, below: a frame per level of the expression.)
   switch e {
   case .index, .range, .eqtest, .comp, .figure, .lazy, .trail, .label, .hist, .family:
     throw ShaderError(structuralDiagnostic(e))
@@ -499,7 +500,9 @@ public func toGLSL(_ e: Expr) throws(ShaderError) -> String {
   case .piecewise(let cases, let otherwise):
     return try piecewiseGLSL(cases, otherwise: otherwise, toGLSL)
   case .loop:
-    return try glslLoop(e)
+    // Port: compileTyped (lib/complex.ts) emits loops, since it types the
+    // params; this is what lib/glsl.ts `toGLSL` itself says of one.
+    throw ShaderError("A recursive function cannot be used here yet.")
   }
 }
 
@@ -528,8 +531,3 @@ private func glslCall(_ e: Expr) throws(ShaderError) -> String {
   return "\(fnGLSL[name] ?? name)(\(args.joined(separator: ", ")))"
 }
 
-private func glslLoop(_ e: Expr) throws(ShaderError) -> String {
-  // Port: compileTyped (lib/complex.ts) emits loops, since it types the
-  // params; this is what lib/glsl.ts `toGLSL` itself says of one.
-  throw ShaderError("A recursive function cannot be used here yet.")
-}
