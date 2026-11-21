@@ -61,6 +61,29 @@ private func same(_ a: View2D, _ b: View2D?) -> Bool {
     return GraphPanels(analysis, colors: colors)
   }
 
+  @Test func splitsKeepClearOfWhatCoversTheFrame() {
+    let cover = GraphPanels.Clear(top: 60, bottom: 200)
+    // A lone panel runs under the cover.
+    var alone = panels(["y = x"])
+    alone.clear = cover
+    #expect(alone.layout(width: 400, height: 800, dpr: 1)[0].rect == PanelRect(x: 0, y: 0, w: 400, h: 800))
+    // Tiles share what is left: the top one runs up under the cover, none runs down under it.
+    var tiled = panels(["y = x", "--- below", "y = x^2", "--- inset top-left", "y = 1", "--- inset bottom-right", "y = 2"])
+    tiled.clear = cover
+    let boxes = tiled.layout(width: 400, height: 800, dpr: 1)
+    #expect(boxes[0].rect == PanelRect(x: 0, y: 0, w: 400, h: 330))
+    #expect(boxes[1].rect == PanelRect(x: 0, y: 330, w: 400, h: 270))
+    // Insets sit in the clear part of their host.
+    for box in boxes where box.inset {
+      #expect(box.rect.y >= 330 && box.rect.y + box.rect.h <= 600)
+    }
+    // In pixels, at the frame's scale.
+    #expect(tiled.layout(width: 800, height: 1600, dpr: 2)[1].rect == PanelRect(x: 0, y: 660, w: 800, h: 540))
+    // Too little left to split: the frame as it is.
+    tiled.clear = GraphPanels.Clear(top: 60, bottom: 700)
+    #expect(tiled.layout(width: 400, height: 800, dpr: 1)[1].rect == PanelRect(x: 0, y: 400, w: 400, h: 400))
+  }
+
   @Test func oneDocumentOnePanelWithoutDividers() {
     let rows = ["a = 2", "y = a sin(x)", "view(x = -4..4)", "(1, 2)"]
     let document = panels(rows)

@@ -82,6 +82,12 @@ shown in place of its readout. A point is dragged where its panel draws it:
 through a view's maps, along the surface of an `on(…)` panel, or as a point
 placed by its coordinates' names (`(r, theta) = (2, 0.8)`).
 
+On an iPhone the graph runs under the status bar and the card of equations.
+A lone panel is drawn under both; a split document is laid out in the part
+left clear (`GraphPanels.clear`, which `StackedLayout` sets from the status
+bar and where the card has settled, up to half the window), so no panel or
+inset is hidden behind either.
+
 The port walks a row by recursion, and the core refuses a row too deep for
 the thread it is read on (`Depth.swift`: 512 levels in a release build; in a
 debug build as many as the thread's stack holds, about 200 on an iPhone's

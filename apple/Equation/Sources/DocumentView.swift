@@ -1,4 +1,5 @@
 import EquationCore
+import EquationRender
 import SwiftUI
 
 /// A graph document's window: the rows beside the graph on iPad and Mac, and
@@ -211,6 +212,19 @@ struct DocumentView: View {
 
     /// The home indicator's height, kept clear below the header and the equations.
     @State private var home: CGFloat = 0
+    /// The status bar's height, and the window's.
+    @State private var status: CGFloat = 0
+    @State private var window: CGFloat = 0
+
+    /// What lies over the graph: the status bar, and the card where it has
+    /// settled, up to half the window (a card pulled higher covers the graph
+    /// on purpose). Of the window, not the keyboard, so typing moves nothing.
+    private var clear: GraphPanels.Clear {
+      guard window > 0 else { return GraphPanels.Clear() }
+      let stops = Self.stops(in: window, home: home)
+      let card = min(stops[min(stop, stops.count - 1)], window * 0.5)
+      return GraphPanels.Clear(top: status, bottom: card)
+    }
 
     /// The card's inset from the screen's sides.
     private static var margin: CGFloat { 8 }
@@ -223,6 +237,7 @@ struct DocumentView: View {
     var body: some View {
       ZStack(alignment: .bottom) {
         graph
+          .environment(\.graphClear, clear)
           .ignoresSafeArea()
         GeometryReader { geometry in
           let stops = Self.stops(in: geometry.size.height, home: home)
@@ -281,7 +296,11 @@ struct DocumentView: View {
       }
       .background {
         // From the window, which the keyboard doesn't change.
-        HomeIndicatorReader { height in if home != height { home = height } }
+        HomeIndicatorReader { top, bottom, height in
+          if home != bottom { home = bottom }
+          if status != top { status = top }
+          if window != height { window = height }
+        }
       }
     }
 
@@ -292,9 +311,10 @@ struct DocumentView: View {
       drag.canGrow = { base - dragged < top - 1 }
     }
 
-    /// Reports the window's bottom safe area: the home indicator's height.
+    /// Reports the window's safe area at the top (the status bar) and the
+    /// bottom (the home indicator), and its height.
     private struct HomeIndicatorReader: UIViewRepresentable {
-      var report: (CGFloat) -> Void
+      var report: (CGFloat, CGFloat, CGFloat) -> Void
 
       func makeUIView(context: Context) -> Probe {
         let probe = Probe()
@@ -306,13 +326,18 @@ struct DocumentView: View {
       func updateUIView(_ probe: Probe, context: Context) { probe.report = report }
 
       final class Probe: UIView {
-        var report: (CGFloat) -> Void = { _ in }
+        var report: (CGFloat, CGFloat, CGFloat) -> Void = { _, _, _ in }
         override func didMoveToWindow() { send() }
         override func safeAreaInsetsDidChange() { send() }
+        override func layoutSubviews() {
+          super.layoutSubviews()
+          send()
+        }
         private func send() {
-          let height = window?.safeAreaInsets.bottom ?? 0
+          let insets = window?.safeAreaInsets ?? .zero
+          let height = window?.bounds.height ?? 0
           // Not during the layout pass that asked.
-          DispatchQueue.main.async { [report] in report(height) }
+          DispatchQueue.main.async { [report] in report(insets.top, insets.bottom, height) }
         }
       }
     }

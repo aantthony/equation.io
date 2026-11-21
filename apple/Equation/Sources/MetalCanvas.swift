@@ -28,6 +28,13 @@ final class MetalCanvas: MTKView, MTKViewDelegate {
         if run == nil { run = StateStepper(content.analysis) } else { run?.adopt(content.analysis) }
       }
       reconcile()
+      // The splits have moved: a window nothing has moved yet is framed again for its new box.
+      if let content, let oldValue, content.panels.clear != oldValue.panels.clear {
+        for k in viewport.states.indices where !viewport.states[k].touched && !viewport.states[k].spatial {
+          viewport.states[k].framed = false
+        }
+        frame(in: viewport.pixels)
+      }
       updatePacing()
       redraw()
     }

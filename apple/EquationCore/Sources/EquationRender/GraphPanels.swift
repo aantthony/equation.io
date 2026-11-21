@@ -51,6 +51,20 @@ public struct GraphPanels: Equatable, Sendable {
   public var panels: [Panel]
   /// Some panel moves with t, so the graph redraws every frame.
   public var animated: Bool
+  /// What lies over the frame's top and bottom, in points: a status bar, a
+  /// card of equations. A lone panel runs under it; a split is made of the
+  /// part left clear, so no panel is hidden whole and an inset stays in sight.
+  public var clear = Clear()
+
+  public struct Clear: Equatable, Sendable {
+    public var top = 0.0
+    public var bottom = 0.0
+
+    public init(top: Double = 0, bottom: Double = 0) {
+      self.top = top
+      self.bottom = bottom
+    }
+  }
 
   /// The gap between an inset and its host's edges, in points (web/session.ts `syncPanels`).
   public static let insetMargin = 12.0
@@ -83,7 +97,29 @@ public struct GraphPanels: Equatable, Sendable {
 
   /// Where each panel goes in a frame `width` × `height` device pixels.
   public func layout(width: Double, height: Double, dpr: Double) -> [PanelLayout] {
-    layoutPanels(panels.compactMap(\.split), width, height, margin: (Self.insetMargin * dpr).rounded())
+    let splits = panels.compactMap(\.split)
+    let margin = (Self.insetMargin * dpr).rounded()
+    let top = (max(0, clear.top) * dpr).rounded()
+    let bottom = (max(0, clear.bottom) * dpr).rounded()
+    let room = height - top - bottom
+    // Nothing over the frame, nothing to keep clear of it, or too little left to split.
+    guard split, top + bottom > 0, room >= 120 * dpr else {
+      return layoutPanels(splits, width, height, margin: margin)
+    }
+    var out = layoutPanels(splits, width, room, margin: margin)
+    for k in out.indices {
+      var r = out[k].rect
+      r.y += top
+      // A tile at the top runs on under the little that covers it there. At
+      // the bottom none does: what covers that is tall, and a window centered
+      // on a box half hidden would show its origin at the cover's edge.
+      if !out[k].inset, r.y <= top {
+        r.h += r.y
+        r.y = 0
+      }
+      out[k].rect = r
+    }
+    return out
   }
 
   /// Each panel's opening window (web/session.ts `syncPanels`, then

@@ -65,6 +65,21 @@ final class GraphViewport {
   }
 }
 
+extension EnvironmentValues {
+  /// What lies over the graph's top and bottom, in points (`GraphPanels.clear`).
+  @Entry var graphClear = GraphPanels.Clear()
+}
+
+extension GraphContent {
+  /// The same graph, its splits kept clear of what lies over the view.
+  func clear(of clear: GraphPanels.Clear) -> GraphContent {
+    guard panels.clear != clear else { return self }
+    var out = self
+    out.panels.clear = clear
+    return out
+  }
+}
+
 /// The graph's Metal view, with the overlay over it.
 struct MetalGraphView: View {
   var content: GraphContent
@@ -72,9 +87,10 @@ struct MetalGraphView: View {
   var generation: Int
   var model: GraphModel
   @State private var viewport = GraphViewport()
+  @Environment(\.graphClear) private var clear
 
   var body: some View {
-    MetalCanvasView(content: content, theme: theme, generation: generation, viewport: viewport, model: model)
+    MetalCanvasView(content: content.clear(of: clear), theme: theme, generation: generation, viewport: viewport, model: model)
       .overlay {
         // Drawn again whenever the Metal view draws a frame that differs.
         Overlay(frames: viewport.frames, layout: viewport.layout, scale: viewport.scale, theme: theme)
