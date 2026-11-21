@@ -205,6 +205,7 @@ private func diffBin(_ op: BinOp, _ a: Expr, _ b: Expr, _ v: String) throws(Diff
   }
 }
 
+@inline(never)
 private func diffPow(_ a: Expr, _ b: Expr, _ v: String) throws(DiffError) -> Expr {
   if let n = numValue(b) {
     // d(a^n) = n a^(n-1) a'
@@ -229,6 +230,7 @@ private func diffCall(_ name: String, _ args: [Expr], _ v: String) throws(DiffEr
 }
 
 /// The calls differentiated in more than one argument, or by a rule of their own; nil for the rest.
+@inline(never)
 private func diffSeveral(_ name: String, _ args: [Expr], _ v: String) throws(DiffError) -> Expr? {
   // A continuous interval's parameter varies on its own, not with x.
   if name == INTERVAL { return ZERO }
@@ -292,6 +294,7 @@ private func diffSeveral(_ name: String, _ args: [Expr], _ v: String) throws(Dif
 }
 
 /// f(a)′ = f′(a) a′, with a′ in hand.
+@inline(never)
 private func chainRule(_ name: String, _ a: Expr, _ da: Expr) throws(DiffError) -> Expr {
   func chain(_ outer: Expr) -> Expr { mul(outer, da) }
   switch name {

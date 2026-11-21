@@ -1649,6 +1649,7 @@ private func lowerLiteral(_ raw: [Expr], id: String?, _ ctx: Ctx) throws -> Low 
 }
 
 /// Two lowered sides under an operator (the `bin` case of `lowerNode`).
+@inline(never)
 private func lowerBinOp(_ op: BinOp, _ a: Low, _ b: Low, _ ctx: Ctx) throws -> Low {
   if let scaled = try scaleHist(op, a.e, b.e, ctx) { return Low(scaled) }
   let f = binOp(op)
@@ -1791,6 +1792,7 @@ private func lowerCall(_ e: Expr, _ name: String, _ rawArgs: [Expr], _ ctx: Ctx)
 }
 
 /// A list literal or one settled already, [map], fourier, reconstruct and hist; nil for any other call.
+@inline(never)
 private func lowerWholeCall(_ e: Expr, _ name: String, _ rawArgs: [Expr], _ ctx: Ctx) throws -> Low? {
   if let literal = listLiteral(e) { return try lowerLiteral(literal.items, id: literal.id, ctx) }
   // A list lowered earlier (an index the object pass settled first) keeps
@@ -1834,6 +1836,7 @@ private func lowerWholeCall(_ e: Expr, _ name: String, _ rawArgs: [Expr], _ ctx:
 }
 
 /// A call of lowered arguments: a sort, a reduction, or a builtin mapped over its lists.
+@inline(never)
 private func callOfLows(_ name: String, _ lowered: [Low], _ ctx: Ctx) throws -> Low {
   var args = lowered
   if name == "sort", args.count == 2 {

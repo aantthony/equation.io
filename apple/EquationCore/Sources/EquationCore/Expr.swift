@@ -610,6 +610,7 @@ private func collectFreeVars(_ e: Expr, _ out: inout NameSet) {
   }
 }
 
+@inline(never)
 private func collectBoundFreeVars(_ e: Expr, _ out: inout NameSet) {
   /// The names free in `parts` less those `bound` there, after what is in `out`.
   func scoped(_ parts: [Expr], binding bound: [String]) {
@@ -652,42 +653,72 @@ private func collectBoundFreeVars(_ e: Expr, _ out: inout NameSet) {
 /// keys are in the order the TypeScript's node type declares them, which is
 /// the order its constructors write them in.
 public func exprKey(_ e: Expr) -> String {
-  func list(_ items: [Expr]) -> String { "[" + items.map(exprKey).joined(separator: ",") + "]" }
-  func number(_ value: Double) -> String { value.isFinite ? JS.string(value) : "null" }
-  /// A Float64Array, which JSON writes as an object keyed by index.
-  func packed(_ values: [Double]) -> String {
-    "{" + values.enumerated().map { "\"\($0.offset)\":\(number($0.element))" }.joined(separator: ",") + "}"
-  }
-  func columns(_ cols: [Column]) -> String {
-    "[" + cols.map { "{\"name\":\(jsonString($0.name)),\"values\":\(packed($0.values))}" }.joined(separator: ",") + "]"
-  }
+  // (The kinds a row is mostly made of here, the rest in a function of their
+  // own: a key is written by a frame per level of the row.)
   switch e {
   case .num(let value):
-    return "{\"kind\":\"num\",\"value\":\(number(value))}"
+    return "{\"kind\":\"num\",\"value\":\(keyNumber(value))}"
   case .var(let name):
     return "{\"kind\":\"var\",\"name\":\(jsonString(name))}"
   case .bin(let op, let a, let b, let glyph):
-    let tail = glyph.map { ",\"glyph\":\"\($0.rawValue)\"" } ?? ""
-    return "{\"kind\":\"bin\",\"op\":\"\(op.rawValue)\",\"a\":\(exprKey(a)),\"b\":\(exprKey(b))\(tail)}"
+    return keyOfBin(op, exprKey(a), exprKey(b), glyph)
   case .neg(let a):
     return "{\"kind\":\"neg\",\"a\":\(exprKey(a))}"
   case .call(let name, let args):
-    return "{\"kind\":\"call\",\"name\":\(jsonString(name)),\"args\":\(list(args))}"
+    return "{\"kind\":\"call\",\"name\":\(jsonString(name)),\"args\":\(keyList(args))}"
+  default:
+    return keyOfStructure(e)
+  }
+}
+
+@inline(never)
+private func keyOfBin(_ op: BinOp, _ a: String, _ b: String, _ glyph: ProductGlyph?) -> String {
+  let tail = glyph.map { ",\"glyph\":\"\($0.rawValue)\"" } ?? ""
+  return "{\"kind\":\"bin\",\"op\":\"\(op.rawValue)\",\"a\":\(a),\"b\":\(b)\(tail)}"
+}
+
+private func keyList(_ items: [Expr]) -> String {
+  var out = "["
+  for (k, item) in items.enumerated() {
+    if k > 0 { out += "," }
+    out += exprKey(item)
+  }
+  return out + "]"
+}
+
+private func keyNumber(_ value: Double) -> String { value.isFinite ? JS.string(value) : "null" }
+
+/// A Float64Array, which JSON writes as an object keyed by index.
+private func keyPacked(_ values: [Double]) -> String {
+  "{" + values.enumerated().map { "\"\($0.offset)\":\(keyNumber($0.element))" }.joined(separator: ",") + "}"
+}
+
+private func keyColumns(_ cols: [Column]) -> String {
+  "["
+    + cols.map { "{\"name\":\(jsonString($0.name)),\"values\":\(keyPacked($0.values))}" }.joined(separator: ",")
+    + "]"
+}
+
+@inline(never)
+private func keyOfStructure(_ e: Expr) -> String {
+  switch e {
+  case .num, .var, .bin, .neg, .call:
+    return exprKey(e)
   case .index(let a, let b):
-    return "{\"kind\":\"index\",\"args\":\(list([a, b]))}"
+    return "{\"kind\":\"index\",\"args\":\(keyList([a, b]))}"
   case .range(let a, let b):
-    return "{\"kind\":\"range\",\"args\":\(list([a, b]))}"
+    return "{\"kind\":\"range\",\"args\":\(keyList([a, b]))}"
   case .eqtest(let op, let a, let b):
-    return "{\"kind\":\"eqtest\",\"op\":\"\(op.rawValue)\",\"args\":\(list([a, b]))}"
+    return "{\"kind\":\"eqtest\",\"op\":\"\(op.rawValue)\",\"args\":\(keyList([a, b]))}"
   case .eq(let l, let r):
     return "{\"kind\":\"eq\",\"l\":\(exprKey(l)),\"r\":\(exprKey(r))}"
   case .ineq(let op, let l, let r, let grouped):
     return "{\"kind\":\"ineq\",\"op\":\"\(op.rawValue)\",\"l\":\(exprKey(l)),\"r\":\(exprKey(r))"
       + (grouped ? ",\"grouped\":true}" : "}")
   case .vec(let items):
-    return "{\"kind\":\"vec\",\"items\":\(list(items))}"
+    return "{\"kind\":\"vec\",\"items\":\(keyList(items))}"
   case .list(let items):
-    return "{\"kind\":\"list\",\"items\":\(list(items))}"
+    return "{\"kind\":\"list\",\"items\":\(keyList(items))}"
   case .str(let value):
     return "{\"kind\":\"str\",\"value\":\(jsonString(value))}"
   case .piecewise(let cases, let otherwise):
@@ -701,24 +732,25 @@ public func exprKey(_ e: Expr) -> String {
       + ",\"functionName\":\(jsonString(functionName))}"
   case .figure(let form, let dimension, let vertices, let over):
     return "{\"kind\":\"figure\",\"form\":\"\(form.rawValue)\",\"dimension\":\(dimension)"
-      + ",\"vertices\":\(list(vertices))" + (over.map { ",\"over\":\(columns($0))}" } ?? "}")
+      + ",\"vertices\":\(keyList(vertices))" + (over.map { ",\"over\":\(keyColumns($0))}" } ?? "}")
   case .trail(let coordinates):
-    return "{\"kind\":\"trail\",\"coordinates\":\(list(coordinates))}"
+    return "{\"kind\":\"trail\",\"coordinates\":\(keyList(coordinates))}"
   case .label(let coordinates, let text):
-    return "{\"kind\":\"label\",\"coordinates\":\(list(coordinates)),\"text\":\(jsonString(text))}"
+    return "{\"kind\":\"label\",\"coordinates\":\(keyList(coordinates)),\"text\":\(jsonString(text))}"
   case .hist(let centers, let counts, let width):
-    return "{\"kind\":\"hist\",\"centers\":\(packed(centers)),\"counts\":\(packed(counts)),\"width\":\(number(width))}"
+    return "{\"kind\":\"hist\",\"centers\":\(keyPacked(centers)),\"counts\":\(keyPacked(counts))"
+      + ",\"width\":\(keyNumber(width))}"
   case .family(let members):
-    return "{\"kind\":\"family\",\"members\":\(list(members))}"
+    return "{\"kind\":\"family\",\"members\":\(keyList(members))}"
   case .data(let values):
-    return "{\"kind\":\"data\",\"values\":\(packed(values))}"
+    return "{\"kind\":\"data\",\"values\":\(keyPacked(values))}"
   case .lazy(let cols, let body):
-    return "{\"kind\":\"lazy\",\"cols\":\(columns(cols)),\"body\":\(exprKey(body))}"
+    return "{\"kind\":\"lazy\",\"cols\":\(keyColumns(cols)),\"body\":\(exprKey(body))}"
   case .text(let values):
     return "{\"kind\":\"text\",\"values\":[\(values.map(jsonString).joined(separator: ","))]}"
   case .loop(let params, let seeds, let body, let limit):
     return "{\"kind\":\"loop\",\"params\":[\(params.map(jsonString).joined(separator: ","))]"
-      + ",\"seeds\":\(list(seeds)),\"body\":\(exprKey(body)),\"limit\":\(limit)}"
+      + ",\"seeds\":\(keyList(seeds)),\"body\":\(exprKey(body)),\"limit\":\(limit)}"
   }
 }
 

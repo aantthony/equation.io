@@ -60,26 +60,65 @@ private func chain(_ n: Int, first: String, _ link: (Int) -> String, last: Strin
 /// different way down. `most`: the deepest worth asking for, where another
 /// limit of the site's answers first (a Σ expands to 500 terms at most).
 private let deepShapes: [(name: String, most: Int, rows: @Sendable (Int) -> [String])] = [
-  ("sum", 4096, { n in ["y = " + terms(n) { "sin(\($0) x)" }] }),
-  ("d/dx sum", 4096, { n in ["y = d/dx (" + terms(n) { "sin(\($0) x)" } + ")"] }),
-  ("d/dx product", 4096, { n in ["y = d/dx (" + terms(n, { "sin(\($0) x)" }, " ") + ")"] }),
-  ("nested", 4096, { n in ["y = " + nested(n, "sin(", "x", ")")] }),
-  ("d/dx nested", 4096, { n in ["y = d/dx " + nested(n, "sin(", "x", ")")] }),
-  ("power", 4096, { n in ["y = " + terms(n, { _ in "x" }, "^")] }),
-  ("numbers", 4096, { n in [terms(n, String.init)] }),
-  ("constant", 4096, { n in ["a = " + terms(n) { "sin(\($0))" }, "y = a x"] }),
-  ("implicit", 4096, { n in [terms(n) { "sin(\($0) x y)" } + " = 1"] }),
-  ("region", 4096, { n in ["y < " + terms(n) { "sin(\($0) x)" }] }),
-  ("surface", 4096, { n in ["z = " + terms(n) { "sin(\($0) x y)" }] }),
+  ("sum", 640, { n in ["y = " + terms(n) { "sin(\($0) x)" }] }),
+  ("d/dx sum", 640, { n in ["y = d/dx (" + terms(n) { "sin(\($0) x)" } + ")"] }),
+  ("d/dx product", 640, { n in ["y = d/dx (" + terms(n, { "sin(\($0) x)" }, " ") + ")"] }),
+  ("nested", 640, { n in ["y = " + nested(n, "sin(", "x", ")")] }),
+  ("d/dx nested", 640, { n in ["y = d/dx " + nested(n, "sin(", "x", ")")] }),
+  ("power", 640, { n in ["y = " + terms(n, { _ in "x" }, "^")] }),
+  ("numbers", 640, { n in [terms(n, String.init)] }),
+  ("constant", 640, { n in ["a = " + terms(n) { "sin(\($0))" }, "y = a x"] }),
+  ("implicit", 640, { n in [terms(n) { "sin(\($0) x y)" } + " = 1"] }),
+  ("region", 640, { n in ["y < " + terms(n) { "sin(\($0) x)" }] }),
+  ("surface", 640, { n in ["z = " + terms(n) { "sin(\($0) x y)" }] }),
   ("sigma", 500, { n in ["y = sum(k=1..\(n), sin(k x))"] }),
-  ("composed", 4096, { n in ["f(x) = sin(x) + 1", "y = " + nested(n, "f(", "x", ")")] }),
-  ("list", 4096, { n in ["[1, 2, 3] + " + terms(n) { "sin(\($0))" }] }),
-  ("points", 4096, { n in ["A = (1, 2)", terms(n) { _ in "A" }] }),
-  ("curve", 4096, { n in ["(" + terms(n) { "sin(\($0) t)" } + ", cos(t))"] }),
-  ("cases", 4096, { n in ["y = " + nested(n, "{x > 1: ", "x", ", 0}")] }),
-  ("complex", 4096, { n in ["z = " + terms(n) { "e^(\($0) i)" }, "|z| x"] }),
-  ("field", 4096, { n in ["r = " + terms(n) { "sin(\($0) x)" }, "r = 1"] }),
+  ("composed", 640, { n in ["f(x) = sin(x) + 1", "y = " + nested(n, "f(", "x", ")")] }),
+  ("list", 640, { n in ["[1, 2, 3] + " + terms(n) { "sin(\($0))" }] }),
+  ("points", 640, { n in ["A = (1, 2)", terms(n) { _ in "A" }] }),
+  ("curve", 640, { n in ["(" + terms(n) { "sin(\($0) t)" } + ", cos(t))"] }),
+  ("cases", 640, { n in ["y = " + nested(n, "{x > 1: ", "x", ", 0}")] }),
+  ("complex", 640, { n in ["z = " + terms(n) { "e^(\($0) i)" }, "|z| x"] }),
+  ("field", 640, { n in ["r = " + terms(n) { "sin(\($0) x)" }, "r = 1"] }),
   ("quadrature", 1, { _ in ["a = interval(1, 2)", "y = int[0..x] a q dq"] }),
+]
+
+/// Deep rows of the kinds a plain row's passes do not reach: matrices and
+/// tensors, the algebras, integrals, systems, complex numbers, intervals,
+/// random variables, sequences, states, the views that map a panel.
+private let passShapes: [(name: String, most: Int, rows: @Sendable (Int) -> [String])] = [
+  ("multivector", 640, { n in [terms(n) { "\($0) e_x" } + " + e_xy"] }),
+  ("matrix", 640, { n in ["M = ((1, 2), (3, 4))", "(" + terms(n) { _ in "M" } + ") (1, 1)"] }),
+  ("matrix product", 640, { n in ["M = ((1, 2), (3, 4))", terms(n, { _ in "M" }, " ") + " (1, 1)"] }),
+  ("integral", 640, { n in ["int[0..1] (" + terms(n) { "sin(\($0) x)" } + ") dx"] }),
+  ("area", 640, { n in ["y = int[0..x] (" + terms(n) { "sin(\($0) q)" } + ") dq"] }),
+  ("system", 640, { n in ["(" + terms(n) { "sin(\($0) x)" } + " + y, y - x) = (0, 0)"] }),
+  ("complex curve", 640, { n in ["y = re(" + terms(n) { "e^(\($0) i x)" } + ")"] }),
+  ("complex map", 640, { n in ["w^2 + " + terms(n) { "\($0) w" } + " = 1"] }),
+  ("interval", 640, { n in ["a = interval(0, 1)", "y = " + terms(n) { "a sin(\($0) x)" }] }),
+  ("random variable", 640, { n in ["X ~ Normal(0, 1)", "E(" + terms(n) { "sin(\($0) X)" } + ")"] }),
+  ("density", 640, { n in ["X ~ Uniform(0, 1)", terms(n) { _ in "X" }] }),
+  ("sequence", 640, { n in ["a_n = " + terms(n) { "sin(\($0) n)" }] }),
+  ("recurrence rule", 640, { n in ["a_1 = 1", "a_{n+1} = " + terms(n) { "sin(\($0) a_n)" }] }),
+  ("state", 640, { n in ["s' = " + terms(n) { "sin(\($0) s)" }, "s(0) = 1", "s", "(t, s)"] }),
+  ("count", 640, { n in ["count({" + terms(n) { "sin(\($0) x)" } + " > 0, 0 < x < 1})"] }),
+  ("implicit surface", 640, { n in [terms(n) { "sin(\($0) x y z)" } + " = 1"] }),
+  ("vector field", 640, { n in ["(" + terms(n) { "sin(\($0) y)" } + ", x)"] }),
+  ("space curve", 640, { n in ["(" + terms(n) { "sin(\($0) u)" } + ", cos(u), u)"] }),
+  ("parametric surface", 640, { n in ["(u, v, " + terms(n) { "sin(\($0) u v)" } + ")"] }),
+  ("polygon", 640, { n in ["polygon((0, 0), (1, 0), (" + terms(n) { "sin(\($0) t)" } + ", 1))"] }),
+  ("orbit", 640, { n in ["s' = -s", "s(0) = 1", "(" + terms(n) { "sin(\($0) s)" } + ")(0..1)"] }),
+  ("mapped view", 640, { n in ["view(x = 10^X)", "y = " + terms(n) { "sin(\($0) x)" }] }),
+  ("plane map", 640, { n in ["view((x, y) = (Y cos(X), Y sin(X)))", "y = " + terms(n) { "sin(\($0) x)" }] }),
+  ("fit", 640, { n in ["X = [1, 2, 3]", "Y = [2, 4, 7]", "Y ~ a X + " + terms(n) { "sin(\($0))" }] }),
+  ("list of curves", 640, { n in ["y = [1, 2] x + " + terms(n) { "sin(\($0) x)" }] }),
+  ("lattice", 640, { n in ["c_0[i] = {i = 0: 1, 0}", "c_{n+1}[i] = mod(" + terms(n) { _ in "c_n[i-1]" } + ", 2)"] }),
+  ("graph", 640, { n in ["graph(1, 2, " + terms(n) { "sin(\($0))" } + ")"] }),
+  ("condition", 640, { n in ["within = " + terms(n) { "sin(\($0) x)" } + " > 0", "y = {within: 1}"] }),
+  ("tensor", 640, { n in ["T = ((1, 2, 3), (4, 5, 6))", terms(n) { _ in "T" }] }),
+  ("point list", 640, { n in ["P = [(1, 2), (3, 4)]", terms(n) { _ in "P" }] }),
+  ("surface panel", 640, { n in
+    ["on((X, Y, Z) = (x, y, x y), x = -1..1, y = -1..1)", "y = " + terms(n) { "sin(\($0) x)" }]
+  }),
 ]
 
 /// Documents of `n` definitions, each reading the one before: read one inside
@@ -142,7 +181,8 @@ private func padded(_ name: String) -> String { name.padding(toLength: 24, withP
   @Test(arguments: [smallestStack, 1 << 20, 8 << 20])
   func theDeepestRowsFitTheirStack(stack: Int) {
     if probing() { print("  on \(stack >> 10) KB, \(depthLimit(on: stack)) levels:") }
-    for (name, most, rows) in deepShapes {
+    // (Every pass on the smallest stack; the plain shapes on the larger ones too, where the limit is deeper.)
+    for (name, most, rows) in stack == smallestStack ? deepShapes + passShapes : deepShapes {
       // The deepest n that is not refused.
       func refused(_ n: Int) -> Bool { errors(rows(n), on: stack).contains(stackExceeded) }
       var (fits, over) = (1, most)
@@ -174,7 +214,7 @@ private func padded(_ name: String) -> String { name.padding(toLength: 24, withP
   /// words — the engine's, where a stack runs out there — on the smallest
   /// stack, and nothing else in the document is the worse for it.
   @Test func rowsTooDeepSaySo() {
-    for (name, most, rows) in deepShapes where most == 4096 {
+    for (name, most, rows) in deepShapes where most == 640 {
       let document = rows(20_000) + ["y = x"]
       let answer = Answer<[RowAnalysis]>([])
       let used = stackUse(smallestStack) { answer.value = analyze(document).rows }

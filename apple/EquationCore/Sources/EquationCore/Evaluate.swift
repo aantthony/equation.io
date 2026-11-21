@@ -272,6 +272,7 @@ public func evaluate(_ e: Expr, _ env: [String: Double]) throws -> Double {
   return try evaluate(e, &scope)
 }
 
+@inline(never)
 private func unbound(_ name: String) -> LanguageError { LanguageError("Unbound variable: \(name)") }
 
 // (Numbers, names and arithmetic here; a call and the rarer kinds in functions
@@ -328,6 +329,7 @@ private func evaluateCall(_ e: Expr, _ env: inout [String: Double]) throws -> Do
 }
 
 /// A Σ/Π that survived resolve, or a recurrence's term; nil for a call that is neither.
+@inline(never)
 private func evaluateBinder(
   _ e: Expr, _ name: String, _ args: [Expr], _ env: inout [String: Double]
 ) throws -> Double? {
@@ -342,6 +344,7 @@ private func evaluateBinder(
   return nil
 }
 
+@inline(never)
 private func unknownFunction(_ name: String) -> LanguageError {
   // (A list as the resolver marks it: Expr.swift, "List identity".)
   if name == LIST_ID || name == LIST_ORIGIN || name == LIST_SEQ {
@@ -357,6 +360,7 @@ private func unknownFunction(_ name: String) -> LanguageError {
 }
 
 /// What `evaluate` says of a kind that has no value as a number.
+@inline(never)
 private func notANumber(_ e: Expr) -> LanguageError {
   switch e {
   case .ineq:

@@ -191,6 +191,7 @@ final class GeomContext {
   }
 
   /// A sum, product or quotient whose sides `a` and `b` are tensors, or are not (`tensorOf`, case .bin).
+  @inline(never)
   private func tensorOfSides(_ op: BinOp, _ lhs: Expr, _ rhs: Expr, _ a: Tensor?, _ b: Tensor?) throws -> Tensor? {
     if a == nil && b == nil {
       // T Q with T a tuple of points: the consumer reads it as a matrix,
@@ -279,12 +280,6 @@ final class GeomContext {
     if !matsPossible { return nil }
     if try lowerMv(e) != nil { return nil }
     if let hit = matSeen[e] { return hit }
-    func scalar(_ n: Expr, _ what: String) throws -> Expr {
-      guard case .scalar(let value) = try lo(n) else {
-        throw LanguageError("Cannot \(what) a matrix by a point — M v applies it.")
-      }
-      return value
-    }
     // ⊗, ∧, contract and tensors of other shapes: a matrix when square.
     // Matrix algebra reads its own spine first (e^(th J) needs th kept
     // apart), and a product of tensors it cannot read comes back square here.
@@ -297,101 +292,134 @@ final class GeomContext {
       case .vec, .var: true
       default: tensorOp(e)
       }
-    func found() throws -> MatValue? {
-      if first, let t = try lowerTensor(e) { return toMat(t).map { MatValue(m: $0) } }
-      switch e {
-      case .var(let name):
-        return getMat(name).map { MatValue(m: $0) }
-      case .neg(let inner):
-        return try lowerMat(inner).map(matNeg)
-      case .bin(let op, let lhs, let rhs, _):
-        if op == .pow {
-          if let power = try lowerMat(rhs) {
-            if !isE(lhs) { throw LanguageError("Only e takes a matrix power: e^(a J) is the rotation by a.") }
-            return MatValue(m: try expOf(power))
-          }
-          guard let a = try lowerMat(lhs) else { return nil }
-          return MatValue(m: try matPow(a.m, writtenPower(rhs)))
-        }
-        let a = try lowerMat(lhs)
-        let b = try lowerMat(rhs)
-        if a == nil && b == nil { return nil }
-        switch op {
-        case .add, .sub:
-          guard let a, let b else {
-            let verb = op == .add ? "add" : "subtract"
-            // A point beside a tuple of points moves each of them: the point
-            // is added to every row, wherever T is written.
-            guard let p = items(try lo(a != nil ? rhs : lhs)) else {
-              throw LanguageError("Cannot \(verb) a matrix and a number — use a multiple of the identity.")
-            }
-            let m = (a ?? b)!.m
-            if p.count != m[0].count {
-              throw LanguageError(
-                "Cannot \(verb) a \(p.count)D point and a tuple of \(m[0].count)D points — "
-                  + "each row takes a point of its own size.")
-            }
-            func combine(_ x: Expr, _ y: Expr) -> Expr { op == .add ? add(x, y) : sub(x, y) }
-            return MatValue(
-              m: m.map { row in
-                row.enumerated().map { c, entry in a != nil ? combine(entry, p[c]) : combine(p[c], entry) }
-              })
-          }
-          return MatValue(m: try matAdd(a.m, b.m, minus: op == .sub))
-        case .mul:
-          if let a, let b { return MatValue(m: try matMul(a.m, b.m)) }
-          // M v is a vector, not a matrix: the caller applies it.
-          if let a {
-            guard case .scalar(let s) = try lo(rhs) else { return nil }
-            return matScale(a, s)
-          }
-          return matScale(b!, try scalar(lhs, "multiply"))
-        case .div:
-          guard let a, b == nil else {
-            throw LanguageError(
-              "Cannot divide by a matrix — multiply by M^-1. (a/2J reads as a/(2J): write a/2 J.)")
-          }
-          return matScale(a, div(.num(1), try scalar(rhs, "divide")))
-        case .pow:
-          return nil
-        }
-      case .vec(let parts):
-        // A tuple of rows — ((a, b), (c, d)), or named points (A, B) — is a
-        // matrix when it is square. Anything else is left to lower(), which
-        // says what that tuple is instead.
-        var rows: [[Expr]] = []
-        for part in parts {
-          guard let row = items(try lo(part)) else { return nil }
-          rows.append(row)
-        }
-        return matrixFromRows(rows).map { MatValue(m: $0) }
-      case .call(let name, let args):
-        if name == "exp" && args.count == 1 {
-          return try lowerMat(args[0]).map { MatValue(m: try expOf($0)) }
-        }
-        if name == "transpose" && args.count == 1 {
-          guard let a = try lowerMat(args[0]) else {
-            throw LanguageError("transpose takes a matrix — define one with M = ((a, b), (c, d)).")
-          }
-          return MatValue(m: transposeOf(a.m))
-        }
-        // cross(n, v) with its v left off: the matrix of v ↦ n × v.
-        if name == "cross" && args.count == 1 {
-          guard let n = items(try lo(args[0])), n.count == 3 else {
-            throw LanguageError(
-              "cross(n) is the rotation generator about a 3D axis: e^(a cross((0, 0, 1))) v.")
-          }
-          return MatValue(m: hatOf(n))
-        }
-        return nil
-      default:
-        return nil
-      }
-    }
-    var value = try found()
+    var value = try matOf(e, first)
     if value == nil && !first { value = try square() }
     matSeen[e] = .some(value)
     return value
+  }
+
+  // (`lowerMat` in pieces: it reads a row a frame per level, and a debug
+  // build's frame holds every case's temporaries at once.)
+  private func scalarBeside(_ n: Expr, _ what: String) throws -> Expr {
+    guard case .scalar(let value) = try lo(n) else {
+      throw LanguageError("Cannot \(what) a matrix by a point — M v applies it.")
+    }
+    return value
+  }
+
+  private func matOf(_ e: Expr, _ first: Bool) throws -> MatValue? {
+    if first, let t = try lowerTensor(e) { return toMat(t).map { MatValue(m: $0) } }
+    switch e {
+    case .var(let name):
+      return getMat(name).map { MatValue(m: $0) }
+    case .neg(let inner):
+      return try lowerMat(inner).map(matNeg)
+    case .bin:
+      return try matOfBin(e)
+    case .vec:
+      return try matOfVec(e)
+    case .call:
+      return try matOfCall(e)
+    default:
+      return nil
+    }
+  }
+
+  private func matOfBin(_ e: Expr) throws -> MatValue? {
+    guard case .bin(let op, let lhs, let rhs, _) = e else { return nil }
+    if op == .pow {
+      if let power = try lowerMat(rhs) {
+        if !isE(lhs) { throw LanguageError("Only e takes a matrix power: e^(a J) is the rotation by a.") }
+        return MatValue(m: try expOf(power))
+      }
+      guard let a = try lowerMat(lhs) else { return nil }
+      return MatValue(m: try matPow(a.m, writtenPower(rhs)))
+    }
+    let a = try lowerMat(lhs)
+    let b = try lowerMat(rhs)
+    return try matOfSides(op, lhs, rhs, a, b)
+  }
+
+  private func matOfVec(_ e: Expr) throws -> MatValue? {
+    guard case .vec(let parts) = e else { return nil }
+    // A tuple of rows — ((a, b), (c, d)), or named points (A, B) — is a
+    // matrix when it is square. Anything else is left to lower(), which
+    // says what that tuple is instead.
+    var rows: [[Expr]] = []
+    for part in parts {
+      guard let row = items(try lo(part)) else { return nil }
+      rows.append(row)
+    }
+    return matrixFromRows(rows).map { MatValue(m: $0) }
+  }
+
+  private func matOfCall(_ e: Expr) throws -> MatValue? {
+    guard case .call(let name, let args) = e else { return nil }
+    if name == "exp" && args.count == 1 {
+      return try lowerMat(args[0]).map { MatValue(m: try expOf($0)) }
+    }
+    if name == "transpose" && args.count == 1 {
+      guard let a = try lowerMat(args[0]) else {
+        throw LanguageError("transpose takes a matrix — define one with M = ((a, b), (c, d)).")
+      }
+      return MatValue(m: transposeOf(a.m))
+    }
+    // cross(n, v) with its v left off: the matrix of v ↦ n × v.
+    if name == "cross" && args.count == 1 {
+      guard let n = items(try lo(args[0])), n.count == 3 else {
+        throw LanguageError(
+          "cross(n) is the rotation generator about a 3D axis: e^(a cross((0, 0, 1))) v.")
+      }
+      return MatValue(m: hatOf(n))
+    }
+    return nil
+  }
+
+  /// A sum, product or quotient whose sides `a` and `b` are matrices, or are not (`matOf`, case .bin).
+  @inline(never)
+  private func matOfSides(
+    _ op: BinOp, _ lhs: Expr, _ rhs: Expr, _ a: MatValue?, _ b: MatValue?
+  ) throws -> MatValue? {
+    if a == nil && b == nil { return nil }
+    switch op {
+    case .add, .sub:
+      guard let a, let b else {
+        let verb = op == .add ? "add" : "subtract"
+        // A point beside a tuple of points moves each of them: the point
+        // is added to every row, wherever T is written.
+        guard let p = items(try lo(a != nil ? rhs : lhs)) else {
+          throw LanguageError("Cannot \(verb) a matrix and a number — use a multiple of the identity.")
+        }
+        let m = (a ?? b)!.m
+        if p.count != m[0].count {
+          throw LanguageError(
+            "Cannot \(verb) a \(p.count)D point and a tuple of \(m[0].count)D points — "
+              + "each row takes a point of its own size.")
+        }
+        func combine(_ x: Expr, _ y: Expr) -> Expr { op == .add ? add(x, y) : sub(x, y) }
+        return MatValue(
+          m: m.map { row in
+            row.enumerated().map { c, entry in a != nil ? combine(entry, p[c]) : combine(p[c], entry) }
+          })
+      }
+      return MatValue(m: try matAdd(a.m, b.m, minus: op == .sub))
+    case .mul:
+      if let a, let b { return MatValue(m: try matMul(a.m, b.m)) }
+      // M v is a vector, not a matrix: the caller applies it.
+      if let a {
+        guard case .scalar(let s) = try lo(rhs) else { return nil }
+        return matScale(a, s)
+      }
+      return matScale(b!, try scalarBeside(lhs, "multiply"))
+    case .div:
+      guard let a, b == nil else {
+        throw LanguageError(
+          "Cannot divide by a matrix — multiply by M^-1. (a/2J reads as a/(2J): write a/2 J.)")
+      }
+      return matScale(a, div(.num(1), try scalarBeside(rhs, "divide")))
+    case .pow:
+      return nil
+    }
   }
 
   // MARK: What lower() asks

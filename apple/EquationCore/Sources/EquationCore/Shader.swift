@@ -451,6 +451,7 @@ public func uniformName(_ p: String) -> String {
 }
 
 /// A power, its sides written already (the `pow` of `toGLSL`).
+@inline(never)
 private func powGLSL(_ lhs: Expr, _ rhs: Expr, _ a: String, _ b: String) -> String {
   if case .num(let n) = rhs, n == n.rounded(), n >= 1, n <= 8 {
     // Small integer powers: expand to products (fast, exact for negative

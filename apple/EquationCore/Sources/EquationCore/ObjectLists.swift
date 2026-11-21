@@ -213,6 +213,18 @@ private func recover<T>(_ run: () throws -> T) throws -> T? {
   }
 }
 
+/// `n` rewritten from the top down: `visit` answers the node that takes a
+/// node's place — handed the walk, for the parts it keeps — or nil for one
+/// whose children are walked. (The walk is not nested in `lowerObjects`, for
+/// the reason `mapIndices` is not.)
+private func rewriteNodes(
+  _ n: Expr, _ visit: @escaping (Expr, (Expr) throws -> Expr) throws -> Expr?
+) throws -> Expr {
+  func walk(_ x: Expr) throws -> Expr { try rewriteNodes(x, visit) }
+  if let replaced = try visit(n, walk) { return replaced }
+  return try mapChildren(n, walk)
+}
+
 /// `n` with every index in it replaced by `indexed` of it. (Not a function
 /// nested in `lowerObjects`: one that walks by handing itself on holds a
 /// copy of all it captures in every frame.)
@@ -424,10 +436,13 @@ func lowerObjects(_ e: Expr, _ defs: BuiltDefs, _ opts: ResolveOpts, named: Bool
   /// Every `comp` whose value is a computed point list, replaced by the list
   /// of that coordinate — over the value's own instances, so they still zip
   /// (`settleComps`).
-  func settleComps(_ n: Expr) throws -> Expr {
+  func settleComps(_ n: Expr) throws -> Expr { try rewriteNodes(n, settled) }
+  /// What `settleComps` makes of one node, given the walk for its parts; nil for a node whose
+  /// children are simply walked.
+  func settled(_ n: Expr, _ walk: (Expr) throws -> Expr) throws -> Expr? {
     switch n {
     case .comp(let rawValue, let index, let arity, let functionName):
-      let value = try settleComps(rawValue)
+      let value = try walk(rawValue)
       let call = Expr.comp(value: value, index: index, arity: arity, functionName: functionName)
       // (Anything else — one point, a wrong dimension — is the ordinary path's to judge.)
       guard let pts = try recover({ try lowerObjects(value, defs, opts, named: true) }), pts.isList,
@@ -446,13 +461,13 @@ func lowerObjects(_ e: Expr, _ defs: BuiltDefs, _ opts: ResolveOpts, named: Bool
         throw LanguageError(
           "\(name) is not defined for tensors — total, mean and count take them entry by entry.")
       }
-      return try mapChildren(n, settleComps)
+      return nil
     case .call(let name, let args) where REDUCES_POINTS.contains(name) && args.count == 1:
       // count(2 P), mean(R P): a reduction takes the computed multiset of
       // points whole, rather than one member per point.
       guard var pts = try recover({ try lowerObjects(args[0], defs, opts, named: true) }), pts.isList,
         !pts.items.isEmpty
-      else { return try mapChildren(n, settleComps) }
+      else { return nil }
       // Points that meet and join made are the tuples they are; lines and
       // planes count, but have no total or mean.
       let flats = pts.items.compactMap(flatOfNode)
@@ -478,10 +493,10 @@ func lowerObjects(_ e: Expr, _ defs: BuiltDefs, _ opts: ResolveOpts, named: Bool
         }
         return tensorNode(Tensor(shape: tensors[0].shape, data: data))
       }
-      return try mapChildren(n, settleComps)
+      return nil
     default:
       if listLiteral(n) != nil || settledList(n) != nil { return n }
-      return try mapChildren(n, settleComps)
+      return nil
     }
   }
 
@@ -601,10 +616,26 @@ func lowerObjects(_ e: Expr, _ defs: BuiltDefs, _ opts: ResolveOpts, named: Bool
     // own algebra (2 M, M v). Those rows are a list only where a call asks
     // for points — hull(M), distance(P, A) — and there still not as the
     // matrix factor of a product.
+    // (In three functions: what a node is taken as whole, the arithmetic a row
+    // is mostly made of, and the rest — the walk is a frame per level of the
+    // row, and what it tries of each node is as deep again.)
     func visit(_ node: Expr) throws -> Expr { try visitNode(node, true) }
     func visitNode(_ node: Expr, _ asMatrix: Bool) throws -> Expr {
-      func visit(_ n: Expr) throws -> Expr { try visitNode(n, true) }
-      func within(_ n: Expr) throws -> Expr { try visitNode(n, asMatrix) }
+      if let whole = try visitWhole(node, asMatrix) { return whole }
+      switch node {
+      case .bin(let op, let a, let b, let glyph):
+        return .bin(op, try visitNode(a, asMatrix || op == .mul), try visitNode(b, asMatrix), glyph: glyph)
+      case .neg(let a):
+        return .neg(try visitNode(a, asMatrix))
+      default:
+        return try visitParts(node, asMatrix)
+      }
+    }
+    /// A node taken whole: a loop's own name, a multiset of matrices, a
+    /// figure a transform is around, or a list's values; nil for one whose
+    /// parts are visited.
+    @inline(never)
+    func visitWhole(_ node: Expr, _ asMatrix: Bool) throws -> Expr? {
       if case .var(let name) = node, bound.contains(name) { return node }
       if asMatrix, case .var(let name) = node, defs.mats.has(name) {
         // M = ((a, 0), (0, 1)) is a multiset of matrices: one per member,
@@ -625,6 +656,12 @@ func lowerObjects(_ e: Expr, _ defs: BuiltDefs, _ opts: ResolveOpts, named: Bool
         lists.append(values)
         return .call(MEMBER, [.num(Double(lists.count - 1))])
       }
+      return nil
+    }
+    @inline(never)
+    func visitParts(_ node: Expr, _ asMatrix: Bool) throws -> Expr {
+      func visit(_ n: Expr) throws -> Expr { try visitNode(n, true) }
+      func within(_ n: Expr) throws -> Expr { try visitNode(n, asMatrix) }
       // A piecewise condition is decided per member, never a list of its
       // own: as a value `k < 3` is the members kept, so taking it whole
       // would drop the comparison. Its sides are what expand — a chain's
@@ -671,10 +708,6 @@ func lowerObjects(_ e: Expr, _ defs: BuiltDefs, _ opts: ResolveOpts, named: Bool
         }
         if settledList(node) != nil { return node }
         return .call(name, try args.map { try visitNode($0, false) })
-      case .bin(let op, let a, let b, let glyph):
-        return .bin(op, try visitNode(a, asMatrix || op == .mul), try within(b), glyph: glyph)
-      case .neg(let a):
-        return .neg(try within(a))
       case .vec(let items):
         return .vec(try items.map(within))
       case .comp(let value, let index, let arity, let functionName):

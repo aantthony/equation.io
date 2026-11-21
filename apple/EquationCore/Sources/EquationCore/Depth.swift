@@ -50,8 +50,9 @@ private let deepestExpr = 512
 /// (A quarter of the stack is left alone besides, for the caller's.)
 private let stackReserve = 32 << 10
 /// What a level of the deepest walk costs: measured at 3.6 KB in a debug
-/// build (a list beside a deep sum) and under 0.7 KB in an optimized one
-/// (calls nested in calls), by StackDepthTests.
+/// build (a list beside a deep sum) and 0.45 KB in an optimized one (calls
+/// nested in calls), by StackDepthTests. The optimized figure is set half as
+/// large again: what gives the smallest stack its 512 levels, and no more.
 #if DEBUG
   private let stackBytesPerLevel = 3600
 #else
@@ -66,6 +67,7 @@ let maxDefinitionNesting = 32
 
 /// Whether `e` nests deeper than `limit`, found over a stack of its own:
 /// this is what is asked before anything recursive may be.
+@inline(never)
 func exceedsDepth(_ e: Expr, _ limit: Int = maxExprDepth) -> Bool {
   // (A leaf is its own answer; most of what is asked is small.)
   switch e {
@@ -95,6 +97,7 @@ func exceedsDepth(_ e: Expr, _ limit: Int = maxExprDepth) -> Bool {
 }
 
 /// How deep `e` nests, counted no further than `cap` + 1.
+@inline(never)
 func exprDepth(_ e: Expr, upTo cap: Int = maxExprDepth) -> Int {
   var deepest = 0
   var pending: [(Expr, Int)] = [(e, 1)]
@@ -113,6 +116,7 @@ func exprDepth(_ e: Expr, upTo cap: Int = maxExprDepth) -> Int {
 /// a tree far deeper than the limit cannot even be let go of: releasing one
 /// is a frame per level too. (A name the body binds over again is counted
 /// as replaced: the answer errs toward refusing.)
+@inline(never)
 func substitutionExceedsDepth(_ body: Expr, _ env: [String: Expr], _ limit: Int = maxExprDepth) -> Bool {
   var depths: [String: Int] = [:]
   var pending: [(Expr, Int)] = [(body, 1)]
@@ -136,6 +140,7 @@ func substitutionExceedsDepth(_ body: Expr, _ env: [String: Expr], _ limit: Int 
 /// bound, from what each rule of `diff` puts above the derivatives of its
 /// operands (a sum one level, a product two, a quotient three, a power or a
 /// call of several arguments five), asked before the derivative is made.
+@inline(never)
 func derivativeMayExceedDepth(_ e: Expr, _ limit: Int = maxExprDepth) -> Bool {
   var pending: [(Expr, Int, Int)] = [(e, 1, 0)]
   var visited = 0
@@ -163,6 +168,7 @@ func derivativeMayExceedDepth(_ e: Expr, _ limit: Int = maxExprDepth) -> Bool {
 }
 
 /// `e`, or the engine's error for one too deep to walk.
+@inline(never)
 @discardableResult
 func notTooDeep(_ e: Expr) throws(LanguageError) -> Expr {
   if exceedsDepth(e) { throw LanguageError(stackExceeded) }

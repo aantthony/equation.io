@@ -326,6 +326,7 @@ struct Resolver {
 
   private func resolveChildren(_ e: Expr) throws -> Expr { try mapChildren(e, resolve) }
 
+  @inline(never)
   private func resolveName(_ name: String) throws -> Expr? {
     if let term = try opts.sequenceTerm?(name, nil, opts.openVars) { return term }
     if let value = try namedInterval(name) { return value }
@@ -344,6 +345,7 @@ struct Resolver {
   }
 
   /// A product or quotient led by ∇, Σ or ∫, which reads the chain after it.
+  @inline(never)
   private func resolveHeaded(_ e: Expr, _ op: BinOp) throws -> Expr? {
     // `∇f`, `∇·F`, `∇×F`, `∇²f` (VectorCalculus.swift).
     if let nabla = try splitNablaChain(e) { return try resolve(nabla) }
@@ -355,6 +357,7 @@ struct Resolver {
     return nil
   }
 
+  @inline(never)
   private func joinBin(_ op: BinOp, _ a: Expr, _ b: Expr, _ glyph: ProductGlyph?) throws -> Expr {
     if op == .div, let d = try matchDeriv(a, b) { return d }
     if glyph != nil { return .bin(op, a, b, glyph: glyph) }
@@ -387,6 +390,7 @@ struct Resolver {
     return Expr.Case(cond: try writtenCondition(c.cond, cond), value: try resolve(c.value), bare: c.bare)
   }
 
+  @inline(never)
   private func refuseEqualityCases(_ cases: [Expr.Case]) throws {
     for c in cases {
       guard case .eq = c.cond else { continue }
@@ -422,6 +426,7 @@ struct Resolver {
   }
 
   /// Σ, Π, ∫ and the reductions of one argument, which read their argument unresolved.
+  @inline(never)
   private func resolveBinderCall(_ name: String, _ rawArgs: [Expr]) throws -> Expr? {
     // (A list literal a Σ marked before its terms were written out.)
     if let marked = try resolveMarkedList(name, rawArgs) { return marked }
@@ -457,6 +462,7 @@ struct Resolver {
   }
 
   /// A user function's body with its parameters filled by resolved arguments.
+  @inline(never)
   private func applyFn(_ name: String, _ fn: FnDef, _ args: [Expr]) throws -> Expr {
     let n = fn.params.count
     if fn.recursive { return try resolveRecur(name, n, args) }
@@ -482,6 +488,7 @@ struct Resolver {
   }
 
   /// A call to a builtin, its arguments resolved.
+  @inline(never)
   private func resolveBuiltin(_ name: String, _ args: [Expr]) throws -> Expr {
     if stackFns.contains(name) { return try stackCall(name, args) ?? .call(name, args) }
     if vectorOps.contains(name) { return try vectorCalculus(name, args) }
@@ -737,6 +744,7 @@ private func lowerPointsNeg(_ e: Expr, _ comps: (String) -> [String]?, _ context
 }
 
 /// A sum, product, quotient or power of two lowered values (`lowerPoints`, case .bin).
+@inline(never)
 private func joinPoints(
   _ e: Expr, _ op: BinOp, _ lhs: Expr, _ rhs: Expr, _ glyph: ProductGlyph?, _ a: Lowered, _ b: Lowered,
   _ lo: (Expr) throws -> Lowered
@@ -803,6 +811,7 @@ private func lowerPointsCall(_ e: Expr, _ comps: (String) -> [String]?, _ contex
 }
 
 /// A call of lowered arguments that is no geometry's (`lowerPoints`, case .call).
+@inline(never)
 private func callOfLowered(_ name: String, _ args: [Expr], _ lowered: [Lowered]) throws -> Lowered {
   // sort(P, P.x) orders points by a key, and count, total and mean take
   // any multiset, points included: list lowering does the work, and a

@@ -107,78 +107,46 @@ private func magnitude(_ e: Expr) -> Expr? {
 /// Evaluate an expression column-wise over joint points. Inequalities yield
 /// 1/0 masks (NaN where an operand is NaN), matching evaluate() (lib/dist.ts
 /// `evalCols`).
+/// Two columns under an operator (`evalCols`, case .bin).
+@inline(never)
+private func colsOfSides(_ op: BinOp, _ a: [Double], _ b: [Double], _ n: Int) -> [Double] {
+  var out = [Double](repeating: 0, count: n)
+  switch op {
+  case .add: for i in 0..<n { out[i] = a[i] + b[i] }
+  case .sub: for i in 0..<n { out[i] = a[i] - b[i] }
+  case .mul: for i in 0..<n { out[i] = a[i] * b[i] }
+  case .div: for i in 0..<n { out[i] = a[i] / b[i] }
+  // (Math.pow, not the real odd roots evaluate() takes: as the site's columns do.)
+  case .pow: for i in 0..<n { out[i] = JS.pow(a[i], b[i]) }
+  }
+  return out
+}
+
+// (A function a kind, below: the walk is a frame per level of the expression.)
 func evalCols(_ e: Expr, _ cols: [String: [Double]], _ env: [String: Double], _ n: Int) throws -> [Double] {
   switch e {
   case .index, .range, .eqtest, .comp, .figure, .lazy, .trail, .label, .hist, .family:
     throw LanguageError(structuralDiagnostic(e))
   case .num(let value):
     return [Double](repeating: value, count: n)
-  case .var(let name):
-    if let col = cols[name] { return col }
-    guard let value = env[name] else { throw LanguageError("Unbound variable: \(name)") }
-    return [Double](repeating: value, count: n)
+  case .var:
+    return try evalColsVar(e, cols, env, n)
   case .neg(let inner):
     return try evalCols(inner, cols, env, n).map { -$0 }
   case .bin(let op, let lhs, let rhs, _):
     let a = try evalCols(lhs, cols, env, n)
     let b = try evalCols(rhs, cols, env, n)
-    var out = [Double](repeating: 0, count: n)
-    switch op {
-    case .add: for i in 0..<n { out[i] = a[i] + b[i] }
-    case .sub: for i in 0..<n { out[i] = a[i] - b[i] }
-    case .mul: for i in 0..<n { out[i] = a[i] * b[i] }
-    case .div: for i in 0..<n { out[i] = a[i] / b[i] }
-    // (Math.pow, not the real odd roots evaluate() takes: as the site's columns do.)
-    case .pow: for i in 0..<n { out[i] = JS.pow(a[i], b[i]) }
-    }
-    return out
-  case .call(let name, let argExprs):
-    guard let fn = evalFunctions[name] else { throw LanguageError("Unknown function: \(name)") }
-    let args = try argExprs.map { try evalCols($0, cols, env, n) }
-    return (0..<n).map { i in fn(args.map { $0[i] }) }
-  case .eq(let l, let r):
-    let a = try evalCols(l, cols, env, n)
-    let b = try evalCols(r, cols, env, n)
-    return (0..<n).map { a[$0] - b[$0] }
+    return colsOfSides(op, a, b, n)
+  case .call:
+    return try evalColsCall(e, cols, env, n)
+  case .eq:
+    return try evalColsEq(e, cols, env, n)
   case .ineq:
-    var out = [Double](repeating: 1, count: n)
-    for (op, l, r) in ineqComparisons(e) {
-      let a = try evalCols(l, cols, env, n)
-      let b = try evalCols(r, cols, env, n)
-      for i in 0..<n where !out[i].isNaN {
-        if a[i].isNaN || b[i].isNaN {
-          out[i] = .nan
-          continue
-        }
-        let holds =
-          switch op {
-          case .lt: a[i] < b[i]
-          case .le: a[i] <= b[i]
-          case .gt: a[i] > b[i]
-          case .ge: a[i] >= b[i]
-          }
-        if !holds { out[i] = 0 }
-      }
-    }
-    return out
+    return try evalColsIneq(e, cols, env, n)
   case .loop:
     throw LanguageError("A recursive function cannot be applied to a data column or random variable yet.")
-  case .piecewise(let cases, let otherwise):
-    var out = [Double](repeating: .nan, count: n)
-    var taken = [Bool](repeating: false, count: n)
-    for c in cases {
-      let mask = try evalCols(c.cond, cols, env, n)
-      let val = try evalCols(c.value, cols, env, n)
-      for i in 0..<n where !taken[i] && mask[i] == 1 {
-        out[i] = val[i]
-        taken[i] = true
-      }
-    }
-    if let otherwise {
-      let val = try evalCols(otherwise, cols, env, n)
-      for i in 0..<n where !taken[i] { out[i] = val[i] }
-    }
-    return out
+  case .piecewise:
+    return try evalColsPiecewise(e, cols, env, n)
   case .vec:
     throw LanguageError("Vector in scalar context.")
   case .list, .data:
@@ -186,6 +154,71 @@ func evalCols(_ e: Expr, _ cols: [String: [Double]], _ env: [String: Double], _ 
   case .str, .text:
     throw LanguageError("Text has no numeric value.")
   }
+}
+
+private func evalColsVar(_ e: Expr, _ cols: [String: [Double]], _ env: [String: Double], _ n: Int) throws -> [Double] {
+  guard case .var(let name) = e else { return [] }
+  if let col = cols[name] { return col }
+  guard let value = env[name] else { throw LanguageError("Unbound variable: \(name)") }
+  return [Double](repeating: value, count: n)
+}
+
+private func evalColsCall(_ e: Expr, _ cols: [String: [Double]], _ env: [String: Double], _ n: Int) throws -> [Double] {
+  guard case .call(let name, let argExprs) = e else { return [] }
+  guard let fn = evalFunctions[name] else { throw LanguageError("Unknown function: \(name)") }
+  let args = try argExprs.map { try evalCols($0, cols, env, n) }
+  return (0..<n).map { i in fn(args.map { $0[i] }) }
+}
+
+private func evalColsEq(_ e: Expr, _ cols: [String: [Double]], _ env: [String: Double], _ n: Int) throws -> [Double] {
+  guard case .eq(let l, let r) = e else { return [] }
+  let a = try evalCols(l, cols, env, n)
+  let b = try evalCols(r, cols, env, n)
+  return (0..<n).map { a[$0] - b[$0] }
+}
+
+private func evalColsIneq(_ e: Expr, _ cols: [String: [Double]], _ env: [String: Double], _ n: Int) throws -> [Double] {
+  var out = [Double](repeating: 1, count: n)
+  for (op, l, r) in ineqComparisons(e) {
+    let a = try evalCols(l, cols, env, n)
+    let b = try evalCols(r, cols, env, n)
+    for i in 0..<n where !out[i].isNaN {
+      if a[i].isNaN || b[i].isNaN {
+        out[i] = .nan
+        continue
+      }
+      let holds =
+        switch op {
+        case .lt: a[i] < b[i]
+        case .le: a[i] <= b[i]
+        case .gt: a[i] > b[i]
+        case .ge: a[i] >= b[i]
+        }
+      if !holds { out[i] = 0 }
+    }
+  }
+  return out
+}
+
+private func evalColsPiecewise(
+  _ e: Expr, _ cols: [String: [Double]], _ env: [String: Double], _ n: Int
+) throws -> [Double] {
+  guard case .piecewise(let cases, let otherwise) = e else { return [] }
+  var out = [Double](repeating: .nan, count: n)
+  var taken = [Bool](repeating: false, count: n)
+  for c in cases {
+    let mask = try evalCols(c.cond, cols, env, n)
+    let val = try evalCols(c.value, cols, env, n)
+    for i in 0..<n where !taken[i] && mask[i] == 1 {
+      out[i] = val[i]
+      taken[i] = true
+    }
+  }
+  if let otherwise {
+    let val = try evalCols(otherwise, cols, env, n)
+    for i in 0..<n where !taken[i] { out[i] = val[i] }
+  }
+  return out
 }
 
 /// `e` over columns, unrounded, with the magnitude of each value (see
