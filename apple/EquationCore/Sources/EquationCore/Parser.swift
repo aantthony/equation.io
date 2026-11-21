@@ -55,21 +55,46 @@ struct ParseContext {
   func parse(_ text: String) throws(ParseError) -> Expr {
     let tokens = addImplicitTokens(mergeEmptyBrackets(mergeBracedSubscripts(normalizeTokens(try tokenize(text)))))
     var stack: [PNode] = []
+    // How deep each operand nests (Depth.swift), kept beside it: the tree is
+    // built without recursion, so nothing else stops a sum of a hundred
+    // thousand terms from becoming one no walk — not even its release — can
+    // go down. (Port: the site's parser builds it, and its engine refuses.)
+    var depths: [Int] = []
+    let deepest = maxExprDepth
     try shunting(tokens) { (token: Token) throws(ParseError) in
       if token.type == .operator || token.type == .parenclose {
         guard let op = operatorTable[token.str] else { throw unknownOperator(token) }
         let args = Array(stack.suffix(op.n))
         stack.removeLast(args.count)
         if args.count < op.n { throw ParseError("Incomplete expression.", parse: true) }
+        let depth = (depths.suffix(args.count).max() ?? 0) + (addsLevel(op.kind, args) ? 1 : 0)
+        depths.removeLast(args.count)
+        if depth > deepest { throw ParseError(stackExceeded) }
         stack.append(try apply(op.kind, args))
+        depths.append(depth)
       } else {
         stack.append(try leaf(token))
+        depths.append(1)
       }
     }
     guard stack.count == 1 else { throw ParseError("Incomplete expression.") }
     // A bare top-level comma series (no parens) still reads as a vector.
-    if case .series(let items) = stack[0] { return try seriesToVec(items) }
-    return try asExpr(stack[0])
+    let parsed = if case .series(let items) = stack[0] { try seriesToVec(items) } else { try asExpr(stack[0]) }
+    // (The count above is of operators; the tree is measured too.)
+    if exceedsDepth(parsed) { throw ParseError(stackExceeded) }
+    return parsed
+  }
+
+  /// Whether an operator's node is a level below its operands': a comma only
+  /// lengthens its series, and a bracket around one expression is that expression.
+  private func addsLevel(_ kind: OpKind, _ args: [PNode]) -> Bool {
+    switch kind {
+    case .comma, .eof: return false
+    case .close(let open):
+      if open != "{", case .expr? = args.first { return false }
+      return true
+    default: return true
+    }
   }
 
   private func leaf(_ token: Token) throws(ParseError) -> PNode {

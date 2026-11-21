@@ -736,17 +736,14 @@ func geodesicRow(
   _ args: [Expr], _ surface: SurfaceMap?, _ getFn: @escaping GetFn, _ ropts: ResolveOpts, _ built: BuiltDefs,
   _ constNames: Set<String>, _ moving: Set<String>
 ) throws -> Classified {
-  // (Its surface may run over u's and v's intervals: Interval.swift.)
-  var surfaceOpts = ropts
-  surfaceOpts.intervals = true
   return try classifyGeodesic(
     args, surface: surface,
     surfaceOperand: { arg in
       var written = arg
       if case .var(let name) = arg, try getFn(name) != nil {} else {
-        written = try Resolver(getFn: getFn, opts: surfaceOpts).resolve(arg)
+        written = try Resolver(getFn: getFn, opts: ropts).resolve(arg)
       }
-      return try Resolver(getFn: getFn, opts: surfaceOpts).surfaceOperand("geodesic", written)
+      return try Resolver(getFn: getFn, opts: ropts).surfaceOperand("geodesic", written)
     },
     lower: { try lowerObjects(try Resolver(getFn: getFn, opts: ropts).resolve($0), built, ropts).e },
     constNames: constNames, moving: moving)

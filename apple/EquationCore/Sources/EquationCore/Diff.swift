@@ -102,203 +102,263 @@ private let TWO_OVER_SQRT_PI = 2 / Double.pi.squareRoot()
 
 /// d(e)/d(v). Throws for functions without a usable derivative.
 public func diff(_ e: Expr, _ v: String) throws(DiffError) -> Expr {
+  // (A derivative nests deeper than what it is of — a level or two per
+  // product, quotient and chain rule — so it is measured, as what it is
+  // taken of is: Depth.swift.)
+  if derivativeMayExceedDepth(e) { throw DiffError(stackExceeded) }
+  let derivative = try diffNode(e, v)
+  if exceedsDepth(derivative) { throw DiffError(stackExceeded) }
+  return derivative
+}
+
+// (A kind to a function, below: this walk is a frame per level of the expression, and a debug
+// build's frame holds every case's temporaries at once.)
+private func diffNode(_ e: Expr, _ v: String) throws(DiffError) -> Expr {
   switch e {
   case .num:
     return ZERO
   case .var(let name):
     return name == v ? ONE : ZERO
   case .neg(let a):
-    return neg(try diff(a, v))
+    return neg(try diffNode(a, v))
   case .bin(let op, let a, let b, _):
-    switch op {
-    case .add:
-      let da = try diff(a, v)
-      return add(da, try diff(b, v))
-    case .sub:
-      let da = try diff(a, v)
-      return sub(da, try diff(b, v))
-    case .mul:
-      let da = try diff(a, v)
-      return add(mul(da, b), mul(a, try diff(b, v)))
-    case .div:
-      let da = try diff(a, v)
-      return div(sub(mul(da, b), mul(a, try diff(b, v))), pow(b, .num(2)))
-    case .pow:
-      if let n = numValue(b) {
-        // d(a^n) = n a^(n-1) a'
-        return mul(mul(b, pow(a, .num(n - 1))), try diff(a, v))
-      }
-      if let c = numValue(a) {
-        // d(c^b) = c^b ln(c) b'
-        return mul(mul(pow(a, b), .num(log(c))), try diff(b, v))
-      }
-      // d(a^b) = a^b (b' ln a + b a'/a)
-      let db = try diff(b, v)
-      return mul(pow(a, b), add(mul(db, call("ln", a)), mul(b, div(try diff(a, v), a))))
-    }
-  case .comp(let value, let index, let arity, let functionName):
-    // f(P): a component of the derivative is the derivative of the
-    // component. A value diff() cannot carry (a tuple inside arithmetic)
-    // leaves the whole call to the finite-difference fallback.
-    guard let dv = try? diff(value, v) else {
-      throw DiffError("Cannot differentiate this point.", nonSmooth: true)
-    }
-    return isNumVal(dv, 0) ? ZERO : .comp(value: dv, index: index, arity: arity, functionName: functionName)
+    return try diffBin(op, a, b, v)
+  case .comp:
+    return try diffComp(e, v)
   case .index, .range, .eqtest, .figure, .lazy, .trail, .label, .hist, .family:
     throw DiffError(structuralDiagnostic(e), nonSmooth: true)
   case .call(let name, let args):
-    // A continuous interval's parameter varies on its own, not with x.
-    if name == INTERVAL { return ZERO }
-    // A list with its origin or its axes (Expr.swift): elementwise, and
-    // still the same list (lib/expr.ts `sameList`). One with neither is a
-    // new list, as the node the TypeScript builds for it is: d/dx [x, 2x]^2
-    // chooses [x, 2x] and [1, 2] apart.
-    if name == LIST_ORIGIN || name == LIST_SEQ, args.count == 2 {
-      return .call(name, [args[0], try diff(args[1], v)])
-    }
-    if name == LIST_ID, args.count == 2, case .list(let items) = try diff(args[1], v) { return identifiedList(items) }
-    if name == "atan2" || (name == "atan" && args.count == 2) {
-      // Fewer than two arguments is the TypeScript reading `undefined.kind`.
-      guard args.count >= 2 else { throw DiffError("Cannot read properties of undefined (reading 'kind')") }
-      let (y, x) = (args[0], args[1])
-      let dy = try diff(y, v)
-      let n = sub(mul(dy, x), mul(y, try diff(x, v)))
-      return div(n, add(pow(x, .num(2)), pow(y, .num(2))))
-    }
-    if name == ANGLE_FN && args.count == 4 {
-      // The angle turns as fast as arm v does, less how fast arm u does.
-      // Each rate is its own scaled builtin: spelled out as
-      // (cross′ dot − cross dot′)/(cross² + dot²) it is 0/0 in float32 long
-      // before the angle itself stops being well defined near the vertex.
-      func rate(_ a: Expr, _ b: Expr) throws(DiffError) -> Expr {
-        let da = try diff(a, v)
-        let db = try diff(b, v)
-        return isNumVal(da, 0) && isNumVal(db, 0) ? ZERO : call(ANGLE_RATE_FN, a, b, da, db)
-      }
-      let turning = try rate(args[2], args[3])
-      return sub(turning, try rate(args[0], args[1]))
-    }
-    if name == ANGLE_RATE_FN && args.count == 4 {
-      // Rare (a second derivative): differentiate the unscaled quotient.
-      let (a, b, da, db) = (args[0], args[1], args[2], args[3])
-      return try diff(div(sub(mul(a, db), mul(b, da)), add(mul(a, a), mul(b, b))), v)
-    }
-    if (name == "normalpdf" || name == "normalcdf") && args.count == 3 {
-      // Full chain rule in all three arguments (x, mean, sd may all move).
-      let (x, m, s) = (args[0], args[1], args[2])
-      let z = div(sub(x, m), s)
-      let dx = try diff(x, v)
-      let dm = try diff(m, v)
-      let dz = div(sub(sub(dx, dm), mul(z, try diff(s, v))), s)
-      let pdf = call("normalpdf", x, m, s)
-      if name == "normalcdf" { return mul(mul(pdf, s), dz) }
-      // φ′ = φ·(−z·z′ − s′/s): the −z z′ from the exponent, −s′/s from 1/s.
-      return mul(pdf, sub(mul(neg(z), dz), div(try diff(s, v), s)))
-    }
-    if (name == "min" || name == "max") && args.count >= 2 {
-      // The derivative of whichever argument is chosen; like abs, the kinks
-      // are ignored. clamp(x, lo, hi) arrives here as min(max(x, lo), hi).
-      let (a, b) = (args[0], args[1])
-      if args.count > 2 { return try diff(.call(name, [call(name, a, b)] + args.dropFirst(2)), v) }
-      let da = try diff(a, v)
-      let db = try diff(b, v)
-      if isNumVal(da, 0) && isNumVal(db, 0) { return ZERO }
-      return .piecewise([Expr.Case(cond: .ineq(name == "min" ? .lt : .gt, a, b), value: da)], otherwise: db)
-    }
-    guard args.count == 1 else { throw DiffError("Cannot differentiate \(plainFnName(name)).", nonSmooth: true) }
-    let a = args[0]
-    let da = try diff(a, v)
-    func chain(_ outer: Expr) -> Expr { mul(outer, da) }
-    switch name {
-    case "sin":
-      return chain(call("cos", a))
-    case "cos":
-      return neg(chain(call("sin", a)))
-    case "tan":
-      return chain(div(ONE, pow(call("cos", a), .num(2))))
-    case "asin":
-      return chain(div(ONE, call("sqrt", sub(ONE, pow(a, .num(2))))))
-    case "acos":
-      return neg(chain(div(ONE, call("sqrt", sub(ONE, pow(a, .num(2)))))))
-    case "atan":
-      return chain(div(ONE, add(ONE, pow(a, .num(2)))))
-    case "sinh":
-      return chain(call("cosh", a))
-    case "cosh":
-      return chain(call("sinh", a))
-    case "tanh":
-      return chain(div(ONE, pow(call("cosh", a), .num(2))))
-    case "sech":
-      return neg(chain(mul(call("sech", a), call("tanh", a))))
-    case "asinh":
-      return chain(div(ONE, call("sqrt", add(pow(a, .num(2)), ONE))))
-    case "acosh":
-      return chain(div(ONE, call("sqrt", sub(pow(a, .num(2)), ONE))))
-    case "atanh":
-      return chain(div(ONE, sub(ONE, pow(a, .num(2)))))
-    case "exp":
-      return chain(call("exp", a))
-    case "ln":
-      return div(da, a)
-    case "log":
-      return div(da, mul(a, .num(LN10)))
-    case "sqrt":
-      return div(da, mul(.num(2), call("sqrt", a)))
-    case "abs":
-      return chain(call("sign", a))
-    case "erf":
-      return chain(mul(.num(TWO_OVER_SQRT_PI), call("exp", neg(pow(a, .num(2))))))
-    case "sinc":
-      // (x cos x − sin x)/x² away from 0, and its Taylor polynomial near
-      // 0, where the quotient cancels (and each derivative of it divides
-      // by x once more). Neither branch calls sinc, so differentiating
-      // again nests no piecewise, and the polynomial differentiates in
-      // turn: sinc″, sinc‴, … are right at and around 0 too.
-      let terms = SINC_PRIME_SERIES.map { mul(.num($0.0), pow(a, .num($0.1))) }
-      return chain(
-        .piecewise(
-          [
-            Expr.Case(
-              cond: .ineq(.gt, call("abs", a), .num(SINC_SERIES_BELOW)),
-              value: div(sub(mul(a, call("cos", a)), call("sin", a)), pow(a, .num(2))))
-          ],
-          otherwise: terms.dropFirst().reduce(terms[0], add)))
-    case "coth":
-      return chain(sub(ONE, pow(call("coth", a), .num(2))))
-    default:
-      // floor/mod/… (and gamma: digamma isn't in the language):
-      // no smooth derivative; caller falls back to FD.
-      throw DiffError("Cannot differentiate \(plainFnName(name)).", nonSmooth: true)
-    }
-  case .eq(let l, let r):
-    let dl = try diff(l, v)
-    return sub(dl, try diff(r, v))
+    return try diffCall(name, args, v)
+  case .eq:
+    return try diffEq(e, v)
   case .ineq:
     throw DiffError("Cannot differentiate an inequality.")
   case .vec:
     throw DiffError("Differentiate vector components individually.")
-  case .list(let items):
-    // Elementwise: d/dx [x, x^2] pairs with [x, x^2].
-    for item in items {
-      if case .range = item { throw DiffError("Cannot differentiate a \"..\" range.") }
-    }
-    var out: [Expr] = []
-    for item in items { out.append(try diff(item, v)) }
-    return .list(out)
+  case .list:
+    return try diffList(e, v)
   case .data:
     throw DiffError("Cannot differentiate a list.")
   case .str, .text:
     throw DiffError("Cannot differentiate text.")
-  case .piecewise(let cases, let otherwise):
-    // Branchwise derivative (ignores the boundary points). A case comes out
-    // without its `bare` mark, as the TypeScript rebuilds it.
-    var out: [Expr.Case] = []
-    for c in cases { out.append(Expr.Case(cond: c.cond, value: try diff(c.value, v))) }
-    guard let otherwise else { return .piecewise(out, otherwise: nil) }
-    return .piecewise(out, otherwise: try diff(otherwise, v))
+  case .piecewise:
+    return try diffPiecewise(e, v)
   case .loop:
     // Central difference instead.
     throw DiffError("Cannot differentiate a recursive function.", nonSmooth: true)
+  }
+}
+
+private func diffComp(_ e: Expr, _ v: String) throws(DiffError) -> Expr {
+  guard case .comp(let value, let index, let arity, let functionName) = e else { return e }
+  // f(P): a component of the derivative is the derivative of the
+  // component. A value diff() cannot carry (a tuple inside arithmetic)
+  // leaves the whole call to the finite-difference fallback.
+  guard let dv = try? diffNode(value, v) else {
+    throw DiffError("Cannot differentiate this point.", nonSmooth: true)
+  }
+  return isNumVal(dv, 0) ? ZERO : .comp(value: dv, index: index, arity: arity, functionName: functionName)
+}
+
+private func diffEq(_ e: Expr, _ v: String) throws(DiffError) -> Expr {
+  guard case .eq(let l, let r) = e else { return e }
+  let dl = try diffNode(l, v)
+  return sub(dl, try diffNode(r, v))
+}
+
+private func diffList(_ e: Expr, _ v: String) throws(DiffError) -> Expr {
+  guard case .list(let items) = e else { return e }
+  // Elementwise: d/dx [x, x^2] pairs with [x, x^2].
+  for item in items {
+    if case .range = item { throw DiffError("Cannot differentiate a \"..\" range.") }
+  }
+  var out: [Expr] = []
+  for item in items { out.append(try diffNode(item, v)) }
+  return .list(out)
+}
+
+private func diffPiecewise(_ e: Expr, _ v: String) throws(DiffError) -> Expr {
+  guard case .piecewise(let cases, let otherwise) = e else { return e }
+  // Branchwise derivative (ignores the boundary points). A case comes out
+  // without its `bare` mark, as the TypeScript rebuilds it.
+  var out: [Expr.Case] = []
+  for c in cases { out.append(Expr.Case(cond: c.cond, value: try diffNode(c.value, v))) }
+  guard let otherwise else { return .piecewise(out, otherwise: nil) }
+  return .piecewise(out, otherwise: try diffNode(otherwise, v))
+}
+
+/// d(a op b)/d(v) (the `bin` case of `diff`; a power apart, whose rules hold the most).
+private func diffBin(_ op: BinOp, _ a: Expr, _ b: Expr, _ v: String) throws(DiffError) -> Expr {
+  switch op {
+  case .add:
+    let da = try diffNode(a, v)
+    return add(da, try diffNode(b, v))
+  case .sub:
+    let da = try diffNode(a, v)
+    return sub(da, try diffNode(b, v))
+  case .mul:
+    let da = try diffNode(a, v)
+    return add(mul(da, b), mul(a, try diffNode(b, v)))
+  case .div:
+    let da = try diffNode(a, v)
+    return div(sub(mul(da, b), mul(a, try diffNode(b, v))), pow(b, .num(2)))
+  case .pow:
+    return try diffPow(a, b, v)
+  }
+}
+
+@inline(never)
+private func diffPow(_ a: Expr, _ b: Expr, _ v: String) throws(DiffError) -> Expr {
+  if let n = numValue(b) {
+    // d(a^n) = n a^(n-1) a'
+    return mul(mul(b, pow(a, .num(n - 1))), try diffNode(a, v))
+  }
+  if let c = numValue(a) {
+    // d(c^b) = c^b ln(c) b'
+    return mul(mul(pow(a, b), .num(log(c))), try diffNode(b, v))
+  }
+  // d(a^b) = a^b (b' ln a + b a'/a)
+  let db = try diffNode(b, v)
+  return mul(pow(a, b), add(mul(db, call("ln", a)), mul(b, div(try diffNode(a, v), a))))
+}
+
+/// d(name(args))/d(v) (the `call` case of `diff`).
+private func diffCall(_ name: String, _ args: [Expr], _ v: String) throws(DiffError) -> Expr {
+  if let several = try diffSeveral(name, args, v) { return several }
+  guard args.count == 1 else { throw DiffError("Cannot differentiate \(plainFnName(name)).", nonSmooth: true) }
+  let a = args[0]
+  let da = try diffNode(a, v)
+  return try chainRule(name, a, da)
+}
+
+/// The calls differentiated in more than one argument, or by a rule of their own; nil for the rest.
+@inline(never)
+private func diffSeveral(_ name: String, _ args: [Expr], _ v: String) throws(DiffError) -> Expr? {
+  // A continuous interval's parameter varies on its own, not with x.
+  if name == INTERVAL { return ZERO }
+  // A list with its origin or its axes (Expr.swift): elementwise, and
+  // still the same list (lib/expr.ts `sameList`). One with neither is a
+  // new list, as the node the TypeScript builds for it is: d/dx [x, 2x]^2
+  // chooses [x, 2x] and [1, 2] apart.
+  if name == LIST_ORIGIN || name == LIST_SEQ, args.count == 2 {
+    return .call(name, [args[0], try diffNode(args[1], v)])
+  }
+  if name == LIST_ID, args.count == 2, case .list(let items) = try diffNode(args[1], v) { return identifiedList(items) }
+  if name == "atan2" || (name == "atan" && args.count == 2) {
+    // Fewer than two arguments is the TypeScript reading `undefined.kind`.
+    guard args.count >= 2 else { throw DiffError("Cannot read properties of undefined (reading 'kind')") }
+    let (y, x) = (args[0], args[1])
+    let dy = try diffNode(y, v)
+    let n = sub(mul(dy, x), mul(y, try diffNode(x, v)))
+    return div(n, add(pow(x, .num(2)), pow(y, .num(2))))
+  }
+  if name == ANGLE_FN && args.count == 4 {
+    // The angle turns as fast as arm v does, less how fast arm u does.
+    // Each rate is its own scaled builtin: spelled out as
+    // (cross′ dot − cross dot′)/(cross² + dot²) it is 0/0 in float32 long
+    // before the angle itself stops being well defined near the vertex.
+    func rate(_ a: Expr, _ b: Expr) throws(DiffError) -> Expr {
+      let da = try diffNode(a, v)
+      let db = try diffNode(b, v)
+      return isNumVal(da, 0) && isNumVal(db, 0) ? ZERO : call(ANGLE_RATE_FN, a, b, da, db)
+    }
+    let turning = try rate(args[2], args[3])
+    return sub(turning, try rate(args[0], args[1]))
+  }
+  if name == ANGLE_RATE_FN && args.count == 4 {
+    // Rare (a second derivative): differentiate the unscaled quotient.
+    let (a, b, da, db) = (args[0], args[1], args[2], args[3])
+    return try diffNode(div(sub(mul(a, db), mul(b, da)), add(mul(a, a), mul(b, b))), v)
+  }
+  if (name == "normalpdf" || name == "normalcdf") && args.count == 3 {
+    // Full chain rule in all three arguments (x, mean, sd may all move).
+    let (x, m, s) = (args[0], args[1], args[2])
+    let z = div(sub(x, m), s)
+    let dx = try diffNode(x, v)
+    let dm = try diffNode(m, v)
+    let dz = div(sub(sub(dx, dm), mul(z, try diffNode(s, v))), s)
+    let pdf = call("normalpdf", x, m, s)
+    if name == "normalcdf" { return mul(mul(pdf, s), dz) }
+    // φ′ = φ·(−z·z′ − s′/s): the −z z′ from the exponent, −s′/s from 1/s.
+    return mul(pdf, sub(mul(neg(z), dz), div(try diffNode(s, v), s)))
+  }
+  if (name == "min" || name == "max") && args.count >= 2 {
+    // The derivative of whichever argument is chosen; like abs, the kinks
+    // are ignored. clamp(x, lo, hi) arrives here as min(max(x, lo), hi).
+    let (a, b) = (args[0], args[1])
+    if args.count > 2 { return try diffNode(.call(name, [call(name, a, b)] + args.dropFirst(2)), v) }
+    let da = try diffNode(a, v)
+    let db = try diffNode(b, v)
+    if isNumVal(da, 0) && isNumVal(db, 0) { return ZERO }
+    return .piecewise([Expr.Case(cond: .ineq(name == "min" ? .lt : .gt, a, b), value: da)], otherwise: db)
+  }
+  return nil
+}
+
+/// f(a)′ = f′(a) a′, with a′ in hand.
+@inline(never)
+private func chainRule(_ name: String, _ a: Expr, _ da: Expr) throws(DiffError) -> Expr {
+  func chain(_ outer: Expr) -> Expr { mul(outer, da) }
+  switch name {
+  case "sin":
+    return chain(call("cos", a))
+  case "cos":
+    return neg(chain(call("sin", a)))
+  case "tan":
+    return chain(div(ONE, pow(call("cos", a), .num(2))))
+  case "asin":
+    return chain(div(ONE, call("sqrt", sub(ONE, pow(a, .num(2))))))
+  case "acos":
+    return neg(chain(div(ONE, call("sqrt", sub(ONE, pow(a, .num(2)))))))
+  case "atan":
+    return chain(div(ONE, add(ONE, pow(a, .num(2)))))
+  case "sinh":
+    return chain(call("cosh", a))
+  case "cosh":
+    return chain(call("sinh", a))
+  case "tanh":
+    return chain(div(ONE, pow(call("cosh", a), .num(2))))
+  case "sech":
+    return neg(chain(mul(call("sech", a), call("tanh", a))))
+  case "asinh":
+    return chain(div(ONE, call("sqrt", add(pow(a, .num(2)), ONE))))
+  case "acosh":
+    return chain(div(ONE, call("sqrt", sub(pow(a, .num(2)), ONE))))
+  case "atanh":
+    return chain(div(ONE, sub(ONE, pow(a, .num(2)))))
+  case "exp":
+    return chain(call("exp", a))
+  case "ln":
+    return div(da, a)
+  case "log":
+    return div(da, mul(a, .num(LN10)))
+  case "sqrt":
+    return div(da, mul(.num(2), call("sqrt", a)))
+  case "abs":
+    return chain(call("sign", a))
+  case "erf":
+    return chain(mul(.num(TWO_OVER_SQRT_PI), call("exp", neg(pow(a, .num(2))))))
+  case "sinc":
+    // (x cos x − sin x)/x² away from 0, and its Taylor polynomial near
+    // 0, where the quotient cancels (and each derivative of it divides
+    // by x once more). Neither branch calls sinc, so differentiating
+    // again nests no piecewise, and the polynomial differentiates in
+    // turn: sinc″, sinc‴, … are right at and around 0 too.
+    let terms = SINC_PRIME_SERIES.map { mul(.num($0.0), pow(a, .num($0.1))) }
+    return chain(
+      .piecewise(
+        [
+          Expr.Case(
+            cond: .ineq(.gt, call("abs", a), .num(SINC_SERIES_BELOW)),
+            value: div(sub(mul(a, call("cos", a)), call("sin", a)), pow(a, .num(2))))
+        ],
+        otherwise: terms.dropFirst().reduce(terms[0], add)))
+  case "coth":
+    return chain(sub(ONE, pow(call("coth", a), .num(2))))
+  default:
+    // floor/mod/… (and gamma: digamma isn't in the language):
+    // no smooth derivative; caller falls back to FD.
+    throw DiffError("Cannot differentiate \(plainFnName(name)).", nonSmooth: true)
   }
 }
 

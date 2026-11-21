@@ -220,6 +220,33 @@ and by whole example document) and what holds the rest back;
 `ANALYSIS_WHY=<text>` and `ANALYSIS_UNSUPPORTED=<name prefix>` list the rows.
 A row is either read as the site reads it or reported as not supported yet.
 
+Beside the examples and the targeted cases (`corpus/cases-*.ts`) the corpus
+holds documents written at random, 600 and 400 of two kinds by default.
+`RANDOM_DOCS`, `RANDOM_LIST_DOCS`, `RANDOM_SEED` and `RANDOM_LIST_SEED` widen
+the search, and `RANDOM_ONLY=1` records those documents alone — tens of
+thousands are too many to keep beside the rest:
+
+```sh
+RANDOM_ONLY=1 RANDOM_DOCS=10000 RANDOM_LIST_DOCS=10000 RANDOM_SEED=7 RANDOM_LIST_SEED=11 pnpm swift:analysis
+swift test --package-path apple/EquationCore -c release -Xswiftc -enable-testing --filter AnalysisConformance/documents
+pnpm swift:analysis    # the default corpus back
+```
+
+The language's walks recurse a level per level of a row's expression, and
+a thread's stack is what it is (512 KB off the main thread, 1 MB on an
+iPhone's). `Depth.swift` is the guard: an expression deeper than a thread
+can walk is the row's error, in the words the site's engine has for it
+("Maximum call stack size exceeded"), rather than the end of the process.
+The limit is 512 levels — past the longest Σ the language expands — wherever
+an optimized build reads a document, and in a debug build what the thread's
+stack holds of its larger frames (100 levels on 512 KB). `StackDepthTests`
+measures it in either build, `swift test` and
+`swift test -c release -Xswiftc -enable-testing --filter StackDepth`:
+`STACK_PROBE=1` prints the stack each shape of row uses at the limit and
+what a level costs. A function that recurses over an expression keeps its
+frame small — a kind to a function, no closure that hands itself on — and
+that test is where one that does not shows.
+
 The corpus includes what Ask's lookups answer in TypeScript to a few thousand
 requests (`corpus/lookups.ts`: every kind, shape and function by each of its
 names, with misspellings, phrases and misses), which `EquationAssist` must

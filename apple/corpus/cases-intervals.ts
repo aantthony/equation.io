@@ -15,7 +15,7 @@ export const INTERVAL_CASES: string[] = [
   'a = interval(1, 2); b = 2 a + 1; y = b x; c = a^2; y < c; d = sin(a); x = d y; y = (a, 1) · (x, 1)',
   'f(q) = interval(0, 1) q; y = f(x); g(x) = x + interval(0, 1); y = g(x); y = g(x) + g(2 x); a = interval(0, 1); h(x) = a x; y = h(x) - h(1)',
   'a = interval(0, 2pi); y = sin(x + a); r = sqrt(x^2 + y^2); r = interval(1, 2); r < interval(1, 2); theta = atan2(y, x); theta = interval(0, 1)',
-  'a = interval(1, 2); y = sum(n=1..3, sin(a n x)); y = d/dx (a x^2); y < int[0..x] a q dq; y = {x > 0: a x, x}; y = abs(a x) + floor(a)',
+  'a = interval(1, 2); y = sum(n=1..3, sin(a n x)); y = d/dx (a x^2); y = int[0..x] a q dq; y = {x > 0: a x, x}; y = abs(a x) + floor(a)',
   // What a family over an interval cannot be.
   'a = interval(1, 2); a x; a x + y; (a x, y); z = a x; a x^2 + y^2 + z^2 = 1; y = a x + u; y = a w; y = i a x',
   'a = interval(1, 2); b = interval(0, 1); y = a x + b; y < a x + b; y = interval(0, 1) x + interval(0, 1); (x, y) = (a, b); (a x, b y) = (1, 1)',

@@ -137,6 +137,8 @@ private func complexParts(_ e: Expr, _ budget: Int?, _ vars: ComplexVars) throws
   return parts
 }
 
+// (A kind to a function, below: this walk is a frame per level of the expression, and a debug
+// build's frame holds every case's temporaries at once.)
 private func splitParts(_ e: Expr, _ budget: Int?, _ vars: ComplexVars) throws -> Pair {
   func parts(_ a: Expr) throws -> Pair { try complexParts(a, budget, vars) }
   if !usesComplex(e, Set(vars.keys)) && !hasProjection(e) { return (e, num(0)) }
@@ -149,97 +151,129 @@ private func splitParts(_ e: Expr, _ budget: Int?, _ vars: ComplexVars) throws -
     return (.eq(try parts(l).re, try parts(r).re), num(0))
   case .ineq(let op, let l, let r, let grouped):
     return (.ineq(op, try parts(l).re, try parts(r).re, grouped: grouped), num(0))
-  case .piecewise(let cases, let otherwise):
-    // Keep the shader's typing rules (real conditions).
-    let type = try inferScalarType(e, typesOf(vars))
-    var conds: [Expr] = []
-    var values: [Pair] = []
-    for c in cases {
-      conds.append(try parts(c.cond).re)
-      values.append(try parts(c.value))
-    }
-    let other = try otherwise.map(parts)
-    func part(_ pick: (Pair) -> Expr) -> Expr {
-      .piecewise(
-        zip(conds, values).map { Expr.Case(cond: $0, value: pick($1)) }, otherwise: other.map(pick))
-    }
-    return (part { $0.re }, type == .complex ? part { $0.im } : num(0))
+  case .piecewise:
+    return try splitPartsPiecewise(e, budget, vars)
   case .loop(let params, let seeds, let body, let limit):
     return try splitLoop(params, seeds, body, limit, budget, vars)
-  case .bin(let op, let lhs, let rhs, _):
-    let a = try parts(lhs)
-    let b = try parts(rhs)
-    if try inferScalarType(e, typesOf(vars)) == .real { return (bin(op, a.re, b.re), num(0)) }
-    switch op {
-    case .add: return addParts(a, b)
-    case .sub: return addParts(a, both(b, negPart))
-    case .mul: return mulParts(a, b)
-    case .div: return divParts(a, b)
-    case .pow:
-      if case .num(let value) = rhs, JS.isInteger(value), abs(value) <= 16 {
-        // Binomial terms keep the evaluated tree linear in n; repeated
-        // complex multiplication duplicates both previous component trees.
-        let n = Int(abs(value))
-        var p = [num(0), num(0)]
-        var coefficient = 1.0
-        for k in 0...n {
-          let term = mul(
-            num(k % 4 < 2 ? coefficient : -coefficient), mul(pow(a.re, num(Double(n - k))), pow(a.im, num(Double(k)))))
-          p[k % 2] = add(p[k % 2], term)
-          coefficient = (coefficient * Double(n - k)) / Double(k + 1)
-        }
-        return value < 0 ? divParts((num(1), num(0)), (p[0], p[1])) : (p[0], p[1])
-      }
-      return expParts(mulParts(b, lnParts(a)))
-    }
-  case .call(let name, let args):
-    // Keep function support and arity consistent with the shader.
-    let type = try inferScalarType(e, typesOf(vars))
-    if type == .real && !["re", "im", "arg", "abs"].contains(name) {
-      return (.call(name, try args.map { try parts($0).re }), num(0))
-    }
-    let a = try parts(args[0])
-    let (x, y) = a
-    let sin: Pair = (bin(.mul, call("sin", x), call("cosh", y)), bin(.mul, call("cos", x), call("sinh", y)))
-    let cos: Pair = (bin(.mul, call("cos", x), call("cosh", y)), negPart(bin(.mul, call("sin", x), call("sinh", y))))
-    let sinh: Pair = (bin(.mul, call("sinh", x), call("cos", y)), bin(.mul, call("cosh", x), call("sin", y)))
-    let cosh: Pair = (bin(.mul, call("cosh", x), call("cos", y)), bin(.mul, call("sinh", x), call("sin", y)))
-    switch name {
-    case "re": return (x, num(0))
-    case "im": return (y, num(0))
-    case "abs": return (call("sqrt", norm2(a)), num(0))
-    case "arg": return (call("atan2", y, x), num(0))
-    case "conj": return (x, negPart(y))
-    case "exp": return expParts(a)
-    case "ln": return lnParts(a)
-    case "log": return both(lnParts(a)) { bin(.div, $0, call("ln", num(10))) }
-    case "sqrt":
-      let radius = call("sqrt", norm2(a))
-      let re = call("sqrt", bin(.div, bin(.add, radius, x), num(2)))
-      let im = call("sqrt", bin(.div, bin(.sub, radius, x), num(2)))
-      let signedIm = Expr.piecewise([Expr.Case(cond: .ineq(.lt, y, num(0)), value: negPart(im))], otherwise: im)
-      let positive = Expr.ineq(.gt, x, num(0))
-      let zero = Expr.ineq(.le, radius, num(0))
-      // Compute the smaller component from 2 re im = y, avoiding
-      // cancellation in radius ± x and singular derivatives on the axes.
-      return (
-        .piecewise(
-          [Expr.Case(cond: zero, value: num(0)), Expr.Case(cond: positive, value: re)],
-          otherwise: bin(.div, y, bin(.mul, num(2), signedIm))),
-        .piecewise(
-          [Expr.Case(cond: zero, value: num(0)), Expr.Case(cond: positive, value: bin(.div, y, bin(.mul, num(2), re)))],
-          otherwise: signedIm)
-      )
-    case "sin": return sin
-    case "cos": return cos
-    case "tan": return divParts(sin, cos)
-    case "sinh": return sinh
-    case "cosh": return cosh
-    case "tanh": return divParts(sinh, cosh)
-    default: break
-    }
+  case .bin:
+    return try splitPartsBin(e, budget, vars)
+  case .call:
+    return try splitPartsCall(e, budget, vars)
   default:
     break
+  }
+  throw LanguageError("This complex expression cannot be evaluated as a point or root system.")
+}
+
+private func splitPartsPiecewise(_ e: Expr, _ budget: Int?, _ vars: ComplexVars) throws -> Pair {
+  guard case .piecewise(let cases, let otherwise) = e else { return (e, .num(0)) }
+  func parts(_ a: Expr) throws -> Pair { try complexParts(a, budget, vars) }
+  // Keep the shader's typing rules (real conditions).
+  let type = try inferScalarType(e, typesOf(vars))
+  var conds: [Expr] = []
+  var values: [Pair] = []
+  for c in cases {
+    conds.append(try parts(c.cond).re)
+    values.append(try parts(c.value))
+  }
+  let other = try otherwise.map(parts)
+  func part(_ pick: (Pair) -> Expr) -> Expr {
+    .piecewise(
+      zip(conds, values).map { Expr.Case(cond: $0, value: pick($1)) }, otherwise: other.map(pick))
+  }
+  return (part { $0.re }, type == .complex ? part { $0.im } : num(0))
+}
+
+private func splitPartsBin(_ e: Expr, _ budget: Int?, _ vars: ComplexVars) throws -> Pair {
+  guard case .bin(let op, let lhs, let rhs, _) = e else { return (e, .num(0)) }
+  func parts(_ a: Expr) throws -> Pair { try complexParts(a, budget, vars) }
+  let a = try parts(lhs)
+  let b = try parts(rhs)
+  return try partsOfSides(e, op, rhs, a, b, vars)
+}
+
+private func splitPartsCall(_ e: Expr, _ budget: Int?, _ vars: ComplexVars) throws -> Pair {
+  guard case .call(let name, let args) = e else { return (e, .num(0)) }
+  func parts(_ a: Expr) throws -> Pair { try complexParts(a, budget, vars) }
+  // Keep function support and arity consistent with the shader.
+  let type = try inferScalarType(e, typesOf(vars))
+  if type == .real && !["re", "im", "arg", "abs"].contains(name) {
+    return (.call(name, try args.map { try parts($0).re }), num(0))
+  }
+  return try partsOfCall(name, try parts(args[0]))
+}
+
+/// A sum, product, quotient or power of two split sides (`splitParts`, case .bin).
+@inline(never)
+private func partsOfSides(_ e: Expr, _ op: BinOp, _ rhs: Expr, _ a: Pair, _ b: Pair, _ vars: ComplexVars) throws
+  -> Pair
+{
+  if try inferScalarType(e, typesOf(vars)) == .real { return (bin(op, a.re, b.re), num(0)) }
+  switch op {
+  case .add: return addParts(a, b)
+  case .sub: return addParts(a, both(b, negPart))
+  case .mul: return mulParts(a, b)
+  case .div: return divParts(a, b)
+  case .pow:
+    if case .num(let value) = rhs, JS.isInteger(value), abs(value) <= 16 {
+      // Binomial terms keep the evaluated tree linear in n; repeated
+      // complex multiplication duplicates both previous component trees.
+      let n = Int(abs(value))
+      var p = [num(0), num(0)]
+      var coefficient = 1.0
+      for k in 0...n {
+        let term = mul(
+          num(k % 4 < 2 ? coefficient : -coefficient), mul(pow(a.re, num(Double(n - k))), pow(a.im, num(Double(k)))))
+        p[k % 2] = add(p[k % 2], term)
+        coefficient = (coefficient * Double(n - k)) / Double(k + 1)
+      }
+      return value < 0 ? divParts((num(1), num(0)), (p[0], p[1])) : (p[0], p[1])
+    }
+    return expParts(mulParts(b, lnParts(a)))
+  }
+}
+
+/// A function of a split argument (`splitParts`, case .call).
+@inline(never)
+private func partsOfCall(_ name: String, _ a: Pair) throws -> Pair {
+  let (x, y) = a
+  let sin: Pair = (bin(.mul, call("sin", x), call("cosh", y)), bin(.mul, call("cos", x), call("sinh", y)))
+  let cos: Pair = (bin(.mul, call("cos", x), call("cosh", y)), negPart(bin(.mul, call("sin", x), call("sinh", y))))
+  let sinh: Pair = (bin(.mul, call("sinh", x), call("cos", y)), bin(.mul, call("cosh", x), call("sin", y)))
+  let cosh: Pair = (bin(.mul, call("cosh", x), call("cos", y)), bin(.mul, call("sinh", x), call("sin", y)))
+  switch name {
+  case "re": return (x, num(0))
+  case "im": return (y, num(0))
+  case "abs": return (call("sqrt", norm2(a)), num(0))
+  case "arg": return (call("atan2", y, x), num(0))
+  case "conj": return (x, negPart(y))
+  case "exp": return expParts(a)
+  case "ln": return lnParts(a)
+  case "log": return both(lnParts(a)) { bin(.div, $0, call("ln", num(10))) }
+  case "sqrt":
+    let radius = call("sqrt", norm2(a))
+    let re = call("sqrt", bin(.div, bin(.add, radius, x), num(2)))
+    let im = call("sqrt", bin(.div, bin(.sub, radius, x), num(2)))
+    let signedIm = Expr.piecewise([Expr.Case(cond: .ineq(.lt, y, num(0)), value: negPart(im))], otherwise: im)
+    let positive = Expr.ineq(.gt, x, num(0))
+    let zero = Expr.ineq(.le, radius, num(0))
+    // Compute the smaller component from 2 re im = y, avoiding
+    // cancellation in radius ± x and singular derivatives on the axes.
+    return (
+      .piecewise(
+        [Expr.Case(cond: zero, value: num(0)), Expr.Case(cond: positive, value: re)],
+        otherwise: bin(.div, y, bin(.mul, num(2), signedIm))),
+      .piecewise(
+        [Expr.Case(cond: zero, value: num(0)), Expr.Case(cond: positive, value: bin(.div, y, bin(.mul, num(2), re)))],
+        otherwise: signedIm)
+    )
+  case "sin": return sin
+  case "cos": return cos
+  case "tan": return divParts(sin, cos)
+  case "sinh": return sinh
+  case "cosh": return cosh
+  case "tanh": return divParts(sinh, cosh)
+  default: break
   }
   throw LanguageError("This complex expression cannot be evaluated as a point or root system.")
 }

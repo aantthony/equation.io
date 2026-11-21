@@ -62,10 +62,8 @@ extension Resolver {
   /// function on the surface.
   func surfaceOperand(_ name: String, _ arg: Expr) throws -> (items: [Expr], over: (u: Expr?, v: Expr?)) {
     let usage = "\(name) takes a parametric surface in u and v, like \(name)(S) with S = (u, v, u^2 - v^2)."
-    // Port: where an interval is not read (Interval.swift), neither are u's and v's.
     let uInterval = opts.interval("u")
     let vInterval = opts.interval("v")
-    if uInterval != nil || vInterval != nil, !opts.intervals { throw Unsupported("interval(…)") }
     var r = arg
     if case .var(let fname) = arg, let fn = try getFn(fname) {
       if fn.params.count != 2 { throw LanguageError(usage) }
@@ -79,7 +77,6 @@ extension Resolver {
     }
     let (uKey, vKey) = (uInterval.map(exprKey), vInterval.map(exprKey))
     let hidden = intervalsIn(r)
-    if !hidden.isEmpty, !opts.intervals { throw Unsupported("interval(…)") }
     var over: (u: Expr?, v: Expr?) = (nil, nil)
     for h in hidden {
       if h.key == uKey {

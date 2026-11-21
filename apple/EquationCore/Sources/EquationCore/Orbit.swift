@@ -32,30 +32,37 @@ func classifyOrbit(
       throw LanguageError("An orbit's time range must hold still (found \(v)).")
     }
   }
-  // (A list of values, one path per run of a family, is not ported: lists are not.)
-  let path: [Expr]
-  let series: Bool
-  switch value {
-  case .vec(let items):
-    if items.count != 2 && items.count != 3 {
-      throw LanguageError("An orbit draws a 2D or 3D point, or one number against t.")
+  // One path per run when the value is a family's list.
+  let items: [Expr] = if case .list(let members) = value { members } else { [value] }
+  let series = items.allSatisfy { if case .vec = $0 { false } else { true } }
+  var paths: [[Expr]] = []
+  for item in items {
+    switch item {
+    case .vec(let coordinates):
+      if series || (coordinates.count != 2 && coordinates.count != 3) {
+        throw LanguageError("An orbit draws a 2D or 3D point, or one number against t.")
+      }
+      paths.append(coordinates)
+    case .eq, .ineq, .data, .list:
+      throw LanguageError("An orbit draws a state, like p(0..50).")
+    default:
+      // (A number among points is a path of one coordinate, which the count below refuses.)
+      paths.append([item])
     }
-    (path, series) = (items, false)
-  case .eq, .ineq, .data, .list:
-    throw LanguageError("An orbit draws a state, like p(0..50).")
-  default:
-    (path, series) = ([value], true)
+  }
+  if !series, Set(paths.map(\.count)).count > 1 {
+    throw LanguageError("All points in an orbit need the same number of coordinates.")
   }
   var params: Set<String> = []
-  for e in path + [from, to] {
+  for e in paths.flatMap({ $0 }) + [from, to] {
     for n in freeVars(e) where n != "t" {
       if !constNames.contains(n) { throw LanguageError("An orbit draws states, constants and t (found \(n)).") }
       params.insert(n)
     }
   }
   return Classified(
-    object: .orbit(paths: [path], series: series, from: from, to: to), animated: false,
-    needs3D: !series && path.count == 3,
+    object: .orbit(paths: paths, series: series, from: from, to: to), animated: false,
+    needs3D: !series && paths.first?.count == 3,
     params: jsSorted(Array(params)))
 }
 

@@ -82,6 +82,7 @@ final class GeomContext {
   var isList: (String) -> Bool = { _ in false }
   private var matSeen: [Expr: MatValue?] = [:]
   private var tenSeen: [Expr: Tensor?] = [:]
+  private var compSeen: [Expr: Expr] = [:]
   /// Multivectors and flats (GeomAlgebra.swift).
   var algebra = AlgebraSeen()
 
@@ -117,87 +118,115 @@ final class GeomContext {
     return found
   }
 
+  // (A kind to a function, below: this walk is a frame per level of the expression, and a debug
+  // build's frame holds every case's temporaries at once.)
   private func tensorOf(_ e: Expr) throws -> Tensor? {
     switch e {
     case .var(let name):
       return getTensor(name, false)
-    case .vec(let parts):
-      func some(_ test: (Expr) throws -> Bool) rethrows -> Bool {
-        for it in parts where try test(it) { return true }
-        return false
-      }
-      if !(try some { try lowerTensor($0) != nil || deepTupleRow($0) }) { return nil }
-      let t = try tupleTensor(parts)
-      // A tuple of points that is not square is a tuple of points.
-      let points = t.shape.count == 2 && (t.shape[1] == 2 || t.shape[1] == 3)
-      return try points && !some({ try lowerTensor($0) != nil }) ? nil : t
+    case .vec:
+      return try tensorOfVec(e)
     case .neg(let inner):
       return try lowerTensor(inner).map(tensorNeg)
-    case .bin(let op, let lhs, let rhs, let glyph):
-      if glyph == .outer { return try outer(anyTensor(lhs), anyTensor(rhs)) }
-      if glyph == .wedge { return try wedge(anyTensor(lhs), anyTensor(rhs)) }
-      let a = try lowerTensor(lhs)
-      let b = try lowerTensor(rhs)
-      if a == nil && b == nil {
-        // T Q with T a tuple of points: the consumer reads it as a matrix,
-        // n×k — the rectangular matvec and product. (Scaled, 2 T, it stays a
-        // tuple of points; on the right, M T, each of its points is moved.)
-        if op != .mul { return nil }
-        guard let l = try pointRows(lhs) else {
-          // v T, a vector on the left of a tuple of points that is not
-          // square: the contraction v_i T_ij, a vector of T's width.
-          guard let r = try pointRows(rhs), r.shape[0] != r.shape[1] else { return nil }
-          guard let v = items(try lo(lhs)) else { return nil }
-          return try product(vectorTensor(v), r)
-        }
-        if let r = try pointRows(rhs) { return try product(l, r) }
-        if let r = try lowerMat(rhs) { return try product(l, fromMat(r.m)) }
-        guard let v = items(try lo(rhs)) else { return nil }
-        return try product(l, vectorTensor(v))
-      }
-      switch op {
-      case .add, .sub:
-        return try tensorAdd(anyTensor(lhs), anyTensor(rhs), minus: op == .sub)
-      case .mul:
-        let l = try anyTensor(lhs)
-        let r = try anyTensor(rhs)
-        if l.shape.isEmpty { return tensorScale(r, l.data[0]) }
-        if r.shape.isEmpty { return tensorScale(l, r.data[0]) }
-        return try product(l, r)
-      case .div:
-        let r = try anyTensor(rhs)
-        guard let a, r.shape.isEmpty else { throw LanguageError("Cannot divide by a tensor.") }
-        return tensorScale(a, .bin(.div, .num(1), r.data[0]))
-      case .pow:
-        // (A power is matrix algebra: e^(th e_x ∧ e_y) is lowerMat's.)
-        return nil
-      }
-    case .index(let target, let at):
-      // T[k]: the k-th slice along the first index, as M[2] is a row.
-      guard let t = try lowerTensor(target) else { return nil }
-      let k = try constIndex(at, "A tensor index")
-      if k < 1 || k > t.shape[0] {
-        throw LanguageError("That tensor has \(t.shape[0]) rows along its first index; \(k) is not one.")
-      }
-      return rows(t)[k - 1]
-    case .call(let name, let args):
-      if !tensorOp(e) { return nil }
-      if name == TENSOR_CALL { return tensorOfNode(e) }
-      if name == "contract" {
-        if args.count != 3 {
-          throw LanguageError(
-            "contract takes a tensor and two of its indices: contract(T, 1, 2) sums T_ii… over i.")
-        }
-        return try contract(
-          anyTensor(args[0]), constIndex(args[1], "An index") - 1, constIndex(args[2], "An index") - 1)
-      }
-      if args.count < 2 {
-        throw LanguageError("\(name) takes two or more vectors or tensors: \(name)(a, b).")
-      }
-      var acc = try anyTensor(args[0])
-      for n in args.dropFirst() { acc = try name == "outer" ? outer(acc, anyTensor(n)) : wedge(acc, anyTensor(n)) }
-      return acc
+    case .bin:
+      return try tensorOfBin(e)
+    case .index:
+      return try tensorOfIndex(e)
+    case .call:
+      return try tensorOfCall(e)
     default:
+      return nil
+    }
+  }
+
+  private func tensorOfVec(_ e: Expr) throws -> Tensor? {
+    guard case .vec(let parts) = e else { return nil }
+    func some(_ test: (Expr) throws -> Bool) rethrows -> Bool {
+      for it in parts where try test(it) { return true }
+      return false
+    }
+    if !(try some { try lowerTensor($0) != nil || deepTupleRow($0) }) { return nil }
+    let t = try tupleTensor(parts)
+    // A tuple of points that is not square is a tuple of points.
+    let points = t.shape.count == 2 && (t.shape[1] == 2 || t.shape[1] == 3)
+    return try points && !some({ try lowerTensor($0) != nil }) ? nil : t
+  }
+
+  private func tensorOfBin(_ e: Expr) throws -> Tensor? {
+    guard case .bin(let op, let lhs, let rhs, let glyph) = e else { return nil }
+    if glyph == .outer { return try outer(anyTensor(lhs), anyTensor(rhs)) }
+    if glyph == .wedge { return try wedge(anyTensor(lhs), anyTensor(rhs)) }
+    let a = try lowerTensor(lhs)
+    let b = try lowerTensor(rhs)
+    return try tensorOfSides(op, lhs, rhs, a, b)
+  }
+
+  private func tensorOfIndex(_ e: Expr) throws -> Tensor? {
+    guard case .index(let target, let at) = e else { return nil }
+    // T[k]: the k-th slice along the first index, as M[2] is a row.
+    guard let t = try lowerTensor(target) else { return nil }
+    let k = try constIndex(at, "A tensor index")
+    if k < 1 || k > t.shape[0] {
+      throw LanguageError("That tensor has \(t.shape[0]) rows along its first index; \(k) is not one.")
+    }
+    return rows(t)[k - 1]
+  }
+
+  private func tensorOfCall(_ e: Expr) throws -> Tensor? {
+    guard case .call(let name, let args) = e else { return nil }
+    if !tensorOp(e) { return nil }
+    if name == TENSOR_CALL { return tensorOfNode(e) }
+    if name == "contract" {
+      if args.count != 3 {
+        throw LanguageError(
+          "contract takes a tensor and two of its indices: contract(T, 1, 2) sums T_ii… over i.")
+      }
+      return try contract(
+        anyTensor(args[0]), constIndex(args[1], "An index") - 1, constIndex(args[2], "An index") - 1)
+    }
+    if args.count < 2 {
+      throw LanguageError("\(name) takes two or more vectors or tensors: \(name)(a, b).")
+    }
+    var acc = try anyTensor(args[0])
+    for n in args.dropFirst() { acc = try name == "outer" ? outer(acc, anyTensor(n)) : wedge(acc, anyTensor(n)) }
+    return acc
+  }
+
+  /// A sum, product or quotient whose sides `a` and `b` are tensors, or are not (`tensorOf`, case .bin).
+  @inline(never)
+  private func tensorOfSides(_ op: BinOp, _ lhs: Expr, _ rhs: Expr, _ a: Tensor?, _ b: Tensor?) throws -> Tensor? {
+    if a == nil && b == nil {
+      // T Q with T a tuple of points: the consumer reads it as a matrix,
+      // n×k — the rectangular matvec and product. (Scaled, 2 T, it stays a
+      // tuple of points; on the right, M T, each of its points is moved.)
+      if op != .mul { return nil }
+      guard let l = try pointRows(lhs) else {
+        // v T, a vector on the left of a tuple of points that is not
+        // square: the contraction v_i T_ij, a vector of T's width.
+        guard let r = try pointRows(rhs), r.shape[0] != r.shape[1] else { return nil }
+        guard let v = items(try lo(lhs)) else { return nil }
+        return try product(vectorTensor(v), r)
+      }
+      if let r = try pointRows(rhs) { return try product(l, r) }
+      if let r = try lowerMat(rhs) { return try product(l, fromMat(r.m)) }
+      guard let v = items(try lo(rhs)) else { return nil }
+      return try product(l, vectorTensor(v))
+    }
+    switch op {
+    case .add, .sub:
+      return try tensorAdd(anyTensor(lhs), anyTensor(rhs), minus: op == .sub)
+    case .mul:
+      let l = try anyTensor(lhs)
+      let r = try anyTensor(rhs)
+      if l.shape.isEmpty { return tensorScale(r, l.data[0]) }
+      if r.shape.isEmpty { return tensorScale(l, r.data[0]) }
+      return try product(l, r)
+    case .div:
+      let r = try anyTensor(rhs)
+      guard let a, r.shape.isEmpty else { throw LanguageError("Cannot divide by a tensor.") }
+      return tensorScale(a, .bin(.div, .num(1), r.data[0]))
+    case .pow:
+      // (A power is matrix algebra: e^(th e_x ∧ e_y) is lowerMat's.)
       return nil
     }
   }
@@ -253,12 +282,6 @@ final class GeomContext {
     if !matsPossible { return nil }
     if try lowerMv(e) != nil { return nil }
     if let hit = matSeen[e] { return hit }
-    func scalar(_ n: Expr, _ what: String) throws -> Expr {
-      guard case .scalar(let value) = try lo(n) else {
-        throw LanguageError("Cannot \(what) a matrix by a point — M v applies it.")
-      }
-      return value
-    }
     // ⊗, ∧, contract and tensors of other shapes: a matrix when square.
     // Matrix algebra reads its own spine first (e^(th J) needs th kept
     // apart), and a product of tensors it cannot read comes back square here.
@@ -271,101 +294,134 @@ final class GeomContext {
       case .vec, .var: true
       default: tensorOp(e)
       }
-    func found() throws -> MatValue? {
-      if first, let t = try lowerTensor(e) { return toMat(t).map { MatValue(m: $0) } }
-      switch e {
-      case .var(let name):
-        return getMat(name).map { MatValue(m: $0) }
-      case .neg(let inner):
-        return try lowerMat(inner).map(matNeg)
-      case .bin(let op, let lhs, let rhs, _):
-        if op == .pow {
-          if let power = try lowerMat(rhs) {
-            if !isE(lhs) { throw LanguageError("Only e takes a matrix power: e^(a J) is the rotation by a.") }
-            return MatValue(m: try expOf(power))
-          }
-          guard let a = try lowerMat(lhs) else { return nil }
-          return MatValue(m: try matPow(a.m, writtenPower(rhs)))
-        }
-        let a = try lowerMat(lhs)
-        let b = try lowerMat(rhs)
-        if a == nil && b == nil { return nil }
-        switch op {
-        case .add, .sub:
-          guard let a, let b else {
-            let verb = op == .add ? "add" : "subtract"
-            // A point beside a tuple of points moves each of them: the point
-            // is added to every row, wherever T is written.
-            guard let p = items(try lo(a != nil ? rhs : lhs)) else {
-              throw LanguageError("Cannot \(verb) a matrix and a number — use a multiple of the identity.")
-            }
-            let m = (a ?? b)!.m
-            if p.count != m[0].count {
-              throw LanguageError(
-                "Cannot \(verb) a \(p.count)D point and a tuple of \(m[0].count)D points — "
-                  + "each row takes a point of its own size.")
-            }
-            func combine(_ x: Expr, _ y: Expr) -> Expr { op == .add ? add(x, y) : sub(x, y) }
-            return MatValue(
-              m: m.map { row in
-                row.enumerated().map { c, entry in a != nil ? combine(entry, p[c]) : combine(p[c], entry) }
-              })
-          }
-          return MatValue(m: try matAdd(a.m, b.m, minus: op == .sub))
-        case .mul:
-          if let a, let b { return MatValue(m: try matMul(a.m, b.m)) }
-          // M v is a vector, not a matrix: the caller applies it.
-          if let a {
-            guard case .scalar(let s) = try lo(rhs) else { return nil }
-            return matScale(a, s)
-          }
-          return matScale(b!, try scalar(lhs, "multiply"))
-        case .div:
-          guard let a, b == nil else {
-            throw LanguageError(
-              "Cannot divide by a matrix — multiply by M^-1. (a/2J reads as a/(2J): write a/2 J.)")
-          }
-          return matScale(a, div(.num(1), try scalar(rhs, "divide")))
-        case .pow:
-          return nil
-        }
-      case .vec(let parts):
-        // A tuple of rows — ((a, b), (c, d)), or named points (A, B) — is a
-        // matrix when it is square. Anything else is left to lower(), which
-        // says what that tuple is instead.
-        var rows: [[Expr]] = []
-        for part in parts {
-          guard let row = items(try lo(part)) else { return nil }
-          rows.append(row)
-        }
-        return matrixFromRows(rows).map { MatValue(m: $0) }
-      case .call(let name, let args):
-        if name == "exp" && args.count == 1 {
-          return try lowerMat(args[0]).map { MatValue(m: try expOf($0)) }
-        }
-        if name == "transpose" && args.count == 1 {
-          guard let a = try lowerMat(args[0]) else {
-            throw LanguageError("transpose takes a matrix — define one with M = ((a, b), (c, d)).")
-          }
-          return MatValue(m: transposeOf(a.m))
-        }
-        // cross(n, v) with its v left off: the matrix of v ↦ n × v.
-        if name == "cross" && args.count == 1 {
-          guard let n = items(try lo(args[0])), n.count == 3 else {
-            throw LanguageError(
-              "cross(n) is the rotation generator about a 3D axis: e^(a cross((0, 0, 1))) v.")
-          }
-          return MatValue(m: hatOf(n))
-        }
-        return nil
-      default:
-        return nil
-      }
-    }
-    var value = try found()
+    var value = try matOf(e, first)
     if value == nil && !first { value = try square() }
     matSeen[e] = .some(value)
     return value
+  }
+
+  // (`lowerMat` in pieces: it reads a row a frame per level, and a debug
+  // build's frame holds every case's temporaries at once.)
+  private func scalarBeside(_ n: Expr, _ what: String) throws -> Expr {
+    guard case .scalar(let value) = try lo(n) else {
+      throw LanguageError("Cannot \(what) a matrix by a point — M v applies it.")
+    }
+    return value
+  }
+
+  private func matOf(_ e: Expr, _ first: Bool) throws -> MatValue? {
+    if first, let t = try lowerTensor(e) { return toMat(t).map { MatValue(m: $0) } }
+    switch e {
+    case .var(let name):
+      return getMat(name).map { MatValue(m: $0) }
+    case .neg(let inner):
+      return try lowerMat(inner).map(matNeg)
+    case .bin:
+      return try matOfBin(e)
+    case .vec:
+      return try matOfVec(e)
+    case .call:
+      return try matOfCall(e)
+    default:
+      return nil
+    }
+  }
+
+  private func matOfBin(_ e: Expr) throws -> MatValue? {
+    guard case .bin(let op, let lhs, let rhs, _) = e else { return nil }
+    if op == .pow {
+      if let power = try lowerMat(rhs) {
+        if !isE(lhs) { throw LanguageError("Only e takes a matrix power: e^(a J) is the rotation by a.") }
+        return MatValue(m: try expOf(power))
+      }
+      guard let a = try lowerMat(lhs) else { return nil }
+      return MatValue(m: try matPow(a.m, writtenPower(rhs)))
+    }
+    let a = try lowerMat(lhs)
+    let b = try lowerMat(rhs)
+    return try matOfSides(op, lhs, rhs, a, b)
+  }
+
+  private func matOfVec(_ e: Expr) throws -> MatValue? {
+    guard case .vec(let parts) = e else { return nil }
+    // A tuple of rows — ((a, b), (c, d)), or named points (A, B) — is a
+    // matrix when it is square. Anything else is left to lower(), which
+    // says what that tuple is instead.
+    var rows: [[Expr]] = []
+    for part in parts {
+      guard let row = items(try lo(part)) else { return nil }
+      rows.append(row)
+    }
+    return matrixFromRows(rows).map { MatValue(m: $0) }
+  }
+
+  private func matOfCall(_ e: Expr) throws -> MatValue? {
+    guard case .call(let name, let args) = e else { return nil }
+    if name == "exp" && args.count == 1 {
+      return try lowerMat(args[0]).map { MatValue(m: try expOf($0)) }
+    }
+    if name == "transpose" && args.count == 1 {
+      guard let a = try lowerMat(args[0]) else {
+        throw LanguageError("transpose takes a matrix — define one with M = ((a, b), (c, d)).")
+      }
+      return MatValue(m: transposeOf(a.m))
+    }
+    // cross(n, v) with its v left off: the matrix of v ↦ n × v.
+    if name == "cross" && args.count == 1 {
+      guard let n = items(try lo(args[0])), n.count == 3 else {
+        throw LanguageError(
+          "cross(n) is the rotation generator about a 3D axis: e^(a cross((0, 0, 1))) v.")
+      }
+      return MatValue(m: hatOf(n))
+    }
+    return nil
+  }
+
+  /// A sum, product or quotient whose sides `a` and `b` are matrices, or are not (`matOf`, case .bin).
+  @inline(never)
+  private func matOfSides(
+    _ op: BinOp, _ lhs: Expr, _ rhs: Expr, _ a: MatValue?, _ b: MatValue?
+  ) throws -> MatValue? {
+    if a == nil && b == nil { return nil }
+    switch op {
+    case .add, .sub:
+      guard let a, let b else {
+        let verb = op == .add ? "add" : "subtract"
+        // A point beside a tuple of points moves each of them: the point
+        // is added to every row, wherever T is written.
+        guard let p = items(try lo(a != nil ? rhs : lhs)) else {
+          throw LanguageError("Cannot \(verb) a matrix and a number — use a multiple of the identity.")
+        }
+        let m = (a ?? b)!.m
+        if p.count != m[0].count {
+          throw LanguageError(
+            "Cannot \(verb) a \(p.count)D point and a tuple of \(m[0].count)D points — "
+              + "each row takes a point of its own size.")
+        }
+        func combine(_ x: Expr, _ y: Expr) -> Expr { op == .add ? add(x, y) : sub(x, y) }
+        return MatValue(
+          m: m.map { row in
+            row.enumerated().map { c, entry in a != nil ? combine(entry, p[c]) : combine(p[c], entry) }
+          })
+      }
+      return MatValue(m: try matAdd(a.m, b.m, minus: op == .sub))
+    case .mul:
+      if let a, let b { return MatValue(m: try matMul(a.m, b.m)) }
+      // M v is a vector, not a matrix: the caller applies it.
+      if let a {
+        guard case .scalar(let s) = try lo(rhs) else { return nil }
+        return matScale(a, s)
+      }
+      return matScale(b!, try scalarBeside(lhs, "multiply"))
+    case .div:
+      guard let a, b == nil else {
+        throw LanguageError(
+          "Cannot divide by a matrix — multiply by M^-1. (a/2J reads as a/(2J): write a/2 J.)")
+      }
+      return matScale(a, div(.num(1), try scalarBeside(rhs, "divide")))
+    case .pow:
+      return nil
+    }
   }
 
   // MARK: What lower() asks
@@ -509,11 +565,24 @@ final class GeomContext {
     return .vec(solveVec(m, v))
   }
 
-  /// A matrix the value of a `comp` reads as its rows — f(M), hull(S) — is a
-  /// list of points, which waits for lists.
-  func compMatrix(_ value: Expr) throws -> Bool {
-    if case .var(let name) = value, getMat(name) != nil { return true }
-    return try lowerMat(value) != nil
+  /// A matrix (a name, or algebra over one: 2 S) has no meaning of its own
+  /// to a function of scalars, so it is what it is wherever a call asks for
+  /// points — hull(S), distance(S, A): the list of its rows, which the
+  /// `comp` waits on for list lowering. Nil for a value that is no matrix.
+  /// (One answer per value: every component of f(M) reads the same rows.
+  /// lib/geom.ts `lower`, case 'comp', its `wait`.)
+  func compRows(_ value: Expr, _ k: Int, _ n: Int, _ fn: String) throws -> Expr? {
+    if let hit = compSeen[value] { return hit }
+    var m: Mat?
+    if case .var(let name) = value { m = getMat(name) }
+    if m == nil { m = try lowerMat(value)?.m }
+    guard let m else { return nil }
+    if !compFits(n, k, m.count) { throw LanguageError(compDims(fn, n, value, m.count)) }
+    var name: String?
+    if case .var(let named) = value { name = named }
+    let rows = settledNode(rowsAsPoints(m, name))
+    compSeen[value] = rows
+    return rows
   }
 }
 
@@ -522,7 +591,8 @@ final class GeomContext {
 /// A definition whose value is a matrix (`R = e^(a J)`, `N = 2 M`), or nil
 /// (lib/geom.ts `lowerMatrix`).
 func lowerMatrix(
-  _ e: Expr, comps: @escaping (String) -> [String]?, getMat: @escaping GetMat, getTensor: @escaping GetTensor
+  _ e: Expr, comps: @escaping (String) -> [String]?, getMat: @escaping GetMat, getTensor: @escaping GetTensor,
+  isList: @escaping (String) -> Bool = { _ in false }
 ) throws -> Mat? {
   // Only the matrix-algebra spine can make a matrix: look along it for one.
   func spine(_ n: Expr) -> Bool {
@@ -553,7 +623,9 @@ func lowerMatrix(
     }
   }
   if !spine(e) { return nil }
-  return try GeomContext(comps: comps, getMat: getMat, getTensor: getTensor, mats: true).lowerMat(e)?.m
+  let context = GeomContext(comps: comps, getMat: getMat, getTensor: getTensor, mats: true)
+  context.isList = isList
+  return try context.lowerMat(e)?.m
 }
 
 /// A definition whose value is a tensor of any shape but a square matrix's

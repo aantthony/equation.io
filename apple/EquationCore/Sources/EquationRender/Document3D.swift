@@ -375,7 +375,9 @@ public struct Document3D: Equatable, Sendable {
 
   /// A curve's samples as flat xyz floats, u from 0 to 1 (web/scene.ts
   /// `sampleSpaceCurve`): a sample the curve has no value at is a gap in the line.
-  static func sample(_ comps: [Expr], _ env: [String: Double]) -> [Float] {
+  /// What does not move with u is worked out once for the frame.
+  static func sample(_ written: [Expr], _ env: [String: Double]) -> [Float] {
+    let comps = foldAllExcept(written, "u", env)
     var out = [Float](repeating: 0, count: curveSamples * 3)
     var scope = env
     for k in 0..<curveSamples {

@@ -4,29 +4,6 @@ import Testing
 
 @testable import EquationRender
 
-/// `body` on a thread with the main thread's stack (8 MB), where the app
-/// analyses a document (EquationCoreTests has the same for its documents): a
-/// test's own thread has 512 KB, which a debug build's frames fill on a deep
-/// row — a 50-term Σ, lowered a frame per term, on top of `analyze`'s own.
-private func onMainStack<T>(_ body: @escaping () -> T) -> T {
-  let box = StackBox(body)
-  let done = DispatchSemaphore(value: 0)
-  let thread = Thread {
-    box.value = box.body()
-    done.signal()
-  }
-  thread.stackSize = 8 << 20
-  thread.start()
-  done.wait()
-  return box.value!
-}
-
-private final class StackBox<T>: @unchecked Sendable {
-  var value: T?
-  let body: () -> T
-  init(_ body: @escaping () -> T) { self.body = body }
-}
-
 /// Holds RowReport.swift to lib/assistant-tools.ts `checkRows`: what Ask's
 /// check, get_graph and set_graph say of each row of every example and of
 /// documents written for it. Regenerate the fixture with
@@ -48,7 +25,7 @@ private final class StackBox<T>: @unchecked Sendable {
     for document in documents {
       let texts = document["rows"] as! [String]
       let wanted = document["report"] as! [[String: Any]]
-      let analysis = onMainStack { analyze(texts) }
+      let analysis = analyze(texts)
       for (k, want) in wanted.enumerated() {
         rows += 1
         let row = analysis.rows[k]

@@ -209,8 +209,17 @@ public struct Graph2D: Equatable, Sendable {
         overlay.polylines.append(.init(pts: samplePath(comps, env), color: css))
       case .polygon, .label:
         _ = drawGeometry(cpu, env, color: color, into: &overlay)
-      case .vlist, .plist, .dlist, .dscatter, .histogram, .family:
+      case .vlist, .plist, .dlist, .dscatter, .histogram:
         _ = drawList(cpu, env, color: color, pointsPerUnit: pointsPerUnit, into: &overlay)
+      case .family(let members):
+        _ = drawList(cpu, env, color: color, pointsPerUnit: pointsPerUnit, into: &overlay)
+        // A family of fields: each member traces its own curve through every
+        // seed, in its shade (web/scene.ts `renderMembers`, case 'vfield2d').
+        for (k, member) in members.enumerated() {
+          guard case .vfield2d(let comps) = member.cpu else { continue }
+          let shade = CSSColor(Self.familyColor(color, member: k, of: members.count))
+          drawSeeds(comps, color: shade, env: env, view: view, bounds: bounds, into: &overlay)
+        }
       case .sequence(let term, let n):
         overlay.points += Self.sequenceDots(
           term: term, index: n, env: env, bounds: bounds, color: css, partialSum: partialSums.contains(index))

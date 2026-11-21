@@ -113,12 +113,57 @@ public func samplePath(_ at: (Double) -> (Double, Double), _ n: Int = CURVE_SAMP
   return out
 }
 
+/// Nodes past which a curve is folded before it is sampled (lib/path.ts `FOLD_NODES`).
+let FOLD_NODES = 500
+
+/// `es` with every part that does not read `v` replaced by its value under
+/// env, once per frame, so a curve sampled hundreds of times along u
+/// evaluates only what moves with u (lib/path.ts `foldAllExcept`).
+/// osculating(C, t) in space is the reason: its centre, radius and plane are
+/// one large expression in t that each sample would otherwise repeat. A part
+/// that does not evaluate here stays as it is, to fail (or not) at sample
+/// time as before.
+public func foldAllExcept(_ es: [Expr], _ v: String, _ env: [String: Double]) -> [Expr] {
+  func value(_ n: Expr) -> Expr? { (try? evaluate(n, env)).map { .num($0) } }
+  /// Kinds whose children do not all live in the enclosing scope: one may
+  /// bind a name, and is folded whole or not at all.
+  func binds(_ e: Expr) -> Bool {
+    switch e {
+    case .bin, .neg, .piecewise, .ineq, .eq: return false
+    case .call(let name, let args): return (name == "sum" || name == "prod") && args.count >= 4
+    default: return true
+    }
+  }
+  func isNumber(_ e: Expr) -> Bool { if case .num = e { true } else { false } }
+  func visit(_ n: Expr) -> Expr {
+    switch n {
+    case .num: return n
+    case .var(let name):
+      if name != v, let known = env[name] { return .num(known) }
+      return n
+    default: break
+    }
+    if binds(n) { return freeVars(n).allSatisfy({ $0 != v && env[$0] != nil }) ? value(n) ?? n : n }
+    let mapped = mapChildren(n, visit)
+    switch n {
+    case .bin, .neg, .call: return childrenOf(mapped).allSatisfy(isNumber) ? value(mapped) ?? mapped : mapped
+    default: return mapped
+    }
+  }
+  return es.map(visit)
+}
+
 /// The polyline of a 2D parametric curve (a real (x(u), y(u)), or the split
 /// parts of a complex path) under `env`: sampled along u from 0 to 1 and
 /// broken at its jumps (lib/path.ts `pathSampler`). A sample the curve has
 /// no value at is undefined, which lifts the pen.
 public func samplePath(_ comps: [Expr], _ env: [String: Double]) -> [Double] {
   guard comps.count >= 2 else { return [] }
+  // A large curve whose bulk does not move with u — an osculating circle,
+  // its centre and radius written out of the curve's derivatives — is folded
+  // under env first: far less than running the whole tree at every sample.
+  let large = comps.reduce(0) { $0 + countNodes($1, limit: FOLD_NODES) } > FOLD_NODES
+  let comps = large ? foldAllExcept(comps, "u", env) : comps
   var scope = env
   return samplePath({ u in
     scope["u"] = u

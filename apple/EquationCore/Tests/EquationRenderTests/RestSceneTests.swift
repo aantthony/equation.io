@@ -94,6 +94,25 @@ import Testing
     #expect(graph.overlay(at: 0).polylines.isEmpty)
   }
 
+  /// A family of fields traces a curve a member through each seed, in the
+  /// member's shade — once some row's own field takes seeds, as on the site.
+  @Test func aSeedTracesEveryMemberOfAFamilyOfFields() {
+    var graph = Self.graph2D(["k = [1, 2]", "(k y, -x)", "(1, x)"])
+    graph.dropSeed(x: 1, y: 0)
+    let overlay = graph.scene(at: 0, width: 800, height: 600).overlay ?? Overlay2D()
+    #expect(overlay.polylines.count == 3)
+    // k = 1: the unit circle; k = 2: the ellipse x² + 2y² = 1.
+    let (circle, ellipse) = (overlay.polylines[0], overlay.polylines[1])
+    func holds(_ pts: [Double], _ f: (Double, Double) -> Double) -> Bool {
+      stride(from: 0, to: pts.count, by: 2).allSatisfy { abs(f(pts[$0], pts[$0 + 1]) - 1) < 1e-6 }
+    }
+    #expect(holds(circle.pts) { $0 * $0 + $1 * $1 })
+    #expect(holds(ellipse.pts) { $0 * $0 + 2 * $1 * $1 })
+    #expect(circle.color != ellipse.color)
+    // (A family alone takes no seed: web/main.ts asks for a row that is a field.)
+    #expect(!Self.graph2D(["k = [1, 2]", "(k y, -x)"]).takesSeeds)
+  }
+
   @Test func aMatrixFieldDrawsStreamlinesWhenAsked() {
     var graph = Self.graph2D(["y = x", "((x, y), (y, -x))"])
     #expect(graph.scene(at: 0, width: 400, height: 300).layers.tfields?.first?.streamlines != true)
