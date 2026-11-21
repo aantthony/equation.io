@@ -17,7 +17,7 @@ extension Document3D {
     var head: [Double]?
     if let trail = run?.trails[index] {
       // (A trail in the plane is flat: z = 0 where the point was, a gap where it was nowhere.)
-      let flat = trail.coordinates
+      let flat = trail.line
       var pts: [Float] = []
       pts.reserveCapacity(flat.count / max(1, dim) * 3)
       for k in stride(from: 0, to: flat.count - dim + 1, by: dim) {

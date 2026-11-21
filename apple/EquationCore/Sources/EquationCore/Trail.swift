@@ -76,6 +76,17 @@ public struct PointTrail: Equatable, Sendable {
 
   /// The line so far, flat: `dim` numbers a sample, NaN where the pen lifts.
   public var coordinates: [Double] { samples.flatMap(\.point) }
+
+  /// The line as drawn: the samples, then on to where the point is now. The
+  /// samples are at most 60 a second, so the last may be a frame or two
+  /// behind the head; the site draws that gap, and a still picture shows it.
+  public var line: [Double] {
+    var out = coordinates
+    if let head, !pendingBreak, let last = samples.last?.point, last != head, last.allSatisfy(\.isFinite) {
+      out += head
+    }
+    return out
+  }
 }
 
 extension StateStepper {
